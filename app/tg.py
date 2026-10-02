@@ -328,6 +328,16 @@ def _kb(buttons):
     return InlineKeyboardMarkup(buttons)
 
 
+async def _safe_edit(query, text, reply_markup=None, parse_mode=None):
+    """编辑消息，失败时（如消息过旧）改为发送新消息。"""
+    try:
+        await query.edit_message_text(text, reply_markup=reply_markup,
+                                      parse_mode=parse_mode)
+    except Exception:  # noqa: BLE001 - 消息过旧等导致编辑失败时发新消息
+        await query.message.reply_text(text, reply_markup=reply_markup,
+                                       parse_mode=parse_mode)
+
+
 async def _on_button(update, context):
     from telegram import InlineKeyboardButton
     query = update.callback_query
@@ -502,14 +512,14 @@ async def _on_button(update, context):
             return
 
         if tab == "ls":
-            await query.edit_message_text("正在获取 Lightsail 实例…")
+            await _safe_edit(query, "正在获取 Lightsail 实例…")
             try:
                 items = provider.list_lightsail(acc["creds"], "")
             except Exception as e:  # noqa: BLE001
-                await query.edit_message_text(f"获取失败: {e}", reply_markup=_kb(back))
+                await _safe_edit(query, f"获取失败: {e}", reply_markup=_kb(back))
                 return
             if not items:
-                await query.edit_message_text(
+                await _safe_edit(query,
                     "没有 Lightsail 实例",
                     reply_markup=_kb(
                         [[InlineKeyboardButton("➕ 创建实例",

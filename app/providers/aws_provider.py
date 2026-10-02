@@ -42,7 +42,7 @@ def _name_of(tags) -> str:
 
 class AwsProvider(Provider):
     id = "aws"
-    name = "AWS (EC2)"
+    name = "AWS"
     supports_billing = True
     supports_lightsail = True
     supports_cloudfront = True

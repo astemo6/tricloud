@@ -43,6 +43,9 @@ def _name_of(tags) -> str:
 class AwsProvider(Provider):
     id = "aws"
     name = "AWS (EC2)"
+    supports_billing = True
+    supports_lightsail = True
+    supports_cloudfront = True
     fields = [
         AccountField("access_key", "Access Key ID"),
         AccountField("secret_key", "Secret Access Key", field_type="password"),
@@ -134,6 +137,170 @@ class AwsProvider(Provider):
         time.sleep(5)
         desc = ec2.describe_instances(InstanceIds=[iid])["Reservations"][0]["Instances"][0]
         return f"已通过重启更换公网 IP，新 IP: {desc.get('PublicIpAddress', '未知')}"
+
+    def get_billing(self, creds: dict) -> dict:
+        """AWS 账单：Cost Explorer 按服务汇总当月费用。
+        需要 IAM 权限 ce:GetCostAndUsage；数据约有 24 小时延迟。
+        Cost Explorer 是全局服务，走 us-east-1 endpoint。
+        """
+        import datetime
+        ce = boto3.client(
+            "ce",
+            aws_access_key_id=creds["access_key"].strip(),
+            aws_secret_access_key=creds["secret_key"].strip(),
+            region_name="us-east-1",
+        )
+        today = datetime.date.today()
+        start = today.replace(day=1).isoformat()
+        try:
+            resp = ce.get_cost_and_usage(
+                TimePeriod={"Start": start, "End": today.isoformat()},
+                Granularity="MONTHLY",
+                Metrics=["UnblendedCost"],
+                GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
+            )
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if "AccessDenied" in code or "Unauthorized" in code:
+                raise ValueError(
+                    "无 Cost Explorer 权限：请给 IAM 用户添加 ce:GetCostAndUsage 权限") from e
+            raise
+        groups = (resp.get("ResultsByTime") or [{}])[0].get("Groups", [])
+        services = []
+        total = 0.0
+        for g in groups:
+            amount = float(g["Metrics"]["UnblendedCost"]["Amount"])
+            total += amount
+            services.append({"name": g["Keys"][0], "cost": round(amount, 4)})
+        services.sort(key=lambda x: -x["cost"])
+        return {
+            "currency": "",
+            "period": f"{start} ~ {today.isoformat()}",
+            "total": round(total, 4),
+            "services": services,
+            "note": "金额为账户结算币种；Cost Explorer 数据约有 24 小时延迟",
+        }
+
+    # ---------- Lightsail ----------
+    LIGHTSAIL_REGIONS = [
+        "us-east-1", "us-east-2", "us-west-2",
+        "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1",
+        "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2",
+        "ap-south-1", "ca-central-1",
+    ]
+
+    def _ls_client(self, creds: dict, region: str):
+        return boto3.client(
+            "lightsail",
+            aws_access_key_id=creds["access_key"].strip(),
+            aws_secret_access_key=creds["secret_key"].strip(),
+            region_name=region,
+        )
+
+    def list_lightsail(self, creds: dict, region: str = "") -> list[dict]:
+        """列出 Lightsail 实例。region 为空时并行扫所有 Lightsail 区域。"""
+        from concurrent.futures import ThreadPoolExecutor
+        regions = [region.strip()] if region and region.strip() else self.LIGHTSAIL_REGIONS
+
+        def _one(rg: str) -> list[dict]:
+            try:
+                ls = self._ls_client(creds, rg)
+                out = []
+                for inst in ls.get_instances().get("instances", []):
+                    st = (inst.get("state") or {}).get("name", "")
+                    out.append({
+                        "name": inst.get("name", ""),
+                        "state": st,
+                        "blueprint": (inst.get("blueprintName") or ""),
+                        "bundle": (inst.get("bundleId") or ""),
+                        "public_ip": inst.get("publicIpAddress") or "",
+                        "private_ip": inst.get("privateIpAddress") or "",
+                        "ipv6": ", ".join(inst.get("ipv6Addresses") or []),
+                        "region": rg,
+                        "zone": (inst.get("location") or {}).get("availabilityZone", ""),
+                        "created": str(inst.get("createdAt") or ""),
+                    })
+                return out
+            except ClientError as e:
+                log.warning("lightsail %s failed: %s", rg, e)
+                return []
+
+        result: list[dict] = []
+        with ThreadPoolExecutor(max_workers=min(len(regions), 8)) as pool:
+            for part in pool.map(_one, regions):
+                result.extend(part)
+        return result
+
+    def lightsail_action(self, creds: dict, name: str, action: str, region: str) -> str:
+        ls = self._ls_client(creds, region.strip())
+        if action == "start":
+            ls.start_instance(instanceName=name)
+            return f"Lightsail 实例 {name} 已启动"
+        if action == "stop":
+            ls.stop_instance(instanceName=name)
+            return f"Lightsail 实例 {name} 已停止"
+        if action == "reboot":
+            ls.reboot_instance(instanceName=name)
+            return f"Lightsail 实例 {name} 重启请求已提交"
+        raise ValueError(f"未知操作: {action}")
+
+    # ---------- CloudFront ----------
+    def _cf_client(self, creds: dict):
+        return boto3.client(
+            "cloudfront",
+            aws_access_key_id=creds["access_key"].strip(),
+            aws_secret_access_key=creds["secret_key"].strip(),
+            region_name="us-east-1",  # CloudFront 是全局服务
+        )
+
+    def list_cloudfront(self, creds: dict) -> list[dict]:
+        cf = self._cf_client(creds)
+        result = []
+        paginator = cf.get_paginator("list_distributions")
+        for page in paginator.paginate():
+            for d in (page.get("DistributionList") or {}).get("Items", []):
+                aliases = (d.get("Aliases") or {}).get("Items", [])
+                origins = []
+                for o in (d.get("Origins") or {}).get("Items", []):
+                    origins.append(o.get("DomainName", ""))
+                result.append({
+                    "id": d.get("Id", ""),
+                    "domain": d.get("DomainName", ""),
+                    "status": d.get("Status", ""),
+                    "enabled": bool(d.get("Enabled")),
+                    "comment": d.get("Comment", ""),
+                    "aliases": aliases,
+                    "origins": origins,
+                    "price_class": (d.get("PriceClass") or "").replace("PriceClass_", ""),
+                })
+        return result
+
+    def cloudfront_invalidate(self, creds: dict, dist_id: str, paths: list[str]) -> str:
+        cf = self._cf_client(creds)
+        clean = [p if p.startswith("/") else "/" + p for p in paths if p.strip()]
+        if not clean:
+            clean = ["/*"]
+        resp = cf.create_invalidation(
+            DistributionId=dist_id,
+            InvalidationBatch={
+                "Paths": {"Quantity": len(clean), "Items": clean},
+                "CallerReference": f"tricloud-{int(time.time())}",
+            },
+        )
+        inv = resp.get("Invalidation", {})
+        return (f"缓存刷新已提交: {dist_id}\n"
+                f"ID: {inv.get('Id', '')}\n"
+                f"路径: {', '.join(clean)}\n"
+                f"状态: {inv.get('Status', '')}")
+
+    def cloudfront_toggle(self, creds: dict, dist_id: str, enabled: bool) -> str:
+        cf = self._cf_client(creds)
+        cfg_resp = cf.get_distribution_config(Id=dist_id)
+        etag = cfg_resp["ETag"]
+        cfg = cfg_resp["DistributionConfig"]
+        cfg["Enabled"] = enabled
+        cf.update_distribution(DistributionConfig=cfg, Id=dist_id, IfMatch=etag)
+        return f"分发 {dist_id} 已{'启用' if enabled else '停用'}（配置部署中，约需几分钟生效）"
 
     def create_options(self, creds: dict) -> dict:
         ec2 = _client(creds)

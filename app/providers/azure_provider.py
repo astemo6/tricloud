@@ -91,6 +91,64 @@ class AzureProvider(Provider):
         {"key": "terminate", "label": "删除", "danger": True},
         {"key": "change_ip", "label": "更换公网 IP"},
     ]
+    supports_billing = True
+
+    def get_billing(self, creds: dict) -> dict:
+        """Azure 账单：Cost Management 查询当月实际费用，按服务分组。
+        需要服务主体在订阅上有 Cost Management Reader（或更高）角色。
+        """
+        import json
+        import urllib.request
+        import urllib.error
+        cred = _credential(creds)
+        sub = creds["subscription_id"].strip()
+        try:
+            token = cred.get_token("https://management.azure.com/.default").token
+        except Exception as e:  # noqa: BLE001
+            raise ValueError(f"获取 Azure 令牌失败: {e}") from e
+        url = (f"https://management.azure.com/subscriptions/{sub}"
+               f"/providers/Microsoft.CostManagement/query?api-version=2023-11-01")
+        body = json.dumps({
+            "type": "ActualCost",
+            "timeframe": "MonthToDate",
+            "dataset": {
+                "granularity": "None",
+                "aggregation": {"totalCost": {"name": "Cost", "function": "Sum"}},
+                "grouping": [{"type": "Dimension", "name": "ServiceName"}],
+            },
+        }).encode()
+        req = urllib.request.Request(
+            url, data=body,
+            headers={"Authorization": f"Bearer {token}",
+                     "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode(errors="replace")[:300]
+            if e.code in (401, 403):
+                raise ValueError(
+                    "无 Cost Management 查询权限：请给服务主体分配订阅的 "
+                    f"Cost Management Reader 角色 ({detail})") from e
+            raise ValueError(f"Cost Management 查询失败 ({e.code}): {detail}") from e
+        props = data.get("properties", {})
+        cols = [c.get("name") for c in props.get("columns", [])]
+        rows = props.get("rows", [])
+        ci_cost, ci_svc, ci_cur = cols.index("Cost"), cols.index("ServiceName"), cols.index("Currency")
+        services, total, currency = [], 0.0, ""
+        for r in rows:
+            cost = float(r[ci_cost] or 0)
+            total += cost
+            currency = currency or r[ci_cur] or ""
+            services.append({"name": r[ci_svc] or "其他", "cost": round(cost, 4)})
+        services.sort(key=lambda x: -x["cost"])
+        return {
+            "currency": currency or "USD",
+            "period": "本月至今 (MonthToDate)",
+            "total": round(total, 4),
+            "services": services,
+            "note": "实际费用（ActualCost）；数据可能有数小时延迟",
+        }
 
     def test(self, creds: dict) -> None:
         _, _, resource = _clients(creds)

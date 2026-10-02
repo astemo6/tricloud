@@ -113,6 +113,42 @@ class OciProvider(Provider):
     id = "oci"
     name = "Oracle Cloud (OCI)"
     supports_snatch = True
+    supports_billing = True
+
+    def get_billing(self, creds: dict) -> dict:
+        """OCI 账单：Usage API 按服务汇总当月费用。
+        需要 IAM policy：allow group <组> to manage usage-report in tenancy
+        """
+        import datetime
+        cfg = _sdk_config(creds)
+        tenancy = cfg["tenancy"]
+        now = datetime.datetime.now(datetime.timezone.utc)
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        usage = oci.usage_api.UsageapiClient(cfg)
+        details = oci.usage_api.models.RequestSummarizedUsagesDetails(
+            tenant_id=tenancy,
+            time_usage_started=start,
+            time_usage_ended=now,
+            granularity="MONTHLY",
+        )
+        items = oci.pagination.list_call_get_all_results(
+            usage.request_summarized_usages,
+            request_summarized_usages_details=details).data
+        by_service: dict[str, float] = {}
+        currency = ""
+        for it in items:
+            svc = it.service or "其他"
+            by_service[svc] = by_service.get(svc, 0.0) + float(it.computed_amount or 0)
+            currency = currency or (it.currency or "")
+        services = [{"name": k, "cost": round(v, 4)}
+                    for k, v in sorted(by_service.items(), key=lambda x: -x[1])]
+        return {
+            "currency": currency or "USD",
+            "period": f"{start.date()} ~ {now.date()}",
+            "total": round(sum(by_service.values()), 4),
+            "services": services,
+            "note": "数据来自 OCI Usage API，可能有数小时延迟；免费套餐费用通常为 0",
+        }
     fields = [
         AccountField("tenancy_ocid", "Tenancy OCID", placeholder="ocid1.tenancy.oc1..…"),
         AccountField("user_ocid", "User OCID", placeholder="ocid1.user.oc1..…"),

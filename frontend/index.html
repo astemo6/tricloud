@@ -103,6 +103,15 @@
            border-radius: 10px; font-size: 13px; z-index: 100; display: none; }
   .toast.show { display: block; }
   .toast.err { background: #4a1f28; border-color: #7a2833; }
+  .tabs { display: flex; gap: 8px; padding: 12px 20px 0; flex-wrap: wrap; }
+  .tab { padding: 8px 16px; border-radius: 8px 8px 0 0; cursor: pointer; color: #8b93ad;
+         border: 1px solid transparent; border-bottom: none; font-size: 13px; }
+  .tab:hover { color: #e6e9f0; }
+  .tab.active { background: #131829; color: #fff; border-color: #232b45; }
+  .bill-total { background: #131829; border: 1px solid #232b45; border-radius: 12px;
+                padding: 20px 24px; margin-bottom: 16px; }
+  .bill-total .amount { font-size: 32px; font-weight: 700; color: #4ade80; }
+  .bill-total .meta { color: #8b93ad; font-size: 12px; margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -122,11 +131,12 @@
     <div class="topbar">
       <select id="accountSel" onchange="onAccountChange()"></select>
       <button class="btn" onclick="openAccountModal()">管理账号</button>
-      <button class="btn" onclick="loadInstances()">刷新</button>
+      <button class="btn" id="refreshBtn" onclick="refreshCurTab()">刷新</button>
       <span style="flex:1"></span>
-      <button class="btn primary" onclick="openCreateModal()">创建实例</button>
+      <button class="btn primary" id="createBtn" onclick="openCreateModal()">创建实例</button>
       <button class="btn" id="snatchBtn" onclick="openSnatchModal()" style="display:none">抢机</button>
     </div>
+    <div class="tabs" id="tabs"></div>
     <div class="content" id="content"></div>
   </div>
 </div>

@@ -89,6 +89,9 @@ def providers(request: Request):
         {
             "id": p.id, "name": p.name,
             "supports_snatch": p.supports_snatch,
+            "supports_billing": p.supports_billing,
+            "supports_lightsail": getattr(p, "supports_lightsail", False),
+            "supports_cloudfront": getattr(p, "supports_cloudfront", False),
             "fields": [f.__dict__ for f in p.fields],
             "actions": p.actions,
         }
@@ -237,6 +240,105 @@ def snatch_instance(request: Request, account_id: int, params: dict):
                          f"抢机 / {params.get('shape', '')}",
                          tasks.job_snatch, acc["provider"], account_id, params)
     return {"ok": True, "job_id": job_id}
+
+
+# ---------- 账单 ----------
+@app.get("/api/accounts/{account_id}/billing")
+def get_billing(request: Request, account_id: int):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = get_provider(acc["provider"])
+    if not provider.supports_billing:
+        raise HTTPException(status_code=400, detail="该云厂商不支持查看账单")
+    try:
+        return provider.get_billing(acc["creds"])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"获取账单失败: {e}") from e
+
+
+# ---------- AWS Lightsail ----------
+def _require_aws(acc: dict):
+    provider = get_provider(acc["provider"])
+    if acc["provider"] != "aws":
+        raise HTTPException(status_code=400, detail="仅 AWS 账号支持此功能")
+    return provider
+
+
+@app.get("/api/accounts/{account_id}/lightsail")
+def list_lightsail(request: Request, account_id: int, region: str = ""):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = _require_aws(acc)
+    try:
+        return provider.list_lightsail(acc["creds"], region)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"获取 Lightsail 实例失败: {e}") from e
+
+
+class LightsailActionBody(BaseModel):
+    name: str
+    action: str   # start|stop|reboot
+    region: str
+
+
+@app.post("/api/accounts/{account_id}/lightsail/action")
+def lightsail_action(request: Request, account_id: int, body: LightsailActionBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = _require_aws(acc)
+    if body.action not in ("start", "stop", "reboot"):
+        raise HTTPException(status_code=400, detail="不支持的操作")
+    try:
+        msg = provider.lightsail_action(acc["creds"], body.name, body.action, body.region)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"操作失败: {e}") from e
+    return {"ok": True, "message": msg}
+
+
+# ---------- AWS CloudFront ----------
+@app.get("/api/accounts/{account_id}/cloudfront")
+def list_cloudfront(request: Request, account_id: int):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = _require_aws(acc)
+    try:
+        return provider.list_cloudfront(acc["creds"])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"获取 CloudFront 分发失败: {e}") from e
+
+
+class InvalidateBody(BaseModel):
+    distribution_id: str
+    paths: list[str] = []
+
+
+@app.post("/api/accounts/{account_id}/cloudfront/invalidate")
+def cloudfront_invalidate(request: Request, account_id: int, body: InvalidateBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = _require_aws(acc)
+    try:
+        msg = provider.cloudfront_invalidate(acc["creds"], body.distribution_id, body.paths)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"刷新失败: {e}") from e
+    return {"ok": True, "message": msg}
+
+
+class CloudFrontToggleBody(BaseModel):
+    distribution_id: str
+    enabled: bool
+
+
+@app.post("/api/accounts/{account_id}/cloudfront/toggle")
+def cloudfront_toggle(request: Request, account_id: int, body: CloudFrontToggleBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = _require_aws(acc)
+    try:
+        msg = provider.cloudfront_toggle(acc["creds"], body.distribution_id, body.enabled)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"操作失败: {e}") from e
+    return {"ok": True, "message": msg}
 
 
 # ---------- 设置（Telegram 联动） ----------

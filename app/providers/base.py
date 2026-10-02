@@ -37,6 +37,7 @@ class Provider(ABC):
     fields: list[AccountField] = []
     actions: list[dict] = []        # [{"key": "start", "label": "启动", "danger": False}]
     supports_snatch: bool = False
+    supports_billing: bool = False  # 是否支持查看账单
 
     @abstractmethod
     def test(self, creds: dict) -> None:
@@ -60,3 +61,10 @@ class Provider(ABC):
 
     def snatch_instance(self, creds: dict, params: dict, ctx) -> str:
         raise NotImplementedError("该云厂商不支持抢机")
+
+    def get_billing(self, creds: dict) -> dict:
+        """查看账单，返回统一结构：
+        {"currency": "USD", "period": "...", "total": 12.34,
+         "services": [{"name": "...", "cost": 1.23}], "note": "..."}
+        """
+        raise NotImplementedError("该云厂商不支持查看账单")

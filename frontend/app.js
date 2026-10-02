@@ -2,6 +2,7 @@
 let providers = [], curProvider = null;
 let accounts = [], curAccount = null;
 let instances = [];
+let curTab = 'instances';
 let jobTimer = null, jobDetailId = null, drawerPoll = null;
 
 async function api(method, path, body) {
@@ -40,8 +41,36 @@ function selectProvider(id) {
 curProvider = providers.find(p => p.id === id);
 document.querySelectorAll('#providerNav.nav-item').forEach(el =>
 el.classList.toggle('active', el.dataset.p === id));
-document.getElementById('snatchBtn').style.display = curProvider.supports_snatch? '': 'none';
+curTab = 'instances';
 loadAccounts();
+}
+
+function renderTabs() {
+const defs = [{key: 'instances', label: '实例'}];
+if (curProvider.supports_lightsail) defs.push({key: 'lightsail', label: 'Lightsail'});
+if (curProvider.supports_cloudfront) defs.push({key: 'cloudfront', label: 'CloudFront'});
+if (curProvider.supports_billing) defs.push({key: 'billing', label: '账单'});
+if (!defs.find(d => d.key === curTab)) curTab = 'instances';
+document.getElementById('tabs').innerHTML = defs.map(d =>
+`<div class="tab${d.key === curTab? ' active': ''}" onclick="switchTab('${d.key}')">${d.label}</div>`).join('');
+const isInst = curTab === 'instances';
+document.getElementById('createBtn').style.display = isInst? '': 'none';
+document.getElementById('snatchBtn').style.display =
+(isInst && curProvider.supports_snatch)? '': 'none';
+}
+
+function switchTab(key) {
+curTab = key;
+renderTabs();
+refreshCurTab();
+}
+
+function refreshCurTab() {
+if (!curAccount) { renderEmpty(); return;}
+if (curTab === 'billing') loadBilling();
+else if (curTab === 'lightsail') loadLightsail();
+else if (curTab === 'cloudfront') loadCloudFront();
+else loadInstances();
 }
 
 async function loadAccounts(selectId) {
@@ -51,13 +80,16 @@ sel.innerHTML = accounts.map(a => `<option value="${a.id}">${esc(a.name)}</optio
 || '<option value="">（暂无账号）</option>';
 curAccount = accounts.find(a => String(a.id) === String(selectId || sel.value)) || accounts[0] || null;
 if (curAccount) sel.value = curAccount.id;
-if (curAccount) loadInstances(); else renderEmpty();
+renderTabs();
+refreshCurTab();
 }
 
 function onAccountChange() {
 const id = document.getElementById('accountSel').value;
 curAccount = accounts.find(a => String(a.id) === id) || null;
-if (curAccount) loadInstances();
+curTab = 'instances';
+renderTabs();
+refreshCurTab();
 }
 
 function renderEmpty() {
@@ -103,6 +135,140 @@ const r = await api('POST', `/api/accounts/${curAccount.id}/action`,
 {instance: inst, action, params: {}});
 toast('任务已提交，在任务历史中查看进度');
 toggleDrawer(true); trackJob(r.job_id);
+} catch (e) { toast(e.message, true);}
+}
+
+/* ---------- 账单 ---------- */
+async function loadBilling() {
+const c = document.getElementById('content');
+c.innerHTML = '<div class="empty">加载中…</div>';
+try {
+const b = await api('GET', `/api/accounts/${curAccount.id}/billing`);
+const money = v => (b.currency? b.currency + ' ': '') + Number(v).toFixed(2);
+c.innerHTML = `<div class="bill-total"><div class="amount">${money(b.total)}</div>
+<div class="meta">统计周期：${esc(b.period)}${b.note? '<br>' + esc(b.note): ''}</div></div>` +
+(b.services && b.services.length
+? `<table><thead><tr><th>服务</th><th style="width:160px">费用</th></tr></thead><tbody>` +
+b.services.map(s => `<tr><td>${esc(s.name)}</td><td class="mono">${money(s.cost)}</td></tr>`).join('') +
+'</tbody></table>'
+: '<div class="empty">本周期暂无费用明细</div>');
+} catch (e) {
+c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadBilling()">重试</button></div>`;
+}
+}
+
+/* ---------- Lightsail ---------- */
+const LS_REGIONS = ['us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'eu-west-2',
+'eu-west-3', 'eu-central-1', 'ap-southeast-1', 'ap-southeast-2',
+'ap-northeast-1', 'ap-northeast-2', 'ap-south-1', 'ca-central-1'];
+let lsRegion = '';
+
+async function loadLightsail() {
+const c = document.getElementById('content');
+c.innerHTML = '<div class="empty">加载中…</div>';
+try {
+const list = await api('GET', `/api/accounts/${curAccount.id}/lightsail?region=${encodeURIComponent(lsRegion)}`);
+const badge = s => {
+const cls = s === 'running'? 'b-running': (s === 'stopped'? 'b-stopped': 'b-unknown');
+return `<span class="badge ${cls}">${esc(s || 'unknown')}</span>`;
+};
+c.innerHTML = `<div style="margin-bottom:12px">
+<select id="lsRegionSel" onchange="lsRegion=this.value;loadLightsail()" style="background:#0f1420;color:#e6e9f0;border:1px solid #2a3350;border-radius:8px;padding:8px 10px">
+<option value="">全部区域（自动扫描）</option>
+${LS_REGIONS.map(r => `<option value="${r}"${r === lsRegion? ' selected': ''}>${r}</option>`).join('')}
+</select></div>` +
+(list.length
+? `<table><thead><tr><th>名称</th><th>状态</th><th>套餐</th><th>公网 IP</th><th>内网 IP</th>
+<th>区域</th><th>创建时间</th><th>操作</th></tr></thead><tbody>` +
+list.map(it => `<tr>
+<td>${esc(it.name)}</td>
+<td>${badge(it.state)}</td>
+<td>${esc(it.bundle)}<br><span style="color:#6f7794;font-size:11px">${esc(it.blueprint)}</span></td>
+<td class="mono">${esc(it.public_ip || '-')}${it.ipv6? `<br>${esc(it.ipv6)}`: ''}</td>
+<td class="mono">${esc(it.private_ip || '-')}</td>
+<td>${esc(it.region)}${it.zone? `<br><span style="color:#6f7794;font-size:11px">${esc(it.zone)}</span>`: ''}</td>
+<td style="font-size:12px">${fmtTime(it.created)}</td>
+<td><div class="row-actions">
+${it.state === 'running'
+? `<button class="btn sm" onclick="lsAction('${esc(it.name)}','reboot','${esc(it.region)}')">重启</button>
+<button class="btn sm danger" onclick="lsAction('${esc(it.name)}','stop','${esc(it.region)}')">停止</button>`
+: `<button class="btn sm" onclick="lsAction('${esc(it.name)}','start','${esc(it.region)}')">启动</button>`}
+</div></td></tr>`).join('') + '</tbody></table>'
+: '<div class="empty">该范围下没有 Lightsail 实例</div>');
+} catch (e) {
+c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadLightsail()">重试</button></div>`;
+}
+}
+
+async function lsAction(name, action, region) {
+if (action === 'stop' && !confirm(`确定停止 Lightsail 实例 ${name} 吗？`)) return;
+try {
+const r = await api('POST', `/api/accounts/${curAccount.id}/lightsail/action`,
+{name, action, region});
+toast(r.message);
+loadLightsail();
+} catch (e) { toast(e.message, true);}
+}
+
+/* ---------- CloudFront ---------- */
+async function loadCloudFront() {
+const c = document.getElementById('content');
+c.innerHTML = '<div class="empty">加载中…</div>';
+try {
+const list = await api('GET', `/api/accounts/${curAccount.id}/cloudfront`);
+c.innerHTML = list.length
+? `<table><thead><tr><th>分发</th><th>状态</th><th>域名/别名</th><th>源站</th><th>价格等级</th><th>操作</th></tr></thead><tbody>` +
+list.map(d => `<tr>
+<td><span class="mono">${esc(d.id)}</span><br><span style="color:#6f7794;font-size:11px">${esc(d.domain)}</span>
+${d.comment? `<br><span style="font-size:12px">${esc(d.comment)}</span>`: ''}</td>
+<td>${d.enabled? '<span class="badge b-running">已启用</span>': '<span class="badge b-stopped">已停用</span>'}
+<br><span style="color:#6f7794;font-size:11px">${esc(d.status)}</span></td>
+<td style="font-size:12px">${d.aliases.map(esc).join('<br>') || '-'}</td>
+<td style="font-size:12px" class="mono">${d.origins.map(esc).join('<br>') || '-'}</td>
+<td>${esc(d.price_class || '-')}</td>
+<td><div class="row-actions">
+<button class="btn sm" onclick="openInvalidateModal('${esc(d.id)}')">刷新缓存</button>
+${d.enabled
+? `<button class="btn sm danger" onclick="cfToggle('${esc(d.id)}', false)">停用</button>`
+: `<button class="btn sm" onclick="cfToggle('${esc(d.id)}', true)">启用</button>`}
+</div></td></tr>`).join('') + '</tbody></table>'
+: '<div class="empty">该账号下没有 CloudFront 分发</div>';
+} catch (e) {
+c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadCloudFront()">重试</button></div>`;
+}
+}
+
+function openInvalidateModal(distId) {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>刷新缓存 · <span class="mono">${esc(distId)}</span></h2>
+<form id="invForm">
+<div class="field"><label>路径（每行一个，留空 = 刷新全部 /*）</label>
+<textarea name="paths" placeholder="/*&#10;/images/*"></textarea></div>
+<div class="help" style="color:#8b93ad;margin-bottom:14px">CloudFront 每月前 1000 条刷新路径免费，超出后按量收费。</div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="submit" class="btn primary">提交刷新</button>
+</div></form>`;
+document.getElementById('modalMask').classList.add('show');
+document.getElementById('invForm').onsubmit = async e => {
+e.preventDefault();
+const paths = new FormData(e.target).get('paths').split('\n').map(s => s.trim()).filter(Boolean);
+try {
+const r = await api('POST', `/api/accounts/${curAccount.id}/cloudfront/invalidate`,
+{distribution_id: distId, paths});
+closeModal();
+toast('刷新请求已提交');
+} catch (err) { toast(err.message, true);}
+};
+}
+
+async function cfToggle(distId, enabled) {
+if (!confirm(`确定${enabled? '启用': '停用'}分发 ${distId} 吗？配置部署约需几分钟生效。`)) return;
+try {
+const r = await api('POST', `/api/accounts/${curAccount.id}/cloudfront/toggle`,
+{distribution_id: distId, enabled});
+toast(r.message);
+loadCloudFront();
 } catch (e) { toast(e.message, true);}
 }
 

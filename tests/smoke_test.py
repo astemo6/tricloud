@@ -29,6 +29,9 @@ def main():
         provs = c.get("/api/providers").json()
         assert [p["id"] for p in provs] == ["oci", "aws", "azure"]
         assert provs[0]["supports_snatch"] is True and len(provs[0]["fields"]) == 7
+        assert all(p["supports_billing"] for p in provs), provs
+        aws_meta = [p for p in provs if p["id"] == "aws"][0]
+        assert aws_meta["supports_lightsail"] and aws_meta["supports_cloudfront"], aws_meta
         print("4. providers 元信息 OK", flush=True)
 
         # 5. 账号创建：mock 掉 provider.test（本地只验证流程，真实连通性由用户在面板里测）
@@ -186,6 +189,64 @@ def main():
             assert jn["status"] == "success", jn
             assert _url.called, "任务完成未触发 TG 推送"
         print("15. 任务完成自动推送 OK", flush=True)
+
+        # 16. 账单接口：三家 mock get_billing
+        fake_bill = {"currency": "USD", "period": "2026-10-01 ~ 2026-10-02",
+                     "total": 12.5, "services": [{"name": "Compute", "cost": 12.5}],
+                     "note": "test"}
+        for pid in ("oci", "aws", "azure"):
+            aid = [a["id"] for a in accs if a["provider"] == pid][0]
+            with patch.object(get_provider(pid), "get_billing", return_value=fake_bill):
+                b = c.get(f"/api/accounts/{aid}/billing").json()
+                assert b["total"] == 12.5 and b["services"][0]["name"] == "Compute", (pid, b)
+        print("16. 三家账单接口 OK", flush=True)
+
+        # 17. Lightsail：列表 + 操作
+        fake_ls = [{"name": "ls-1", "state": "running", "bundle": "nano_2_0",
+                    "blueprint": "ubuntu_22_04", "public_ip": "3.3.3.3",
+                    "private_ip": "192.168.1.2", "ipv6": "", "region": "us-east-1",
+                    "zone": "us-east-1a", "created": "2026-01-01"}]
+        with patch.object(get_provider("aws"), "list_lightsail", return_value=fake_ls) as m:
+            lst = c.get(f"/api/accounts/{aws_id}/lightsail?region=").json()
+            assert lst[0]["name"] == "ls-1" and lst[0]["state"] == "running", lst
+            m.assert_called_once()
+        with patch.object(get_provider("aws"), "lightsail_action",
+                          return_value="Lightsail 实例 ls-1 已停止") as m:
+            r = c.post(f"/api/accounts/{aws_id}/lightsail/action",
+                       json={"name": "ls-1", "action": "stop", "region": "us-east-1"})
+            assert r.status_code == 200 and "已停止" in r.json()["message"], r.text
+            m.assert_called_once_with({"dummy": "x"}, "ls-1", "stop", "us-east-1")
+        # 非法操作被拒绝
+        r = c.post(f"/api/accounts/{aws_id}/lightsail/action",
+                   json={"name": "ls-1", "action": "nonsense", "region": "us-east-1"})
+        assert r.status_code == 400, r.text
+        # 非 AWS 账号拒绝
+        r = c.get(f"/api/accounts/{oci_id}/lightsail")
+        assert r.status_code == 400, r.text
+        print("17. Lightsail 接口 OK", flush=True)
+
+        # 18. CloudFront：列表 + 刷新 + 启用停用
+        fake_cf = [{"id": "E123", "domain": "d123.cloudfront.net", "status": "Deployed",
+                    "enabled": True, "comment": "", "aliases": ["cdn.example.com"],
+                    "origins": ["origin.example.com"], "price_class": "100"}]
+        with patch.object(get_provider("aws"), "list_cloudfront", return_value=fake_cf):
+            lst = c.get(f"/api/accounts/{aws_id}/cloudfront").json()
+            assert lst[0]["id"] == "E123" and lst[0]["enabled"] is True, lst
+        with patch.object(get_provider("aws"), "cloudfront_invalidate",
+                          return_value="缓存刷新已提交") as m:
+            r = c.post(f"/api/accounts/{aws_id}/cloudfront/invalidate",
+                       json={"distribution_id": "E123", "paths": ["/*"]})
+            assert r.status_code == 200, r.text
+            m.assert_called_once_with({"dummy": "x"}, "E123", ["/*"])
+        with patch.object(get_provider("aws"), "cloudfront_toggle",
+                          return_value="已停用") as m:
+            r = c.post(f"/api/accounts/{aws_id}/cloudfront/toggle",
+                       json={"distribution_id": "E123", "enabled": False})
+            assert r.status_code == 200, r.text
+            m.assert_called_once_with({"dummy": "x"}, "E123", False)
+        r = c.get(f"/api/accounts/{oci_id}/cloudfront")
+        assert r.status_code == 400, r.text
+        print("18. CloudFront 接口 OK", flush=True)
 
         print("\n全部冒烟测试通过", flush=True)
 

@@ -405,8 +405,11 @@ c.innerHTML = '<div class="empty">加载中…</div>';
 try {
 const list = await api('GET', `/api/accounts/${curAccount.id}/cloudfront`);
 const header = `<div style="margin-bottom:12px"><button class="btn sm" onclick="openCfCreateModal()">创建分发</button></div>`;
+const planBadge = p => p === 'paygo'
+? '<span style="color:#8b93ad;font-size:12px">按量付费</span>'
+: `<span class="badge b-running">${esc(p)}</span>`;
 c.innerHTML = header + (list.length
-? `<table><thead><tr><th>分发</th><th>状态</th><th>域名/别名</th><th>源站</th><th>价格等级</th><th>操作</th></tr></thead><tbody>` +
+? `<table><thead><tr><th>分发</th><th>状态</th><th>域名/别名</th><th>源站</th><th>价格等级</th><th>套餐</th><th>操作</th></tr></thead><tbody>` +
 list.map(d => `<tr>
 <td><span class="mono">${esc(d.id)}</span><br><span style="color:#6f7794;font-size:11px">${esc(d.domain)}</span>
 ${d.comment? `<br><span style="font-size:12px">${esc(d.comment)}</span>`: ''}</td>
@@ -415,9 +418,11 @@ ${d.comment? `<br><span style="font-size:12px">${esc(d.comment)}</span>`: ''}</t
 <td style="font-size:12px">${d.aliases.map(esc).join('<br>') || '-'}</td>
 <td style="font-size:12px" class="mono">${d.origins.map(esc).join('<br>') || '-'}</td>
 <td>${esc(d.price_class || '-')}</td>
+<td>${planBadge(d.plan || 'paygo')}</td>
 <td><div class="row-actions">
 <button class="btn sm" onclick="openInvalidateModal('${esc(d.id)}')">刷新缓存</button>
 <button class="btn sm" onclick="openCfEditModal('${esc(d.id)}')">编辑</button>
+<button class="btn sm" onclick="openCfPlanModal('${esc(d.id)}','${esc(d.plan || 'paygo')}')">套餐</button>
 ${d.enabled
 ? `<button class="btn sm danger" onclick="cfToggle('${esc(d.id)}', false)">停用</button>`
 : `<button class="btn sm" onclick="cfToggle('${esc(d.id)}', true)">启用</button>`}
@@ -498,6 +503,45 @@ toast(r.message); closeModal(); loadCloudFront();
 } catch (e) {
 box.innerHTML = `<h2>编辑分发</h2><div class="empty">加载失败: ${esc(e.message)}</div>`;
 }
+}
+
+const CF_PLANS = [
+{key: 'paygo', label: '按量付费（Pay as you go）', desc: '按流量+请求数计费，无月费上限'},
+{key: 'FREE', label: 'FREE — $0/月', desc: '100GB 流量 / 100万请求，含 WAF/DNS，无超额费'},
+{key: 'PRO', label: 'PRO — $15/月', desc: '50TB 流量 / 1000万请求，含 WAF/DNS/日志，无超额费'},
+{key: 'BUSINESS', label: 'BUSINESS — $200/月', desc: '50TB 流量 / 1.25亿请求，高级防护+机器人管理'},
+{key: 'PREMIUM', label: 'PREMIUM — $1000/月起', desc: '50TB~600TB 可配， mission-critical 负载'},
+];
+
+function openCfPlanModal(distId, curPlan) {
+const box = document.getElementById('modalBox');
+const cur = (curPlan || 'paygo').toUpperCase();
+box.innerHTML = `<h2>切换套餐 <span class="mono" style="font-size:13px">${esc(distId)}</span></h2>
+<div class="help" style="color:#8b93ad;margin-bottom:12px">当前：${cur === 'PAYGO' ? '按量付费' : esc(curPlan)}。包月套餐每个分发单独计费，切换立即生效并开始计费。</div>
+<form id="cfPlanForm">
+${CF_PLANS.map(p => `
+<label style="display:block;border:1px solid #2a3350;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer">
+<input type="radio" name="plan_tier" value="${p.key}" ${p.key.toUpperCase() === cur ? 'checked' : ''}
+style="margin-right:8px">
+<b>${esc(p.label)}</b><br>
+<span style="color:#8b93ad;font-size:12px;margin-left:24px">${esc(p.desc)}</span>
+</label>`).join('')}
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="submit" class="btn primary">确认切换</button>
+</div></form>`;
+document.getElementById('modalMask').classList.add('show');
+document.getElementById('cfPlanForm').onsubmit = async e => {
+e.preventDefault();
+const tier = new FormData(e.target).get('plan_tier');
+if (tier.toUpperCase() === cur) { toast('已是当前套餐，无需切换'); return;}
+if (tier !== 'paygo' && !confirm(`确定为分发 ${distId} 订阅 ${tier} 套餐吗？将立即开始按月计费。`)) return;
+try {
+const r = await api('POST', `/api/accounts/${curAccount.id}/cloudfront/plan`,
+{distribution_id: distId, plan_tier: tier});
+toast(r.message); closeModal(); loadCloudFront();
+} catch (err) { toast(err.message, true);}
+};
 }
 
 function openCfCreateModal() {

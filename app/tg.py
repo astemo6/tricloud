@@ -547,7 +547,8 @@ async def _on_button(update, context):
             for d in items:
                 key = f"c{len(_cf_cache) % 9000 + 1}"
                 _cf_cache[key] = {"account_id": int(aid), "dist_id": d["id"],
-                                  "enabled": bool(d.get("enabled"))}
+                                  "enabled": bool(d.get("enabled")),
+                                  "plan": d.get("plan", "paygo")}
                 icon = "🟢" if d["enabled"] else "⚪"
                 label = (d["aliases"][0] if d["aliases"] else d["domain"])[:28]
                 buttons.append([InlineKeyboardButton(
@@ -682,8 +683,10 @@ async def _on_button(update, context):
             await query.edit_message_text("信息已过期，请重新进入")
             return
         acc = db.account_get(item["account_id"])
+        plan = item.get("plan", "paygo")
+        plan_txt = "按量付费" if plan == "paygo" else f"套餐 {plan}"
         await query.edit_message_text(
-            f"☁️ <b>{_esc(item['dist_id'])}</b>",
+            f"☁️ <b>{_esc(item['dist_id'])}</b>\n套餐：{plan_txt}",
             parse_mode="HTML",
             reply_markup=_kb([
                 [InlineKeyboardButton("🧹 刷新缓存", callback_data=f"cfi:{key}")],

@@ -613,6 +613,35 @@ class CloudFrontUpdateBody(BaseModel):
     default_root_object: str | None = None
 
 
+class CloudFrontPlanBody(BaseModel):
+    distribution_id: str
+    plan_tier: str  # paygo | FREE | PRO | BUSINESS | PREMIUM
+
+
+@app.post("/api/accounts/{account_id}/cloudfront/plan")
+def cloudfront_set_plan(request: Request, account_id: int, body: CloudFrontPlanBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = _require_aws(acc)
+    # 分发 ARN 需要账号 ID，用 STS 获取
+    import boto3 as _boto3
+    try:
+        sts = _boto3.client(
+            "sts",
+            aws_access_key_id=acc["creds"]["access_key"].strip(),
+            aws_secret_access_key=acc["creds"]["secret_key"].strip(),
+            region_name="us-east-1",
+        )
+        aws_account_id = sts.get_caller_identity()["Account"]
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"获取账号 ID 失败: {e}") from e
+    try:
+        msg = provider.set_cf_plan(acc["creds"], body.distribution_id, aws_account_id, body.plan_tier)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"切换套餐失败: {e}") from e
+    return {"ok": True, "message": msg}
+
+
 @app.put("/api/accounts/{account_id}/cloudfront/{dist_id}")
 def cloudfront_update(request: Request, account_id: int, dist_id: str, body: CloudFrontUpdateBody):
     _require_login(request)

@@ -466,8 +466,77 @@ class AwsProvider(Provider):
             region_name="us-east-1",  # CloudFront 是全局服务
         )
 
+    def _ppm_client(self, creds: dict):
+        return boto3.client(
+            "pricing-plan-manager",
+            aws_access_key_id=creds["access_key"].strip(),
+            aws_secret_access_key=creds["secret_key"].strip(),
+            region_name="us-east-1",
+        )
+
+    def get_cf_plans(self, creds: dict) -> dict:
+        """返回 {dist_id: plan_tier}，pay-as-you-go 的分发不在其中。"""
+        ppm = self._ppm_client(creds)
+        result = {}
+        try:
+            paginator = ppm.get_paginator("list_subscriptions")
+            for page in paginator.paginate():
+                for sub in page.get("subscriptionSummaries", []):
+                    if sub.get("planFamily") != "CloudFront":
+                        continue
+                    if (sub.get("status") or "").upper() not in ("ACTIVE", "PENDING_APPROVAL"):
+                        continue
+                    tier = sub.get("planTier", "")
+                    for arn in sub.get("resourceArns", []):
+                        # arn:aws:cloudfront::123:distribution/E123
+                        dist_id = arn.split("/distribution/")[-1] if "/distribution/" in arn else ""
+                        if dist_id:
+                            result[dist_id] = tier
+        except ClientError:  # noqa: BLE001
+            pass
+        return result
+
+    def set_cf_plan(self, creds: dict, dist_id: str, account_id: str, tier: str) -> str:
+        """切换分发套餐：tier 为 FREE/PRO/BUSINESS/PREMIUM，或 paygo 切回按量付费。
+
+        注意：这是计费操作！PRO $15/月、BUSINESS $200/月、PREMIUM $1000/月起。
+        """
+        ppm = self._ppm_client(creds)
+        dist_arn = f"arn:aws:cloudfront::{account_id}:distribution/{dist_id}"
+        tier = (tier or "").strip().upper()
+        if tier == "PAYGO":
+            # 找到包含该分发的订阅并解绑
+            found = None
+            paginator = ppm.get_paginator("list_subscriptions")
+            for page in paginator.paginate():
+                for sub in page.get("subscriptionSummaries", []):
+                    if sub.get("planFamily") != "CloudFront":
+                        continue
+                    if any(dist_id in a for a in sub.get("resourceArns", [])):
+                        found = sub
+                        break
+                if found:
+                    break
+            if not found:
+                raise ValueError(f"分发 {dist_id} 当前已是按量付费，无需切换")
+            ppm.disassociate_resources_from_subscription(
+                arn=found["arn"], resourceArns=[dist_arn])
+            return f"分发 {dist_id} 已切回按量付费（Pay as you go）"
+        if tier not in ("FREE", "PRO", "BUSINESS", "PREMIUM"):
+            raise ValueError("套餐只能是 FREE/PRO/BUSINESS/PREMIUM 或 paygo")
+        prices = {"FREE": "$0/月", "PRO": "$15/月", "BUSINESS": "$200/月", "PREMIUM": "$1000/月起"}
+        resp = ppm.create_subscription(
+            planFamily="CloudFront", planTier=tier,
+            resourceArns=[dist_arn], approvalMode="IMMEDIATE",
+            clientToken=f"tricloud-{dist_id}-{int(time.time())}",
+        )
+        sub = resp.get("subscription", {})
+        return (f"分发 {dist_id} 已订阅 {tier} 套餐（{prices[tier]}），"
+                f"状态：{sub.get('status', '未知')}")
+
     def list_cloudfront(self, creds: dict) -> list[dict]:
         cf = self._cf_client(creds)
+        plans = self.get_cf_plans(creds)
         result = []
         paginator = cf.get_paginator("list_distributions")
         for page in paginator.paginate():
@@ -476,8 +545,9 @@ class AwsProvider(Provider):
                 origins = []
                 for o in (d.get("Origins") or {}).get("Items", []):
                     origins.append(o.get("DomainName", ""))
+                dist_id = d.get("Id", "")
                 result.append({
-                    "id": d.get("Id", ""),
+                    "id": dist_id,
                     "domain": d.get("DomainName", ""),
                     "status": d.get("Status", ""),
                     "enabled": bool(d.get("Enabled")),
@@ -485,6 +555,7 @@ class AwsProvider(Provider):
                     "aliases": aliases,
                     "origins": origins,
                     "price_class": (d.get("PriceClass") or "").replace("PriceClass_", ""),
+                    "plan": plans.get(dist_id, "paygo"),
                 })
         return result
 

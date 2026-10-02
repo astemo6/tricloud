@@ -128,4 +128,55 @@ public class TriCloudApi {
         return gson.fromJson(get("/api/accounts/" + accountId + "/billing"),
                 Models.Billing.class);
     }
+
+    public List<Models.LightsailInstance> lightsail(int accountId)
+            throws IOException, ApiException {
+        Type t = new TypeToken<List<Models.LightsailInstance>>() {}.getType();
+        return gson.fromJson(get("/api/accounts/" + accountId + "/lightsail"), t);
+    }
+
+    public void lightsailAction(int accountId, String name, String action, String region)
+            throws IOException, ApiException {
+        Map<String, String> p = new HashMap<>();
+        p.put("name", name);
+        p.put("action", action);
+        p.put("region", region);
+        post("/api/accounts/" + accountId + "/lightsail/action", gson.toJson(p));
+    }
+
+    public List<Models.Distribution> cloudfront(int accountId)
+            throws IOException, ApiException {
+        Type t = new TypeToken<List<Models.Distribution>>() {}.getType();
+        return gson.fromJson(get("/api/accounts/" + accountId + "/cloudfront"), t);
+    }
+
+    public void cloudfrontInvalidate(int accountId, String distId)
+            throws IOException, ApiException {
+        Map<String, Object> p = new HashMap<>();
+        p.put("distribution_id", distId);
+        p.put("paths", new ArrayList<String>());
+        post("/api/accounts/" + accountId + "/cloudfront/invalidate", gson.toJson(p));
+    }
+
+    public void cloudfrontToggle(int accountId, String distId, boolean enable)
+            throws IOException, ApiException {
+        Map<String, Object> p = new HashMap<>();
+        p.put("distribution_id", distId);
+        p.put("enabled", enable);
+        post("/api/accounts/" + accountId + "/cloudfront/toggle", gson.toJson(p));
+    }
+
+    public String quotas(int accountId) throws IOException, ApiException {
+        // 配额结构各云不同，直接返回原始 JSON 由 UI 展示
+        return get("/api/accounts/" + accountId + "/quotas");
+    }
+
+    public List<Models.Job> jobs() throws IOException, ApiException {
+        Type t = new TypeToken<List<Models.Job>>() {}.getType();
+        return gson.fromJson(get("/api/jobs?limit=50"), t);
+    }
+
+    public void jobStop(String jobId) throws IOException, ApiException {
+        post("/api/jobs/" + jobId + "/stop", "{}");
+    }
 }

@@ -39,8 +39,10 @@ public class AccountActivity extends Activity {
         }
 
         ListView lv = findViewById(R.id.lvAccounts);
-        List<Models.CloudAccount> all = new ArrayList<>();
-        ArrayAdapter<Models.CloudAccount> adapter =
+        findViewById(R.id.btnJobs).setOnClickListener(v ->
+                startActivity(new Intent(this, JobActivity.class)));
+
+        List<Models.CloudAccount> all = new ArrayList<>();        ArrayAdapter<Models.CloudAccount> adapter =
                 new ArrayAdapter<Models.CloudAccount>(this,
                         android.R.layout.simple_list_item_2,
                         android.R.id.text1, all) {
@@ -61,7 +63,7 @@ public class AccountActivity extends Activity {
 
         lv.setOnItemClickListener((AdapterView<?> parent, View view, int position, long id) -> {
             Models.CloudAccount acc = all.get(position);
-            Intent i = new Intent(this, InstanceActivity.class);
+            Intent i = new Intent(this, DashboardActivity.class);
             i.putExtra("account_id", acc.id);
             i.putExtra("account_name", acc.name);
             i.putExtra("provider", acc.provider);

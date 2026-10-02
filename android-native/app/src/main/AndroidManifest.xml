@@ -20,8 +20,13 @@
         </activity>
 
         <activity android:name=".AccountActivity" android:exported="false" />
+        <activity android:name=".DashboardActivity" android:exported="false" />
         <activity android:name=".InstanceActivity" android:exported="false" />
+        <activity android:name=".LightsailActivity" android:exported="false" />
+        <activity android:name=".CloudFrontActivity" android:exported="false" />
+        <activity android:name=".QuotaActivity" android:exported="false" />
         <activity android:name=".BillingActivity" android:exported="false" />
+        <activity android:name=".JobActivity" android:exported="false" />
 
     </application>
 

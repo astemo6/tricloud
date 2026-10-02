@@ -613,7 +613,9 @@ d != null? `存活 ${d} 天（${fmtDate(a.cloud_created_at)}创建） <a href="j
 <button class="btn sm" onclick="editAccount(${a.id})">编辑</button>
 <button class="btn sm danger" onclick="delAccount(${a.id})">删除</button></div>`; }).join('')
 || '<div style="color:#8b93ad;padding:8px 0">暂无账号</div>'}
-<h2 style="margin-top:20px">添加账号</h2>
+<h2 style="margin-top:20px">添加账号
+<button class="btn sm" style="margin-left:8px" onclick="toggleBatchAdd()">批量添加</button></h2>
+<div id="singleAddForm">
 <form id="accForm">
 <div class="field"><label>账号别名 <span class="req">*</span></label>
 <input name="name" required placeholder="如：甲骨文-东京"></div>
@@ -623,7 +625,20 @@ ${fieldInput(f, '')}${f.help? `<div class="help">${esc(f.help)}</div>`: ''}</div
 <button type="button" class="btn" onclick="closeModal()">取消</button>
 <button type="submit" class="btn primary">保存（自动校验连通性）</button>
 </div>
-</form>`;
+</form>
+</div>
+<div id="batchAddForm" style="display:none">
+<form id="accBatchForm">
+<div class="field"><label>批量添加（每行一个账号，字段用 | 分隔）</label>
+<textarea name="batch" rows="6" style="width:100%" placeholder="别名 | 字段1 | 字段2 | ..."></textarea>
+<div class="help" id="batchHelp" style="color:#8b93ad"></div></div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="toggleBatchAdd()">返回单个添加</button>
+<button type="submit" class="btn primary">批量保存（逐个校验）</button>
+</div>
+</form>
+<div id="batchResult"></div>
+</div>`;
 document.getElementById('modalMask').classList.add('show');
 document.getElementById('accForm').onsubmit = async e => {
 e.preventDefault();
@@ -635,6 +650,40 @@ await api('POST', '/api/accounts', {provider: p.id, name: fd.get('name').trim(),
 toast('账号已添加'); closeModal(); loadAccounts();
 } catch (err) { toast(err.message, true);}
 };
+// 批量添加说明
+document.getElementById('batchHelp').textContent =
+`格式：别名 | ${p.fields.map(f => f.label).join(' | ')}（每行一个）`;
+document.getElementById('accBatchForm').onsubmit = async e => {
+e.preventDefault();
+const text = (new FormData(e.target).get('batch') || '').trim();
+const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+if (!lines.length) { toast('请先粘贴账号信息', true); return;}
+const accounts = [];
+for (const line of lines) {
+const parts = line.split('|').map(s => s.trim());
+if (parts.length < p.fields.length + 1) {
+toast(`格式错误（需要 ${p.fields.length + 1} 个字段）: ${line.slice(0, 30)}…`, true); return;}
+const creds = {};
+p.fields.forEach((f, i) => creds[f.key] = parts[i + 1] || '');
+accounts.push({name: parts[0], creds});
+}
+if (!confirm(`确定批量添加 ${accounts.length} 个账号吗？将逐个校验连通性。`)) return;
+try {
+const r = await api('POST', '/api/accounts/batch', {provider: p.id, accounts});
+const box = document.getElementById('batchResult');
+box.innerHTML = `<div style="margin-top:10px"><b>${esc(r.summary)}</b><br>` +
+r.results.map(x => `<div style="font-size:12px;color:${x.ok? '#4ade80': '#f87171'}">${x.ok? '✅': '❌'} ${esc(x.name)}${x.ok? '': ': ' + esc(x.error)}</div>`).join('') + '</div>';
+loadAccounts();
+} catch (err) { toast(err.message, true);}
+};
+}
+
+function toggleBatchAdd() {
+const s = document.getElementById('singleAddForm');
+const b = document.getElementById('batchAddForm');
+const showBatch = s.style.display !== 'none';
+s.style.display = showBatch? 'none': '';
+b.style.display = showBatch? '': 'none';
 }
 
 async function editAccount(id) {
@@ -804,19 +853,39 @@ if (lastCreateOpts && o.region && o.region !== lastCreateOpts.default_region) o.
 return o;
 }
 
+async function saveCreateDefaults() {
+const form = document.getElementById('createForm');
+if (!form) return;
+const params = readForm(form, curProvider);
+// 密码/密钥类不存为默认
+delete params.password; delete params.ssh_key;
+try {
+await api('PUT', '/api/create-defaults', {provider: curProvider.id, defaults: params});
+toast('已保存为默认创建参数');
+} catch (e) { toast(e.message, true);}
+}
+
 async function openCreateModal() {
 if (!curAccount) { toast('请先添加账号', true); return;}
 const opts = await api('GET', `/api/accounts/${curAccount.id}/create-options`).catch(e => { toast(e.message, true); return null;});
 if (!opts) return;
 lastCreateOpts = opts;
+const defaults = await api('GET', `/api/create-defaults/${curProvider.id}`).catch(() => ({}));
 const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>创建实例 · ${esc(curProvider.name)}</h2>
 <form id="createForm">${createFormHTML(curProvider, opts)}
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="button" class="btn" onclick="saveCreateDefaults()">保存为默认</button>
 <button type="submit" class="btn primary">提交创建（后台执行）</button>
 </div></form>`;
 document.getElementById('modalMask').classList.add('show');
+// 应用默认参数
+const form = document.getElementById('createForm');
+for (const [k, v] of Object.entries(defaults || {})) {
+const el = form.querySelector(`[name="${k}"]`);
+if (el && v !== '' && v != null) el.value = v;
+}
 document.getElementById('createForm').onsubmit = async e => {
 e.preventDefault();
 const params = readForm(e.target, curProvider);

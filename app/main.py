@@ -146,6 +146,60 @@ def create_account(request: Request, body: AccountBody):
     return {"ok": True, "id": account_id}
 
 
+class BatchAccountBody(BaseModel):
+    provider: str
+    accounts: list[dict]  # [{name, creds}]
+
+@app.post("/api/accounts/batch")
+def create_accounts_batch(request: Request, body: BatchAccountBody):
+    _require_login(request)
+    provider = get_provider(body.provider)
+    results = []
+    for item in body.accounts:
+        name = (item.get("name") or "").strip()
+        creds = item.get("creds") or {}
+        if not name:
+            results.append({"name": name, "ok": False, "error": "别名不能为空"})
+            continue
+        try:
+            provider.test(creds)
+        except Exception as e:  # noqa: BLE001
+            results.append({"name": name, "ok": False, "error": f"凭证校验失败: {e}"})
+            continue
+        try:
+            aid = db.account_create(body.provider, name, creds)
+            results.append({"name": name, "ok": True, "id": aid})
+        except Exception as e:  # noqa: BLE001
+            results.append({"name": name, "ok": False, "error": str(e)})
+    ok_count = sum(1 for r in results if r["ok"])
+    return {"ok": True, "results": results,
+            "summary": f"成功 {ok_count}/{len(results)}"}
+
+
+@app.get("/api/create-defaults/{provider}")
+def get_create_defaults(request: Request, provider: str):
+    _require_login(request)
+    import json as _json
+    raw = db.meta_get(f"create_defaults_{provider}") or "{}"
+    try:
+        return _json.loads(raw)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+class CreateDefaultsBody(BaseModel):
+    provider: str
+    defaults: dict
+
+@app.put("/api/create-defaults")
+def set_create_defaults(request: Request, body: CreateDefaultsBody):
+    _require_login(request)
+    import json as _json
+    get_provider(body.provider)  # 校验 provider 有效
+    db.meta_set(f"create_defaults_{body.provider}", _json.dumps(body.defaults))
+    return {"ok": True}
+
+
 @app.put("/api/accounts/{account_id}")
 def update_account(request: Request, account_id: int, body: AccountUpdateBody):
     _require_login(request)

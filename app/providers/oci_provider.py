@@ -268,12 +268,6 @@ class OciProvider(Provider):
         compute, _, _ = _clients(creds)
         compute.list_instances(compartment_id=creds["tenancy_ocid"].strip(), limit=1)
 
-    def get_account_created_at(self, creds: dict) -> float | None:
-        """租户创建时间（unix 时间戳）。"""
-        _, _, identity = _clients(creds)
-        t = identity.get_tenancy(creds["tenancy_ocid"].strip()).data
-        return t.time_created.timestamp() if t.time_created else None
-
     def list_instances(self, creds: dict) -> list[InstanceInfo]:
         compute, vnet, _ = _clients(creds)
         tenancy = creds["tenancy_ocid"].strip()

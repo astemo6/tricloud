@@ -460,7 +460,7 @@ box.innerHTML = `<h2>账号管理 · ${esc(p.name)}</h2>
 ${accounts.map(a => { const d = aliveDays(a); return `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid #232b45">
 <span style="flex:1">${esc(a.name)}<br><span style="color:#6f7794;font-size:12px">${
 d != null? `存活 ${d} 天（${fmtDate(a.cloud_created_at)}创建） <a href="javascript:void(0)" onclick="setCloudCreatedAt(${a.id},'${p.id}')" style="color:#5aa9ff">修改</a>`
-: `云账号创建时间未设置 <a href="javascript:void(0)" onclick="setCloudCreatedAt(${a.id},'${p.id}')" style="color:#5aa9ff">${p.id === 'oci'? '自动获取': '设置'}</a>`}</span></span>
+: `云账号创建时间未设置 <a href="javascript:void(0)" onclick="setCloudCreatedAt(${a.id},'${p.id}')" style="color:#5aa9ff">设置</a>`}</span></span>
 <button class="btn sm" onclick="testAccount(${a.id})">测试连接</button>
 <button class="btn sm" onclick="openMonitorModal(${a.id})">🔔 监控</button>
 <button class="btn sm" onclick="editAccount(${a.id})">编辑</button>
@@ -519,13 +519,9 @@ catch (e) { toast(e.message, true);}
 }
 
 async function setCloudCreatedAt(id, provider) {
-if (provider === 'oci' && confirm('OCI 支持从租户信息自动获取创建时间，是否自动获取？\n（取消则手动输入日期）')) {
-try {
-const r = await api('POST', `/api/accounts/${id}/cloud-created-at/detect`);
-toast(`已获取创建时间：${fmtDate(r.timestamp)}`); openAccountModal(); loadAccounts(); return;
-} catch (e) { toast(`自动获取失败：${e.message}，请手动输入`, true);}
-}
-const v = prompt('请输入云账号创建日期（格式 YYYY-MM-DD）：');
+const cur = accounts.find(a => a.id === id);
+const v = prompt('请输入云账号注册/创建日期（格式 YYYY-MM-DD）：',
+cur && cur.cloud_created_at? fmtDate(cur.cloud_created_at): '');
 if (v === null) return;
 const m = v.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
 if (!m) { toast('日期格式不正确', true); return;}

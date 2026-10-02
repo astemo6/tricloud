@@ -308,24 +308,6 @@ def set_cloud_created_at(request: Request, account_id: int, body: CloudCreatedAt
     return {"ok": True}
 
 
-@app.post("/api/accounts/{account_id}/cloud-created-at/detect")
-def detect_cloud_created_at(request: Request, account_id: int):
-    """OCI：从租户信息自动获取创建时间并保存。AWS/Azure 无公开 API，需手动设置。"""
-    _require_login(request)
-    acc = _get_account(account_id)
-    if acc["provider"] != "oci":
-        raise HTTPException(status_code=400, detail="只有 OCI 支持自动获取，AWS/Azure 请手动设置")
-    provider = get_provider("oci")
-    try:
-        ts = provider.get_account_created_at(acc["creds"])
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"获取租户创建时间失败: {e}") from e
-    if not ts:
-        raise HTTPException(status_code=502, detail="未能获取到租户创建时间")
-    db.account_set_cloud_created_at(account_id, ts)
-    return {"ok": True, "timestamp": ts}
-
-
 # ---------- 配额 / 订阅 ----------
 @app.get("/api/accounts/{account_id}/quotas")
 def get_quotas(request: Request, account_id: int):

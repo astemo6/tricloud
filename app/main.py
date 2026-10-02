@@ -286,17 +286,17 @@ def get_billing(request: Request, account_id: int):
         man_total = sum(m["amount"] for m in manual)
         man_applied = 0.0
         if manual:
-            starts = [m["start_at"] for m in manual if m.get("start_at")]
-            start_ts = min(starts) if starts else None
-            if start_ts:
-                start_d = _dt.datetime.fromtimestamp(start_ts).strftime("%Y-%m-%d")
-            else:
-                start_d = (_dt.date.today() - _dt.timedelta(days=365)).isoformat()
             end_d = _dt.date.today().isoformat()
-            try:
-                man_applied = provider.get_credit_applied(acc["creds"], start_d, end_d)
-            except Exception:  # noqa: BLE001
-                man_applied = 0.0
+            for m in manual:
+                start_ts = m.get("start_at")
+                start_d = _dt.datetime.fromtimestamp(start_ts).strftime("%Y-%m-%d") if start_ts \
+                    else (_dt.date.today() - _dt.timedelta(days=365)).isoformat()
+                try:
+                    cur_applied = provider.get_credit_applied(acc["creds"], start_d, end_d)
+                except Exception:  # noqa: BLE001
+                    cur_applied = 0.0
+                # 只算添加之后的新增抵扣
+                man_applied += max(0.0, cur_applied - (m.get("ce_baseline") or 0.0))
         man_remaining = max(0.0, round(man_total - man_applied, 2))
         for m in manual:
             m["source"] = "manual"
@@ -373,8 +373,17 @@ def add_manual_credit(request: Request, account_id: int, body: ManualCreditBody)
     if body.amount <= 0:
         raise HTTPException(status_code=400, detail="金额必须大于 0")
     import time as _t
-    cid = db.credit_add(account_id, name, body.amount, body.expires_at,
-                        body.start_at or _t.time())
+    import datetime as _dt2
+    start_ts = body.start_at or _t.time()
+    # 记录添加时的 CE 累计抵扣作为基线，之后只算新增抵扣（排除历史其他 credit）
+    baseline = 0.0
+    try:
+        provider = get_provider(acc["provider"])
+        start_d = _dt2.datetime.fromtimestamp(start_ts).strftime("%Y-%m-%d")
+        baseline = provider.get_credit_applied(acc["creds"], start_d, _dt2.date.today().isoformat())
+    except Exception:  # noqa: BLE001
+        pass
+    cid = db.credit_add(account_id, name, body.amount, body.expires_at, start_ts, baseline)
     return {"ok": True, "id": cid}
 
 

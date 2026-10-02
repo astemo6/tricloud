@@ -76,6 +76,8 @@ def init_db() -> None:
         ccols = {r["name"] for r in conn.execute("PRAGMA table_info(account_credits)")}
         if "start_at" not in ccols:
             conn.execute("ALTER TABLE account_credits ADD COLUMN start_at REAL")
+        if "ce_baseline" not in ccols:
+            conn.execute("ALTER TABLE account_credits ADD COLUMN ce_baseline REAL")
     # 启动时把上次异常中断的任务标记出来
     with _lock, _connect() as conn:
         conn.execute(
@@ -171,7 +173,7 @@ def account_set_cloud_created_at(account_id: int, ts: float | None) -> bool:
 def credit_list(account_id: int) -> list[dict]:
     with _lock, _connect() as conn:
         rows = conn.execute(
-            "SELECT id, name, amount, expires_at, start_at FROM account_credits"
+            "SELECT id, name, amount, expires_at, start_at, ce_baseline FROM account_credits"
             " WHERE account_id=? ORDER BY expires_at IS NULL, expires_at",
             (account_id,),
         ).fetchall()
@@ -179,12 +181,13 @@ def credit_list(account_id: int) -> list[dict]:
 
 
 def credit_add(account_id: int, name: str, amount: float,
-               expires_at: float | None, start_at: float | None = None) -> int:
+               expires_at: float | None, start_at: float | None = None,
+               ce_baseline: float = 0.0) -> int:
     with _lock, _connect() as conn:
         cur = conn.execute(
-            "INSERT INTO account_credits(account_id, name, amount, expires_at, start_at, created_at)"
-            " VALUES (?,?,?,?,?,?)",
-            (account_id, name, amount, expires_at, start_at, time.time()),
+            "INSERT INTO account_credits(account_id, name, amount, expires_at, start_at, ce_baseline, created_at)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (account_id, name, amount, expires_at, start_at, ce_baseline, time.time()),
         )
         return cur.lastrowid
 

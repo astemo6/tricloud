@@ -1,0 +1,14 @@
+services:
+  tricloud:
+    build: .
+    container_name: tricloud
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18711:8000"
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data:/data

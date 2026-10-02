@@ -1,0 +1,459 @@
+"""OCI (Oracle Cloud Infrastructure) provider。
+
+功能对标 SIJULY/Oracle 面板：实例列表/生命周期/换公网IP/分配IPv6/
+改配置/简化创建/自动抢机/自动建网，全部走 OCI Python SDK。
+"""
+import base64
+import json
+import logging
+import random
+import time
+
+import oci
+from oci.core.models import (
+    AddVcnIpv6CidrDetails,
+    CreateIpv6Details,
+    CreatePublicIpDetails,
+    CreateSubnetDetails,
+    CreateVcnDetails,
+    CreateInternetGatewayDetails,
+    EgressSecurityRule,
+    GetPublicIpByPrivateIpIdDetails,
+    LaunchInstanceDetails,
+    CreateVnicDetails,
+    InstanceSourceViaImageDetails,
+    LaunchInstanceShapeConfigDetails,
+    RouteRule,
+    UpdateInstanceDetails,
+    UpdateInstanceShapeConfigDetails,
+    UpdateRouteTableDetails,
+    UpdateSecurityListDetails,
+    UpdateSubnetDetails,
+    UpdateVcnDetails,
+)
+from oci.exceptions import ServiceError
+
+from .base import AccountField, InstanceInfo, Provider
+
+log = logging.getLogger(__name__)
+
+_STATUS_MAP = {
+    "RUNNING": "running",
+    "STOPPED": "stopped",
+    "STOPPING": "stopping",
+    "STARTING": "pending",
+    "PROVISIONING": "pending",
+    "TERMINATED": "terminated",
+    "TERMINATING": "terminating",
+}
+
+
+def _sdk_config(creds: dict) -> dict:
+    key = creds["private_key"].replace("\\n", "\n")
+    if "BEGIN" not in key:
+        raise ValueError("私钥格式不正确，需要 PEM 格式")
+    return {
+        "user": creds["user_ocid"].strip(),
+        "tenancy": creds["tenancy_ocid"].strip(),
+        "fingerprint": creds["fingerprint"].strip(),
+        "region": creds["region"].strip(),
+        "key_content": key,
+    }
+
+
+def _clients(creds: dict):
+    cfg = _sdk_config(creds)
+    return (
+        oci.core.ComputeClient(cfg),
+        oci.core.VirtualNetworkClient(cfg),
+        oci.identity.IdentityClient(cfg),
+    )
+
+
+def _primary_vnic(vnet, compute, tenancy: str, instance_id: str):
+    atts = oci.pagination.list_call_get_all_results(
+        compute.list_vnic_attachments, compartment_id=tenancy, instance_id=instance_id
+    ).data
+    if not atts:
+        return None, None
+    vnic = vnet.get_vnic(atts[0].vnic_id).data
+    return vnic, atts[0]
+
+
+def _user_data(login_user: str, password: str, startup_script: str = "") -> str:
+    default_script = """
+echo "Waiting for apt lock..."
+while fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do
+  sleep 10
+done
+for i in 1 2 3; do
+  apt-get update && apt-get install -y curl wget unzip git socat cron && break
+  sleep 15
+done
+"""
+    parts = [
+        "#cloud-config",
+        "chpasswd:",
+        "  expire: False",
+        "  list:",
+        f"    - {login_user}:{password}",
+        "runcmd:",
+        "  - \"sed -i -e '/^#*PasswordAuthentication/s/^.*$/PasswordAuthentication yes/' /etc/ssh/sshd_config\"",
+        "  - 'rm -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf'",
+        "  - \"sed -i -e '/^#*PermitRootLogin/s/^.*$/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config\"",
+        f"  - [ bash, -c, {json.dumps(default_script)} ]",
+    ]
+    if startup_script and startup_script.strip():
+        parts.append(f"  - [ bash, -c, {json.dumps(startup_script.strip())} ]")
+    parts.append("  - systemctl restart sshd || service sshd restart || service ssh restart")
+    return base64.b64encode("\n".join(parts).encode()).decode()
+
+
+class OciProvider(Provider):
+    id = "oci"
+    name = "Oracle Cloud (OCI)"
+    supports_snatch = True
+    fields = [
+        AccountField("tenancy_ocid", "Tenancy OCID", placeholder="ocid1.tenancy.oc1..…"),
+        AccountField("user_ocid", "User OCID", placeholder="ocid1.user.oc1..…"),
+        AccountField("fingerprint", "API 密钥指纹", placeholder="如 aa:bb:cc:…"),
+        AccountField("region", "区域", placeholder="如 ap-tokyo-1",
+                     help="实例所在的区域，如 ap-tokyo-1 / ap-osaka-1"),
+        AccountField("private_key", "API 私钥 (PEM)", field_type="textarea",
+                     placeholder="-----BEGIN PRIVATE KEY-----…"),
+        AccountField("default_subnet_ocid", "默认子网 OCID", required=False,
+                     help="创建实例时使用；留空则自动查找或创建"),
+        AccountField("default_ssh_key", "默认 SSH 公钥", field_type="textarea", required=False,
+                     help="创建实例时注入；留空则只用密码登录"),
+    ]
+    actions = [
+        {"key": "start", "label": "启动"},
+        {"key": "stop", "label": "停止"},
+        {"key": "restart", "label": "重启"},
+        {"key": "terminate", "label": "终止", "danger": True},
+        {"key": "change_ip", "label": "更换公网 IP"},
+        {"key": "assign_ipv6", "label": "分配 IPv6"},
+        {"key": "update_shape", "label": "更改配置"},
+    ]
+
+    # ---------- 基础 ----------
+    def test(self, creds: dict) -> None:
+        compute, _, _ = _clients(creds)
+        compute.list_instances(compartment_id=creds["tenancy_ocid"].strip(), limit=1)
+
+    def list_instances(self, creds: dict) -> list[InstanceInfo]:
+        compute, vnet, _ = _clients(creds)
+        tenancy = creds["tenancy_ocid"].strip()
+        result = []
+        instances = oci.pagination.list_call_get_all_results(
+            compute.list_instances, compartment_id=tenancy
+        ).data
+        for inst in instances:
+            if inst.lifecycle_state in ("TERMINATED", "TERMINATING"):
+                continue
+            info = InstanceInfo(
+                id=inst.id,
+                name=inst.display_name or "-",
+                status=_STATUS_MAP.get(inst.lifecycle_state, "unknown"),
+                status_text=inst.lifecycle_state,
+                shape=inst.shape,
+                cpu=str(getattr(inst.shape_config, "ocpus", "") or ""),
+                memory=str(getattr(inst.shape_config, "memory_in_gbs", "") or ""),
+                region=inst.region,
+                zone=inst.availability_domain,
+                created=inst.time_created.isoformat() if inst.time_created else "",
+            )
+            try:
+                vnic, att = _primary_vnic(vnet, compute, tenancy, inst.id)
+                if vnic:
+                    info.public_ip = vnic.public_ip or ""
+                    info.private_ip = vnic.private_ip or ""
+                    info.extra["vnic_id"] = vnic.id
+                    info.extra["subnet_id"] = vnic.subnet_id
+                ipv6s = vnet.list_ipv6s(vnic_id=vnic.id).data if vnic else []
+                if ipv6s:
+                    info.ipv6 = ipv6s[0].ip_address
+            except Exception as e:  # noqa: BLE001 - 单个实例的网络信息失败不影响列表
+                log.warning("enrich instance %s failed: %s", inst.id, e)
+            try:
+                bvas = compute.list_boot_volume_attachments(
+                    compartment_id=tenancy, instance_id=inst.id
+                ).data
+                if bvas:
+                    bv = compute.get_boot_volume(bvas[0].boot_volume_id).data
+                    info.extra["boot_volume_gb"] = str(bv.size_in_gbs)
+            except Exception as e:  # noqa: BLE001
+                log.warning("boot volume info %s failed: %s", inst.id, e)
+            result.append(info)
+        return result
+
+    # ---------- 实例操作 ----------
+    def instance_action(self, creds: dict, inst: InstanceInfo, action: str, ctx) -> str:
+        compute, vnet, _ = _clients(creds)
+        iid = inst.id
+        if action == "start":
+            compute.instance_action(iid, "START")
+            oci.wait_until(compute, compute.get_instance(iid), "lifecycle_state", "RUNNING",
+                           max_wait_seconds=300)
+            return "实例已启动"
+        if action == "stop":
+            compute.instance_action(iid, "STOP")
+            oci.wait_until(compute, compute.get_instance(iid), "lifecycle_state", "STOPPED",
+                           max_wait_seconds=300)
+            return "实例已停止"
+        if action == "restart":
+            compute.instance_action(iid, "RESET")
+            oci.wait_until(compute, compute.get_instance(iid), "lifecycle_state", "RUNNING",
+                           max_wait_seconds=300)
+            return "实例已重启"
+        if action == "terminate":
+            compute.terminate_instance(iid, preserve_boot_volume=False)
+            return "实例终止请求已提交"
+        if action == "change_ip":
+            return self._change_ip(compute, vnet, creds, inst)
+        if action == "assign_ipv6":
+            return self._assign_ipv6(vnet, inst)
+        if action == "update_shape":
+            raise ValueError("更改配置需要提供 shape/ocpus/memory 参数，请用专用接口")
+        raise ValueError(f"未知操作: {action}")
+
+    def _change_ip(self, compute, vnet, creds, inst: InstanceInfo) -> str:
+        vnic_id = inst.extra.get("vnic_id")
+        if not vnic_id:
+            raise ValueError("缺少 vnic_id，请刷新实例列表后重试")
+        privates = oci.pagination.list_call_get_all_results(
+            vnet.list_private_ips, vnic_id=vnic_id
+        ).data
+        primary = next((p for p in privates if p.is_primary), None)
+        if not primary:
+            raise ValueError("未找到主私有 IP")
+        try:
+            existing = vnet.get_public_ip_by_private_ip_id(
+                GetPublicIpByPrivateIpIdDetails(private_ip_id=primary.id)
+            ).data
+            if existing.lifetime == "EPHEMERAL":
+                vnet.delete_public_ip(existing.id)
+                time.sleep(5)
+        except ServiceError as e:
+            if e.status != 404:
+                raise
+        new_ip = vnet.create_public_ip(
+            CreatePublicIpDetails(
+                compartment_id=creds["tenancy_ocid"].strip(),
+                lifetime="EPHEMERAL",
+                private_ip_id=primary.id,
+            )
+        ).data
+        return f"更换 IP 成功，新公网 IP: {new_ip.ip_address}"
+
+    def _assign_ipv6(self, vnet, inst: InstanceInfo) -> str:
+        vnic_id = inst.extra.get("vnic_id")
+        if not vnic_id:
+            raise ValueError("缺少 vnic_id，请刷新实例列表后重试")
+        vnic = vnet.get_vnic(vnic_id).data
+        subnet = vnet.get_subnet(vnic.subnet_id).data
+        vcn = vnet.get_vcn(subnet.vcn_id).data
+        if not vcn.ipv6_cidr_blocks:
+            vnet.add_ipv6_vcn_cidr(
+                vcn_id=vcn.id,
+                add_vcn_ipv6_cidr_details=AddVcnIpv6CidrDetails(is_oracle_gua_allocation_enabled=True),
+            )
+            oci.wait_until(vnet, vnet.get_vcn(vcn.id), "lifecycle_state", "AVAILABLE",
+                           max_wait_seconds=300)
+            vcn = vnet.get_vcn(vcn.id).data
+        if not subnet.ipv6_cidr_block:
+            subnet_v6 = vcn.ipv6_cidr_blocks[0].replace("/56", "/64")
+            vnet.update_subnet(subnet.id, UpdateSubnetDetails(ipv6_cidr_block=subnet_v6))
+            oci.wait_until(vnet, vnet.get_subnet(subnet.id), "lifecycle_state", "AVAILABLE",
+                           max_wait_seconds=300)
+        rt = vnet.get_route_table(vcn.default_route_table_id).data
+        igws = vnet.list_internet_gateways(compartment_id=vcn.compartment_id, vcn_id=vcn.id).data
+        if not igws:
+            raise ValueError("未找到互联网网关，无法添加 IPv6 路由")
+        if not any(r.destination == "::/0" for r in rt.route_rules):
+            rules = list(rt.route_rules)
+            rules.append(RouteRule(destination="::/0", network_entity_id=igws[0].id))
+            vnet.update_route_table(rt.id, UpdateRouteTableDetails(route_rules=rules))
+        seclist = vnet.get_security_list(vcn.default_security_list_id).data
+        if not any(r.destination == "::/0" for r in seclist.egress_security_rules):
+            egress = list(seclist.egress_security_rules)
+            egress.append(EgressSecurityRule(destination="::/0", protocol="all"))
+            vnet.update_security_list(seclist.id, UpdateSecurityListDetails(egress_security_rules=egress))
+        new_v6 = vnet.create_ipv6(CreateIpv6Details(vnic_id=vnic_id)).data
+        return f"IPv6 分配成功: {new_v6.ip_address}"
+
+    def update_shape(self, creds: dict, instance_id: str, shape: str,
+                     ocpus: float | None, memory_gbs: float | None, ctx) -> str:
+        compute, _, _ = _clients(creds)
+        details = UpdateInstanceDetails(shape=shape)
+        if ocpus or memory_gbs:
+            details.shape_config = UpdateInstanceShapeConfigDetails(
+                ocpus=ocpus, memory_in_gbs=memory_gbs)
+        compute.update_instance(instance_id, details)
+        ctx.log("配置更新请求已提交，等待实例恢复 RUNNING…")
+        oci.wait_until(compute, compute.get_instance(instance_id), "lifecycle_state", "RUNNING",
+                       max_wait_seconds=600)
+        return f"实例配置已更新为 {shape}"
+
+    # ---------- 创建实例 ----------
+    def create_options(self, creds: dict) -> dict:
+        compute, _, identity = _clients(creds)
+        tenancy = creds["tenancy_ocid"].strip()
+        ads = identity.list_availability_domains(compartment_id=tenancy).data
+        ad_names = [ad.name for ad in ads]
+        shapes = []
+        if ad_names:
+            try:
+                for s in compute.list_shapes(compartment_id=tenancy,
+                                             availability_domain=ad_names[0]).data:
+                    shapes.append(s.shape)
+            except ServiceError as e:
+                log.warning("list_shapes failed: %s", e)
+        return {
+            "availability_domains": ad_names,
+            "shapes": sorted(set(shapes)),
+            "os_options": ["Canonical Ubuntu", "Oracle Linux"],
+            "has_default_subnet": bool(creds.get("default_subnet_ocid")),
+            "has_default_ssh_key": bool(creds.get("default_ssh_key")),
+        }
+
+    def _ensure_subnet(self, vnet, creds: dict, account_id: int | None, ctx) -> str:
+        tenancy = creds["tenancy_ocid"].strip()
+        subnet_id = (creds.get("default_subnet_ocid") or "").strip()
+        if subnet_id:
+            try:
+                if vnet.get_subnet(subnet_id).data.lifecycle_state == "AVAILABLE":
+                    return subnet_id
+            except ServiceError as e:
+                if e.status != 404:
+                    raise
+                ctx.log("保存的默认子网不可用，将自动查找/创建")
+        try:
+            vcns = vnet.list_vcns(compartment_id=tenancy).data
+            if vcns:
+                subnets = vnet.list_subnets(compartment_id=tenancy, vcn_id=vcns[0].id).data
+                if subnets:
+                    return subnets[0].id
+        except Exception as e:  # noqa: BLE001
+            ctx.log(f"自动查找子网失败: {e}，将创建新网络")
+        ctx.log("正在自动创建网络资源 (VCN/网关/子网)，约需 2-3 分钟…")
+        alias = f"auto{random.randint(100, 999)}"
+        vcn = vnet.create_vcn(CreateVcnDetails(
+            cidr_block="10.0.0.0/16", display_name=f"vcn-{alias}", compartment_id=tenancy)).data
+        oci.wait_until(vnet, vnet.get_vcn(vcn.id), "lifecycle_state", "AVAILABLE")
+        ig = vnet.create_internet_gateway(CreateInternetGatewayDetails(
+            display_name=f"ig-{alias}", compartment_id=tenancy,
+            is_enabled=True, vcn_id=vcn.id)).data
+        oci.wait_until(vnet, vnet.get_internet_gateway(ig.id), "lifecycle_state", "AVAILABLE")
+        rt_id = vcn.default_route_table_id
+        rules = vnet.get_route_table(rt_id).data.route_rules
+        rules.append(RouteRule(destination="0.0.0.0/0", network_entity_id=ig.id))
+        vnet.update_route_table(rt_id, UpdateRouteTableDetails(route_rules=rules))
+        subnet = vnet.create_subnet(CreateSubnetDetails(
+            compartment_id=tenancy, vcn_id=vcn.id, cidr_block="10.0.1.0/24",
+            display_name=f"subnet-{alias}")).data
+        oci.wait_until(vnet, vnet.get_subnet(subnet.id), "lifecycle_state", "AVAILABLE")
+        ctx.log(f"网络创建完成，子网: {subnet.id}")
+        # 回写账号，下次直接复用
+        if account_id:
+            from .. import db as _db
+            acc = _db.account_get(account_id)
+            if acc:
+                acc["creds"]["default_subnet_ocid"] = subnet.id
+                _db.account_update(account_id, acc["name"], acc["creds"])
+        return subnet.id
+
+    def _launch(self, creds: dict, account_id: int | None, params: dict, ctx) -> tuple[str, str]:
+        """执行一次创建，返回 (instance_id, 结果文本)。"""
+        compute, vnet, identity = _clients(creds)
+        tenancy = creds["tenancy_ocid"].strip()
+        shape = params["shape"]
+        # 免费 E2.1.Micro 配额保护
+        if shape == "VM.Standard.E2.1.Micro":
+            existing = [i for i in oci.pagination.list_call_get_all_results(
+                compute.list_instances, compartment_id=tenancy).data
+                if i.shape == shape and i.lifecycle_state not in ("TERMINATED", "TERMINATING")]
+            if len(existing) >= 2:
+                raise ValueError("免费 E2.1.Micro 已有 2 台在运行，无法再创建")
+        ads = identity.list_availability_domains(compartment_id=tenancy).data
+        ad = params.get("availability_domain") or ads[0].name
+        os_name = params.get("os", "Canonical Ubuntu")
+        images = compute.list_images(
+            compartment_id=tenancy, operating_system=os_name, shape=shape,
+            sort_by="TIMECREATED", sort_order="DESC", limit=5).data
+        if not images:
+            raise ValueError(f"未找到 {os_name} + {shape} 的可用镜像")
+        image_id = images[0].id
+        ctx.log(f"使用镜像: {images[0].display_name}")
+        subnet_id = self._ensure_subnet(vnet, creds, account_id, ctx)
+        login_user = params.get("login_user", "ubuntu") or "ubuntu"
+        password = params.get("password") or "".join(
+            random.choice("abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789")
+            for _ in range(16))
+        ssh_key = (params.get("ssh_key") or creds.get("default_ssh_key") or "").strip()
+        metadata = {"user_data": _user_data(login_user, password, params.get("startup_script", ""))}
+        if ssh_key:
+            metadata["ssh_authorized_keys"] = ssh_key
+        details = LaunchInstanceDetails(
+            compartment_id=tenancy,
+            availability_domain=ad,
+            display_name=params.get("name") or f"instance-{random.randint(1000, 9999)}",
+            shape=shape,
+            source_details=InstanceSourceViaImageDetails(
+                image_id=image_id,
+                boot_volume_size_in_gbs=int(params.get("boot_volume_gb") or 50)),
+            create_vnic_details=CreateVnicDetails(
+                subnet_id=subnet_id,
+                assign_public_ip=params.get("assign_public_ip", True)),
+            metadata=metadata,
+        )
+        if shape.endswith(".Flex"):
+            details.shape_config = LaunchInstanceShapeConfigDetails(
+                ocpus=float(params.get("ocpus") or 1),
+                memory_in_gbs=float(params.get("memory_gbs") or 6))
+        ctx.log(f"正在创建实例 {details.display_name} ({shape})…")
+        instance = compute.launch_instance(details).data
+        ctx.log(f"实例 {instance.id} 已提交，等待 RUNNING…")
+        oci.wait_until(compute, compute.get_instance(instance.id), "lifecycle_state", "RUNNING",
+                       max_wait_seconds=900, max_interval_seconds=15)
+        public_ip = ""
+        try:
+            vnic, _ = _primary_vnic(vnet, compute, tenancy, instance.id)
+            public_ip = (vnic.public_ip or "") if vnic else ""
+        except Exception as e:  # noqa: BLE001
+            ctx.log(f"获取公网 IP 失败: {e}")
+        text = (f"实例创建成功: {details.display_name}\n"
+                f"ID: {instance.id}\n"
+                f"公网 IP: {public_ip or '（未分配）'}\n"
+                f"登录用户: {login_user}\n"
+                f"密码: {password}（仅显示一次，请妥善保存）")
+        return instance.id, text
+
+    def create_instance(self, creds: dict, params: dict, ctx) -> str:
+        _, text = self._launch(creds, params.get("_account_id"), params, ctx)
+        return text
+
+    def snatch_instance(self, creds: dict, params: dict, ctx) -> str:
+        interval = int(params.get("retry_interval") or 30)
+        attempt = 0
+        ctx.log(f"开始抢机: {params.get('shape')}，重试间隔 {interval}s，手动停止前一直尝试")
+        while True:
+            if ctx.should_stop():
+                return "抢机任务已手动停止"
+            attempt += 1
+            try:
+                _, text = self._launch(creds, params.get("_account_id"), params, ctx)
+                ctx.log(f"第 {attempt} 次尝试成功！")
+                return f"抢机成功（第 {attempt} 次尝试）\n{text}"
+            except ServiceError as e:
+                msg = f"{e.code}: {e.message}"
+                if (e.status == 429 or "TooManyRequests" in str(e.code)
+                        or "Out of host capacity" in str(e.message)
+                        or "OutOfCapacity" in str(e.code)):
+                    ctx.log(f"第 {attempt} 次尝试: 资源不足 ({e.code})，{interval}s 后重试…")
+                    for _ in range(interval):
+                        if ctx.should_stop():
+                            return "抢机任务已手动停止"
+                        time.sleep(1)
+                    continue
+                raise ValueError(f"抢机失败（非容量原因）: {msg}") from e

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TriCloud 登录</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: #0f1420; color: #e6e9f0; min-height: 100vh;
+         display: flex; align-items: center; justify-content: center; }
+  .card { background: #171d2e; border: 1px solid #2a3350; border-radius: 12px;
+          padding: 40px 36px; width: 340px; box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+  h1 { font-size: 22px; text-align: center; margin-bottom: 6px; }
+  h1 span { color: #5aa9ff; }
+  p.sub { text-align: center; color: #8b93ad; font-size: 13px; margin-bottom: 26px; }
+  input { width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #2a3350;
+          background: #0f1420; color: #e6e9f0; font-size: 15px; outline: none; }
+  input:focus { border-color: #5aa9ff; }
+  button { width: 100%; margin-top: 14px; padding: 11px; border: none; border-radius: 8px;
+           background: #2f6fed; color: #fff; font-size: 15px; cursor: pointer; }
+  button:hover { background: #3d7df5; }
+  .err { color: #ff7a7a; font-size: 13px; margin-top: 10px; min-height: 18px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Tri<span>Cloud</span></h1>
+  <p class="sub">OCI · AWS · Azure 三合一管理面板</p>
+  <input type="password" id="pwd" placeholder="面板密码" autocomplete="current-password">
+  <button onclick="doLogin()">登录</button>
+  <div class="err" id="err"></div>
+</div>
+<script>
+async function doLogin() {
+  const pwd = document.getElementById('pwd').value;
+  const err = document.getElementById('err');
+  err.textContent = '';
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({password: pwd})
+    });
+    if (r.ok) { location.href = '/'; return; }
+    const d = await r.json();
+    err.textContent = d.detail || '登录失败';
+  } catch (e) { err.textContent = '网络错误: ' + e.message; }
+}
+document.getElementById('pwd').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+</script>
+</body>
+</html>

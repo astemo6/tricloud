@@ -78,7 +78,7 @@ else loadInstances();
 }
 
 /* ---------- 账号存活天数 ---------- */
-const aliveDays = a => a.created_at? Math.max(0, Math.floor((Date.now() / 1000 - a.created_at) / 86400)): null;
+const aliveDays = a => a.created_at != null? Math.max(0, Math.floor((Date.now() / 1000 - a.created_at) / 86400)): null;
 const aliveLabel = a => { const d = aliveDays(a); return d == null? '': `（存活${d}天）`; };
 
 async function loadAccounts(selectId) {

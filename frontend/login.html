@@ -15,8 +15,13 @@
   h1 span { color: #5aa9ff; }
   p.sub { text-align: center; color: #8b93ad; font-size: 13px; margin-bottom: 26px; }
   input { width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #2a3350;
-          background: #0f1420; color: #e6e9f0; font-size: 15px; outline: none; }
+          background: #0f1420; color: #e6e9f0; font-size: 15px; outline: none;
+          -webkit-user-select: text; user-select: text; }
   input:focus { border-color: #5aa9ff; }
+  .pwd-wrap { position: relative; }
+  .pwd-toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+               background: none; border: none; color: #8b93ad; font-size: 18px;
+               width: auto; margin: 0; padding: 4px; cursor: pointer; }
   button { width: 100%; margin-top: 14px; padding: 11px; border: none; border-radius: 8px;
            background: #2f6fed; color: #fff; font-size: 15px; cursor: pointer; }
   button:hover { background: #3d7df5; }
@@ -27,11 +32,21 @@
 <div class="card">
   <h1>Tri<span>Cloud</span></h1>
   <p class="sub">OCI · AWS · Azure 三合一管理面板</p>
-  <input type="password" id="pwd" placeholder="面板密码" autocomplete="current-password">
+  <div class="pwd-wrap">
+    <input type="password" id="pwd" placeholder="面板密码" autocomplete="current-password">
+    <button type="button" class="pwd-toggle" id="pwdToggle">👁</button>
+  </div>
   <button onclick="doLogin()">登录</button>
   <div class="err" id="err"></div>
 </div>
 <script>
+document.getElementById('pwdToggle').onclick = () => {
+  const input = document.getElementById('pwd');
+  const btn = document.getElementById('pwdToggle');
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  btn.textContent = show ? '🙈' : '👁';
+};
 async function doLogin() {
   const pwd = document.getElementById('pwd').value;
   const err = document.getElementById('err');

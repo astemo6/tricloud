@@ -38,6 +38,8 @@ class Provider(ABC):
     actions: list[dict] = []        # [{"key": "start", "label": "启动", "danger": False}]
     supports_snatch: bool = False
     supports_billing: bool = False  # 是否支持查看账单
+    supports_quotas: bool = False   # 是否支持配额查询
+    supports_subscription: bool = False  # 是否支持订阅信息查询（OCI）
 
     @abstractmethod
     def test(self, creds: dict) -> None:
@@ -68,3 +70,14 @@ class Provider(ABC):
          "services": [{"name": "...", "cost": 1.23}], "note": "..."}
         """
         raise NotImplementedError("该云厂商不支持查看账单")
+
+    def get_quotas(self, creds: dict) -> dict:
+        """配额查询，返回统一结构：
+        {"groups": [{"title": "...", "items": [{"name": "...", "detail": "..."}]}],
+         "note": "..."}
+        """
+        raise NotImplementedError("该云厂商不支持配额查询")
+
+    def get_subscription(self, creds: dict) -> dict:
+        """订阅信息查询，返回 {"items": [{"name": "...", "detail": "..."}], "note": "..."}。"""
+        raise NotImplementedError("该云厂商不支持订阅信息查询")

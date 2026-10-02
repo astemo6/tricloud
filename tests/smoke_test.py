@@ -248,6 +248,95 @@ def main():
         assert r.status_code == 400, r.text
         print("18. CloudFront 接口 OK", flush=True)
 
+        # 19. 配额/订阅接口
+        fake_q = {"groups": [{"title": "计算", "items": [{"name": "x", "detail": "可用1"}]}],
+                  "note": "n"}
+        with patch.object(get_provider("oci"), "get_quotas", return_value=fake_q):
+            q = c.get(f"/api/accounts/{oci_id}/quotas").json()
+            assert q["groups"][0]["title"] == "计算", q
+        fake_s = {"items": [{"name": "租户名", "detail": "t"}], "note": ""}
+        with patch.object(get_provider("oci"), "get_subscription", return_value=fake_s):
+            s = c.get(f"/api/accounts/{oci_id}/subscription").json()
+            assert s["items"][0]["detail"] == "t", s
+        r = c.get(f"/api/accounts/{aws_id}/subscription")
+        assert r.status_code == 400, r.text
+        print("19. 配额/订阅接口 OK", flush=True)
+
+        # 20. 一键测活
+        with patch.object(get_provider("oci"), "test", return_value=None), \
+             patch.object(get_provider("aws"), "test",
+                          side_effect=RuntimeError("bad key")):
+            lst = c.post("/api/accounts/test-all?provider=oci").json()
+            assert len(lst) == 2 and lst[0]["ok"] is True, lst
+            lst = c.post("/api/accounts/test-all?provider=aws").json()
+            assert lst[0]["ok"] is False and "bad key" in lst[0]["message"], lst
+        print("20. 一键测活 OK", flush=True)
+
+        # 21. 监控设置读写
+        m0 = c.get(f"/api/accounts/{oci_id}/monitor").json()
+        assert m0 == {"monitor_alert": False, "monitor_restart": False}, m0
+        r = c.put(f"/api/accounts/{oci_id}/monitor",
+                  json={"monitor_alert": True, "monitor_restart": False})
+        assert r.status_code == 200, r.text
+        m1 = c.get(f"/api/accounts/{oci_id}/monitor").json()
+        assert m1["monitor_alert"] is True and m1["monitor_restart"] is False, m1
+        print("21. 监控设置 OK", flush=True)
+
+        # 22. 设置扩展字段（每日报告/监控间隔）
+        s = c.get("/api/settings").json()
+        assert s["daily_report"] is False and s["daily_report_hour"] == 9 \
+            and s["monitor_interval_min"] == 5, s
+        r = c.put("/api/settings", json={"tg_bot_token": "", "tg_chat_id": "",
+                                         "daily_report": True, "daily_report_hour": 8,
+                                         "monitor_interval_min": 10})
+        assert r.status_code == 200, r.text
+        s = c.get("/api/settings").json()
+        assert s["daily_report"] is True and s["daily_report_hour"] == 8 \
+            and s["monitor_interval_min"] == 10, s
+        print("22. 设置扩展 OK", flush=True)
+
+        # 23. 新操作走任务（改名/扩容/开端口参数透传）
+        with patch.object(get_provider("oci"), "instance_action",
+                          return_value="ok") as m:
+            r = c.post(f"/api/accounts/{oci_id}/action",
+                       json={"instance": fake_inst.__dict__, "action": "rename",
+                             "params": {"new_name": "web2"}})
+            assert r.status_code == 200, r.text
+            job_id = r.json()["job_id"]
+            for _ in range(50):
+                j = c.get(f"/api/jobs/{job_id}").json()
+                if j["status"] not in ("queued", "running"):
+                    break
+                time.sleep(0.2)
+            assert j["status"] == "success", j
+            _, _, action, ctx = m.call_args[0]
+            assert action == "rename" and ctx.params == {"new_name": "web2"}, \
+                m.call_args
+        print("23. 新操作参数透传 OK", flush=True)
+
+        # 24. monitor 模块：状态变化告警 + 每日报告（mock）
+        from app import monitor as _mon
+        from unittest.mock import patch as _p2
+        sent2 = []
+        _mon._last_status.clear()
+        inst_a = InstanceInfo(id="i-1", name="a", status="running")
+        inst_b = InstanceInfo(id="i-1", name="a", status="stopped")
+        with _p2("app.tg.send_message",
+                 side_effect=lambda t, parse_mode="HTML": sent2.append(t) or True), \
+             _p2.object(get_provider("oci"), "list_instances",
+                        side_effect=[[inst_a], [inst_b]]), \
+             _p2("app.tasks.submit_action", return_value="jid") as _sa:
+            accs_mon = db.account_list()
+            # 开启账号1的告警+自启
+            db.account_set_monitor(accs_mon[0]["id"], True, True)
+            _mon._check_once()   # 第一次：建立基线，无告警
+            assert sent2 == [], sent2
+            _mon._check_once()   # 第二次：running->stopped，告警+自启
+            assert any("告警" in t for t in sent2), sent2
+            assert _sa.called, "异常停止未触发自动重启"
+            db.account_set_monitor(accs_mon[0]["id"], False, False)
+        print("24. 监控告警/自启 OK", flush=True)
+
         print("\n全部冒烟测试通过", flush=True)
 
 

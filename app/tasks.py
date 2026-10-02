@@ -18,6 +18,7 @@ def job_action(ctx, provider_id: str, account_id: int, inst_dict: dict, action: 
             float(params["memory_gbs"]) if params.get("memory_gbs") else None,
             ctx)
     ctx.log(f"执行操作: {action} / {inst.name}")
+    ctx.params = params  # 需要参数的操作（改名/扩容/开端口）从这里取
     return provider.instance_action(acc["creds"], inst, action, ctx)
 
 

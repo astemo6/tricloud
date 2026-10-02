@@ -55,6 +55,12 @@ def init_db() -> None:
     os.makedirs(config.DATA_DIR, exist_ok=True)
     with _lock, _connect() as conn:
         conn.executescript(SCHEMA)
+        # 迁移：账号表加监控开关字段（老库升级）
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(accounts)")}
+        if "monitor_alert" not in cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN monitor_alert INTEGER DEFAULT 0")
+        if "monitor_restart" not in cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN monitor_restart INTEGER DEFAULT 0")
     # 启动时把上次异常中断的任务标记出来
     with _lock, _connect() as conn:
         conn.execute(
@@ -131,6 +137,28 @@ def account_delete(account_id: int) -> bool:
     with _lock, _connect() as conn:
         cur = conn.execute("DELETE FROM accounts WHERE id=?", (account_id,))
         return cur.rowcount > 0
+
+
+def account_list_monitored() -> list[dict]:
+    """列出开启了监控告警或自动重启的账号（含解密凭证）。"""
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM accounts WHERE monitor_alert=1 OR monitor_restart=1"
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["creds"] = json.loads(decrypt_secret(d.pop("creds_enc")))
+            out.append(d)
+        return out
+
+
+def account_set_monitor(account_id: int, alert: bool, restart: bool) -> None:
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE accounts SET monitor_alert=?, monitor_restart=?, updated_at=? WHERE id=?",
+            (1 if alert else 0, 1 if restart else 0, time.time(), account_id),
+        )
 
 
 # ---------- sessions ----------

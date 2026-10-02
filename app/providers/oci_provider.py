@@ -150,6 +150,88 @@ class OciProvider(Provider):
             "services": services,
             "note": "数据来自 OCI Usage API，可能有数小时延迟；免费套餐费用通常为 0",
         }
+
+    def get_quotas(self, creds: dict) -> dict:
+        """配额查询：计算实例各规格按可用域的可用余量 + 块存储额度。"""
+        cfg = _sdk_config(creds)
+        tenancy = cfg["tenancy"]
+        identity = oci.identity.IdentityClient(cfg)
+        limits = oci.limits.LimitsClient(cfg)
+        ads = [ad.name for ad in
+               identity.list_availability_domains(compartment_id=tenancy).data]
+        groups = []
+
+        def _availability(service: str, name: str) -> dict:
+            out = {}
+            for ad in ads:
+                try:
+                    ra = limits.get_resource_availability(
+                        service, name, tenancy, availability_domain=ad).data
+                    out[ad.split(":")[-1]] = f"可用{ra.available}"
+                except Exception as e:  # noqa: BLE001
+                    log.debug("quota %s/%s/%s failed: %s", service, name, ad, e)
+            return out
+
+        # 计算：挑实例数量类配额
+        try:
+            defs = oci.pagination.list_call_get_all_results(
+                limits.list_limit_definitions,
+                compartment_id=tenancy, service_name="compute").data
+        except Exception as e:  # noqa: BLE001
+            raise ValueError(f"查询配额定义失败（需要 limits 读取权限）: {e}") from e
+        interesting = [d for d in defs
+                       if "count" in d.name.lower()
+                       and any(k in d.name.lower() for k in
+                               ("micro", "small", "a1", "e2", "e3", "e4", "standard"))]
+        interesting.sort(key=lambda d: (0 if "micro" in d.name.lower() else
+                                        1 if "a1" in d.name.lower() else 2, d.name))
+        items = []
+        for d in interesting[:10]:
+            avail = _availability("compute", d.name)
+            detail = " · ".join(f"{ad}:{v}" for ad, v in avail.items()) or "查询失败"
+            items.append({"name": d.name, "detail": detail})
+        if items:
+            groups.append({"title": "计算实例余量（按可用域）", "items": items})
+
+        # 块存储
+        try:
+            bdefs = oci.pagination.list_call_get_all_results(
+                limits.list_limit_definitions,
+                compartment_id=tenancy, service_name="block-storage").data
+        except Exception:  # noqa: BLE001
+            bdefs = []
+        bitems = []
+        for d in bdefs:
+            if any(k in d.name.lower() for k in ("volume", "storage")):
+                try:
+                    vals = limits.list_limit_values(
+                        compartment_id=tenancy, service_name="block-storage").data
+                except Exception:  # noqa: BLE001
+                    vals = []
+                v = next((x.value for x in vals if x.name == d.name), None)
+                bitems.append({"name": d.name,
+                               "detail": f"配额 {v}" if v is not None else d.description or ""})
+                if len(bitems) >= 6:
+                    break
+        if bitems:
+            groups.append({"title": "块存储配额", "items": bitems})
+        return {
+            "groups": groups,
+            "note": "余量为当前可用域实时可用数；部分规格需在对应可用域查询",
+        }
+
+    def get_subscription(self, creds: dict) -> dict:
+        """订阅信息：租户基本信息（OCI 无公开的付费订阅 API）。"""
+        cfg = _sdk_config(creds)
+        tenancy = oci.identity.IdentityClient(cfg).get_tenancy(cfg["tenancy"]).data
+        return {
+            "items": [
+                {"name": "租户名", "detail": tenancy.name or "-"},
+                {"name": "归属区域", "detail": tenancy.home_region_key or "-"},
+                {"name": "租户 OCID", "detail": cfg["tenancy"]},
+            ],
+            "note": "付费订阅详情/免费试用剩余请在 OCI 控制台账单页查看，API 未开放",
+        }
     fields = [
         AccountField("tenancy_ocid", "Tenancy OCID", placeholder="ocid1.tenancy.oc1..…"),
         AccountField("user_ocid", "User OCID", placeholder="ocid1.user.oc1..…"),
@@ -171,7 +253,12 @@ class OciProvider(Provider):
         {"key": "change_ip", "label": "更换公网 IP"},
         {"key": "assign_ipv6", "label": "分配 IPv6"},
         {"key": "update_shape", "label": "更改配置"},
+        {"key": "rename", "label": "改名"},
+        {"key": "extend_disk", "label": "磁盘扩容"},
+        {"key": "open_port", "label": "开放端口"},
     ]
+    supports_quotas = True
+    supports_subscription = True
 
     # ---------- 基础 ----------
     def test(self, creds: dict) -> None:
@@ -214,11 +301,13 @@ class OciProvider(Provider):
                 log.warning("enrich instance %s failed: %s", inst.id, e)
             try:
                 bvas = compute.list_boot_volume_attachments(
-                    compartment_id=tenancy, instance_id=inst.id
+                    compartment_id=tenancy, availability_domain=info.zone,
+                    instance_id=inst.id,
                 ).data
                 if bvas:
                     bv = compute.get_boot_volume(bvas[0].boot_volume_id).data
                     info.extra["boot_volume_gb"] = str(bv.size_in_gbs)
+                    info.extra["boot_volume_id"] = bvas[0].boot_volume_id
             except Exception as e:  # noqa: BLE001
                 log.warning("boot volume info %s failed: %s", inst.id, e)
             result.append(info)
@@ -252,6 +341,16 @@ class OciProvider(Provider):
             return self._assign_ipv6(vnet, inst)
         if action == "update_shape":
             raise ValueError("更改配置需要提供 shape/ocpus/memory 参数，请用专用接口")
+        if action == "rename":
+            new_name = (getattr(ctx, "params", {}) or {}).get("new_name", "").strip()
+            if not new_name:
+                raise ValueError("请提供新名称")
+            compute.update_instance(iid, UpdateInstanceDetails(display_name=new_name))
+            return f"实例已改名为 {new_name}"
+        if action == "extend_disk":
+            return self._extend_disk(compute, creds, inst, ctx)
+        if action == "open_port":
+            return self._open_port(vnet, inst, ctx)
         raise ValueError(f"未知操作: {action}")
 
     def _change_ip(self, compute, vnet, creds, inst: InstanceInfo) -> str:
@@ -318,6 +417,54 @@ class OciProvider(Provider):
             vnet.update_security_list(seclist.id, UpdateSecurityListDetails(egress_security_rules=egress))
         new_v6 = vnet.create_ipv6(CreateIpv6Details(vnic_id=vnic_id)).data
         return f"IPv6 分配成功: {new_v6.ip_address}"
+
+    def _extend_disk(self, compute, creds: dict, inst: InstanceInfo, ctx) -> str:
+        size = int((getattr(ctx, "params", {}) or {}).get("size_gb") or 0)
+        if size <= 0:
+            raise ValueError("请提供目标磁盘大小（GB）")
+        tenancy = creds["tenancy_ocid"].strip()
+        bvol_id = inst.extra.get("boot_volume_id")
+        if not bvol_id:
+            bvas = compute.list_boot_volume_attachments(
+                compartment_id=tenancy, availability_domain=inst.zone,
+                instance_id=inst.id).data
+            if not bvas:
+                raise ValueError("未找到该实例的启动卷")
+            bvol_id = bvas[0].boot_volume_id
+        bv = compute.get_boot_volume(bvol_id).data
+        cur = int(bv.size_in_gbs)
+        if size <= cur:
+            raise ValueError(f"目标大小 {size}GB 必须大于当前 {cur}GB（只支持扩容）")
+        ctx.log(f"启动卷 {cur}GB → {size}GB…")
+        compute.update_boot_volume(
+            bvol_id, oci.core.models.UpdateBootVolumeDetails(size_in_gbs=size))
+        return f"磁盘扩容已提交: {cur}GB → {size}GB（系统内需手动扩展分区）"
+
+    def _open_port(self, vnet, inst: InstanceInfo, ctx) -> str:
+        port = int((getattr(ctx, "params", {}) or {}).get("port") or 0)
+        if not (1 <= port <= 65535):
+            raise ValueError("请提供有效端口 1-65535")
+        vnic_id = inst.extra.get("vnic_id")
+        subnet_id = inst.extra.get("subnet_id")
+        if not vnic_id or not subnet_id:
+            raise ValueError("缺少网卡/子网信息，请刷新实例列表后重试")
+        vnic = vnet.get_vnic(vnic_id).data
+        seclist = vnet.get_security_list(vnic.nsg_ids[0]).data if vnic.nsg_ids else \
+            vnet.get_security_list(vnet.get_subnet(subnet_id).data.security_list_ids[0]).data
+        for r in seclist.ingress_security_rules or []:
+            if (r.protocol == "6" and r.source == "0.0.0.0/0" and r.tcp_options
+                    and r.tcp_options.destination_port_range
+                    and r.tcp_options.destination_port_range.min == port
+                    and r.tcp_options.destination_port_range.max == port):
+                return f"端口 {port} 已在安全列表中放行，无需重复操作"
+        from oci.core.models import IngressSecurityRule, TcpOptions, PortRange
+        rules = list(seclist.ingress_security_rules or [])
+        rules.append(IngressSecurityRule(
+            protocol="6", source="0.0.0.0/0",
+            tcp_options=TcpOptions(destination_port_range=PortRange(min=port, max=port)),
+            description=f"tricloud open {port}"))
+        vnet.update_security_list(seclist.id, UpdateSecurityListDetails(ingress_security_rules=rules))
+        return f"已在安全列表放行 TCP 端口 {port}（来源 0.0.0.0/0）"
 
     def update_shape(self, creds: dict, instance_id: str, shape: str,
                      ocpus: float | None, memory_gbs: float | None, ctx) -> str:

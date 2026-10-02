@@ -50,6 +50,8 @@ const defs = [{key: 'instances', label: '实例'}];
 if (curProvider.supports_lightsail) defs.push({key: 'lightsail', label: 'Lightsail'});
 if (curProvider.supports_cloudfront) defs.push({key: 'cloudfront', label: 'CloudFront'});
 if (curProvider.supports_billing) defs.push({key: 'billing', label: '账单'});
+if (curProvider.supports_quotas) defs.push({key: 'quotas', label: '配额'});
+if (curProvider.supports_subscription) defs.push({key: 'subscription', label: '订阅'});
 if (!defs.find(d => d.key === curTab)) curTab = 'instances';
 document.getElementById('tabs').innerHTML = defs.map(d =>
 `<div class="tab${d.key === curTab? ' active': ''}" onclick="switchTab('${d.key}')">${d.label}</div>`).join('');
@@ -70,6 +72,8 @@ if (!curAccount) { renderEmpty(); return;}
 if (curTab === 'billing') loadBilling();
 else if (curTab === 'lightsail') loadLightsail();
 else if (curTab === 'cloudfront') loadCloudFront();
+else if (curTab === 'quotas') loadQuotas();
+else if (curTab === 'subscription') loadSubscription();
 else loadInstances();
 }
 
@@ -126,6 +130,20 @@ async function doAction(idx, action) {
 const inst = instances[idx];
 const meta = curProvider.actions.find(a => a.key === action);
 if (action === 'update_shape') { openShapeModal(inst); return;}
+if (action === 'rename') {
+openParamModal('改名', inst, 'rename',
+[{key: 'new_name', label: '新名称', required: true, placeholder: '输入新的实例名称'}], '');
+return;}
+if (action === 'extend_disk') {
+openParamModal('磁盘扩容', inst, 'extend_disk',
+[{key: 'size_gb', label: '目标大小（GB）', type: 'number', required: true, placeholder: '如 100'}],
+'只能调大不能调小，扩容后需在系统内手动扩展分区。');
+return;}
+if (action === 'open_port') {
+openParamModal('开放端口', inst, 'open_port',
+[{key: 'port', label: '端口', type: 'number', required: true, placeholder: '如 8080'}],
+'将在安全组/安全列表放行该 TCP 端口（来源 0.0.0.0/0）。');
+return;}
 const needConfirm = meta.danger || action === 'change_ip' || action === 'terminate';
 const tips = {terminate: '确定要终止/删除该实例吗？此操作不可恢复！',
 change_ip: '更换公网 IP 后原 IP 会释放，确定继续吗？'};
@@ -157,8 +175,39 @@ c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button cla
 }
 }
 
-/* ---------- Lightsail ---------- */
-const LS_REGIONS = ['us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'eu-west-2',
+/* ---------- 配额 / 订阅 ---------- */
+async function loadQuotas() {
+const c = document.getElementById('content');
+c.innerHTML = '<div class="empty">加载中…</div>';
+try {
+const q = await api('GET', `/api/accounts/${curAccount.id}/quotas`);
+c.innerHTML = (q.groups || []).map(g =>
+`<h3 style="margin:18px 0 10px;font-size:14px;color:#aab2cc">${esc(g.title)}</h3>
+<table><thead><tr><th>项目</th><th>详情</th></tr></thead><tbody>` +
+(g.items || []).map(it => `<tr><td class="mono">${esc(it.name)}</td><td>${esc(it.detail)}</td></tr>`).join('') +
+'</tbody></table>').join('') +
+(q.note? `<div class="help" style="color:#6f7794;margin-top:12px;font-size:12px">${esc(q.note)}</div>`: '') ||
+'<div class="empty">暂无配额数据</div>';
+} catch (e) {
+c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadQuotas()">重试</button></div>`;
+}
+}
+
+async function loadSubscription() {
+const c = document.getElementById('content');
+c.innerHTML = '<div class="empty">加载中…</div>';
+try {
+const s = await api('GET', `/api/accounts/${curAccount.id}/subscription`);
+c.innerHTML = `<table><thead><tr><th>项目</th><th>详情</th></tr></thead><tbody>` +
+(s.items || []).map(it => `<tr><td>${esc(it.name)}</td><td class="mono">${esc(it.detail)}</td></tr>`).join('') +
+'</tbody></table>' +
+(s.note? `<div class="help" style="color:#6f7794;margin-top:12px;font-size:12px">${esc(s.note)}</div>`: '');
+} catch (e) {
+c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadSubscription()">重试</button></div>`;
+}
+}
+
+/* ---------- Lightsail ---------- */const LS_REGIONS = ['us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'eu-west-2',
 'eu-west-3', 'eu-central-1', 'ap-southeast-1', 'ap-southeast-2',
 'ap-northeast-1', 'ap-northeast-2', 'ap-south-1', 'ca-central-1'];
 let lsRegion = '';
@@ -285,9 +334,12 @@ function openAccountModal() {
 const p = curProvider;
 const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>账号管理 · ${esc(p.name)}</h2>
+<div style="margin-bottom:10px"><button class="btn sm" onclick="testAllAccounts()">🔍 一键测活（测试本云全部账号）</button></div>
+<div id="testAllResult"></div>
 ${accounts.map(a => `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid #232b45">
 <span style="flex:1">${esc(a.name)}</span>
 <button class="btn sm" onclick="testAccount(${a.id})">测试连接</button>
+<button class="btn sm" onclick="openMonitorModal(${a.id})">🔔 监控</button>
 <button class="btn sm" onclick="editAccount(${a.id})">编辑</button>
 <button class="btn sm danger" onclick="delAccount(${a.id})">删除</button></div>`).join('')
 || '<div style="color:#8b93ad;padding:8px 0">暂无账号</div>'}
@@ -346,6 +398,45 @@ catch (e) { toast(e.message, true);}
 async function testAccount(id) {
 try { await api('POST', `/api/accounts/${id}/test`); toast('连接正常');}
 catch (e) { toast(e.message, true);}
+}
+
+async function testAllAccounts() {
+const box = document.getElementById('testAllResult');
+box.innerHTML = '<div style="color:#8b93ad;padding:6px 0">测活中…</div>';
+try {
+const list = await api('POST', `/api/accounts/test-all?provider=${curProvider.id}`);
+box.innerHTML = list.map(r =>
+`<div style="padding:6px 0;border-bottom:1px solid #232b45;font-size:13px">
+${r.ok? '✅': '❌'} ${esc(r.name)} <span style="color:#6f7794">${esc(r.message)}</span></div>`).join('')
+|| '<div style="color:#8b93ad">暂无账号</div>';
+} catch (e) { box.innerHTML = `<div style="color:#ff7a7a">测活失败: ${esc(e.message)}</div>`;}
+}
+
+async function openMonitorModal(id) {
+const acc = accounts.find(a => a.id === id);
+let m = {monitor_alert: false, monitor_restart: false};
+try { m = await api('GET', `/api/accounts/${id}/monitor`);} catch (e) { toast(e.message, true); return;}
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>监控设置 · ${esc(acc.name)}</h2>
+<form id="monitorForm">
+<div class="check-row"><input type="checkbox" name="monitor_alert"${m.monitor_alert? ' checked': ''}>
+<span>状态告警：实例异常停止/恢复时 Telegram 推送通知</span></div>
+<div class="check-row"><input type="checkbox" name="monitor_restart"${m.monitor_restart? ' checked': ''}>
+<span>异常自启：实例异常停止后自动提交启动任务</span></div>
+<div class="help" style="color:#8b93ad;margin-bottom:14px">后台每 N 分钟巡检一次（N 在"设置"里配置，默认 5 分钟）。需要先在设置里配置 Telegram 才能收到通知。</div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="openAccountModal()">返回</button>
+<button type="submit" class="btn primary">保存</button>
+</div></form>`;
+document.getElementById('monitorForm').onsubmit = async e => {
+e.preventDefault();
+const fd = new FormData(e.target);
+try {
+await api('PUT', `/api/accounts/${id}/monitor`,
+{monitor_alert: !!fd.get('monitor_alert'), monitor_restart: !!fd.get('monitor_restart')});
+toast('监控设置已保存'); openAccountModal();
+} catch (err) { toast(err.message, true);}
+};
 }
 
 function closeModal() { document.getElementById('modalMask').classList.remove('show');}
@@ -479,8 +570,32 @@ closeModal(); toast('抢机任务已启动'); toggleDrawer(true); trackJob(r.job
 };
 }
 
-function openShapeModal(inst) {
+/* 通用参数弹窗：改名 / 磁盘扩容 / 开放端口 */
+function openParamModal(title, inst, action, fields, tip) {
 const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>${esc(title)} · ${esc(inst.name)}</h2>
+<form id="paramForm">
+${fields.map(formField).join('')}
+${tip? `<div class="help" style="color:#fbbf24;margin-bottom:6px">${esc(tip)}</div>`: ''}
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="submit" class="btn primary">提交</button>
+</div></form>`;
+document.getElementById('modalMask').classList.add('show');
+document.getElementById('paramForm').onsubmit = async e => {
+e.preventDefault();
+const fd = new FormData(e.target), params = {};
+fields.forEach(f => params[f.key] = (fd.get(f.key) || '').trim());
+if (action === 'extend_disk' && !confirm(`确定把磁盘扩容到 ${params.size_gb}GB 吗？（不可逆，且可能产生费用）`)) return;
+try {
+const r = await api('POST', `/api/accounts/${curAccount.id}/action`,
+{instance: inst, action, params});
+closeModal(); toast('任务已提交'); toggleDrawer(true); trackJob(r.job_id);
+} catch (err) { toast(err.message, true);}
+};
+}
+
+function openShapeModal(inst) {const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>更改实例配置 · ${esc(inst.name)}</h2>
 <form id="shapeForm">
 ${formField({key: 'shape', label: '目标规格', required: true, placeholder: '如 VM.Standard.A1.Flex'})}
@@ -591,6 +706,15 @@ ${s.tg_bot_token_set ? '当前状态：' + (s.tg_bot_running ? 'Bot 运行中 �
 <input name="tg_bot_token" type="password" placeholder="${s.tg_bot_token_set ? '已保存，留空不修改' : '如 123456:ABC-DEF…'}"></div>
 <div class="field"><label>Chat ID</label>
 <input name="tg_chat_id" value="${esc(s.tg_chat_id || '')}" placeholder="如 123456789"></div>
+<h2 style="margin-top:20px">监控与每日报告</h2>
+<div class="check-row"><input type="checkbox" name="daily_report"${s.daily_report? ' checked': ''}>
+<span>每日账单报告（Telegram 推送全部账号当日费用汇总）</span></div>
+<div class="field-row">
+<div class="field"><label>报告时间（小时，0-23）</label>
+<input name="daily_report_hour" type="number" min="0" max="23" value="${s.daily_report_hour}"></div>
+<div class="field"><label>监控巡检间隔（分钟）</label>
+<input name="monitor_interval_min" type="number" min="1" max="120" value="${s.monitor_interval_min}"></div>
+</div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="tgTest()">发送测试消息</button>
 <span style="flex:1"></span>
@@ -602,8 +726,14 @@ document.getElementById('tgForm').onsubmit = async e => {
 e.preventDefault();
 const fd = new FormData(e.target);
 try {
-await api('PUT', '/api/settings', {tg_bot_token: fd.get('tg_bot_token').trim(), tg_chat_id: fd.get('tg_chat_id').trim()});
-closeModal(); toast('设置已保存，Bot 已' + (fd.get('tg_bot_token').trim() ? '启动' : '更新'));
+await api('PUT', '/api/settings', {
+tg_bot_token: fd.get('tg_bot_token').trim(),
+tg_chat_id: fd.get('tg_chat_id').trim(),
+daily_report: !!fd.get('daily_report'),
+daily_report_hour: parseInt(fd.get('daily_report_hour') || '9', 10),
+monitor_interval_min: parseInt(fd.get('monitor_interval_min') || '5', 10),
+});
+closeModal(); toast('设置已保存');
 } catch (err) { toast(err.message, true); }
 };
 }).catch(e => toast(e.message, true));

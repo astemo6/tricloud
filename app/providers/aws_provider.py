@@ -58,7 +58,11 @@ class AwsProvider(Provider):
         {"key": "reboot", "label": "重启"},
         {"key": "terminate", "label": "终止", "danger": True},
         {"key": "change_ip", "label": "更换公网 IP"},
+        {"key": "rename", "label": "改名"},
+        {"key": "extend_disk", "label": "磁盘扩容"},
+        {"key": "open_port", "label": "开放端口"},
     ]
+    supports_quotas = True
 
     def test(self, creds: dict) -> None:
         _client(creds).describe_instances(MaxResults=5)
@@ -112,6 +116,16 @@ class AwsProvider(Provider):
             return "实例终止请求已提交"
         if action == "change_ip":
             return self._change_ip(ec2, iid, ctx)
+        if action == "rename":
+            new_name = (getattr(ctx, "params", {}) or {}).get("new_name", "").strip()
+            if not new_name:
+                raise ValueError("请提供新名称")
+            ec2.create_tags(Resources=[iid], Tags=[{"Key": "Name", "Value": new_name}])
+            return f"实例已改名为 {new_name}"
+        if action == "extend_disk":
+            return self._extend_disk(ec2, iid, ctx)
+        if action == "open_port":
+            return self._open_port(ec2, iid, ctx)
         raise ValueError(f"未知操作: {action}")
 
     def _change_ip(self, ec2, iid: str, ctx) -> str:
@@ -301,6 +315,78 @@ class AwsProvider(Provider):
         cfg["Enabled"] = enabled
         cf.update_distribution(DistributionConfig=cfg, Id=dist_id, IfMatch=etag)
         return f"分发 {dist_id} 已{'启用' if enabled else '停用'}（配置部署中，约需几分钟生效）"
+
+    def _extend_disk(self, ec2, iid: str, ctx) -> str:
+        size = int((getattr(ctx, "params", {}) or {}).get("size_gb") or 0)
+        if size <= 0:
+            raise ValueError("请提供目标磁盘大小（GB）")
+        desc = ec2.describe_instances(InstanceIds=[iid])["Reservations"][0]["Instances"][0]
+        bdm = (desc.get("BlockDeviceMappings") or [None])[0] or {}
+        vol_id = (bdm.get("Ebs") or {}).get("VolumeId")
+        if not vol_id:
+            raise ValueError("未找到系统盘")
+        vol = ec2.describe_volumes(VolumeIds=[vol_id])["Volumes"][0]
+        cur = vol["Size"]
+        if size <= cur:
+            raise ValueError(f"目标大小 {size}GB 必须大于当前 {cur}GB（只支持扩容）")
+        ctx.log(f"卷 {vol_id} {cur}GB → {size}GB…")
+        ec2.modify_volume(VolumeId=vol_id, Size=size)
+        return f"磁盘扩容已提交: {cur}GB → {size}GB（系统内需手动扩展分区）"
+
+    def _open_port(self, ec2, iid: str, ctx) -> str:
+        port = int((getattr(ctx, "params", {}) or {}).get("port") or 0)
+        if not (1 <= port <= 65535):
+            raise ValueError("请提供有效端口 1-65535")
+        desc = ec2.describe_instances(InstanceIds=[iid])["Reservations"][0]["Instances"][0]
+        sg_ids = [g["GroupId"] for g in desc.get("SecurityGroups", [])]
+        if not sg_ids:
+            raise ValueError("实例未关联安全组")
+        done = []
+        for sg in sg_ids:
+            try:
+                ec2.authorize_security_group_ingress(
+                    GroupId=sg, IpPermissions=[{
+                        "IpProtocol": "tcp", "FromPort": port, "ToPort": port,
+                        "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "tricloud open"}]}])
+                done.append(sg)
+            except ClientError as e:
+                if "InvalidPermission.Duplicate" in str(e):
+                    continue
+                raise
+        if not done:
+            return f"端口 {port} 在安全组中已放行，无需重复操作"
+        return f"已在安全组放行 TCP 端口 {port}（来源 0.0.0.0/0）: {', '.join(done)}"
+
+    def get_quotas(self, creds: dict) -> dict:
+        """配额查询：Service Quotas API 看 EC2 主要配额。"""
+        sq = boto3.client(
+            "service-quotas",
+            aws_access_key_id=creds["access_key"].strip(),
+            aws_secret_access_key=creds["secret_key"].strip(),
+            region_name=creds["region"].strip(),
+        )
+        try:
+            quotas = sq.list_service_quotas(ServiceCode="ec2")["Quotas"]
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if "AccessDenied" in code:
+                raise ValueError(
+                    "无 Service Quotas 权限：请给 IAM 用户添加 servicequotas:ListServiceQuotas") from e
+            raise
+        items = []
+        for q in quotas:
+            name = q.get("QuotaName", "")
+            if "On-Demand" in name and "instances" in name.lower():
+                items.append({
+                    "name": name,
+                    "detail": f"配额 {q.get('Value')} {q.get('Unit', '')}"
+                              f"{'（可申请提高）' if q.get('Adjustable') else ''}",
+                })
+        items.sort(key=lambda x: x["name"])
+        return {
+            "groups": [{"title": "EC2 按需实例配额", "items": items[:12]}] if items else [],
+            "note": "数据来自 Service Quotas；vCPU 配额等可在 AWS 控制台 Service Quotas 页查看",
+        }
 
     def create_options(self, creds: dict) -> dict:
         ec2 = _client(creds)

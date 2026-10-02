@@ -90,7 +90,11 @@ class AzureProvider(Provider):
         {"key": "reboot", "label": "重启"},
         {"key": "terminate", "label": "删除", "danger": True},
         {"key": "change_ip", "label": "更换公网 IP"},
+        {"key": "open_port", "label": "开放端口"},
+        {"key": "extend_disk", "label": "磁盘扩容"},
+        {"key": "reimage", "label": "重置系统", "danger": True},
     ]
+    supports_quotas = True
     supports_billing = True
 
     def get_billing(self, creds: dict) -> dict:
@@ -218,7 +222,114 @@ class AzureProvider(Provider):
             return "虚拟机删除请求已提交"
         if action == "change_ip":
             return self._change_ip(network, rg, name, ctx)
+        if action == "open_port":
+            return self._open_port(compute, network, rg, name, ctx)
+        if action == "extend_disk":
+            return self._extend_disk(compute, rg, name, ctx)
+        if action == "reimage":
+            ctx.log("正在重置系统（重装镜像），虚拟机数据盘保留、系统盘还原…")
+            compute.virtual_machines.begin_reimage(rg, name).result()
+            return "重置系统请求已提交，完成后需重新配置系统"
         raise ValueError(f"未知操作: {action}")
+
+    def _find_nic(self, network, rg: str, vm_name: str):
+        for nic in network.network_interfaces.list(rg):
+            if nic.virtual_machine and vm_name in (nic.virtual_machine.id or ""):
+                parsed = _parse_id(nic.id)
+                return network.network_interfaces.get(
+                    rg, parsed.get("networkinterfaces", ""))
+        raise ValueError("未找到该虚拟机的网卡")
+
+    def _open_port(self, compute, network, rg: str, vm_name: str, ctx) -> str:
+        port = int((getattr(ctx, "params", {}) or {}).get("port") or 0)
+        if not (1 <= port <= 65535):
+            raise ValueError("请提供有效端口 1-65535")
+        nic = self._find_nic(network, rg, vm_name)
+        nsg_ref = nic.network_security_group
+        nsg_rg, nsg_name = rg, ""
+        if nsg_ref:
+            p = _parse_id(nsg_ref.id)
+            nsg_rg, nsg_name = p.get("resourcegroups", rg), p.get("networksecuritygroups", "")
+        else:
+            # 回退到子网上的 NSG
+            subnet_ref = (nic.ip_configurations or [None])[0].subnet if nic.ip_configurations else None
+            if subnet_ref:
+                sp = _parse_id(subnet_ref.id)
+                subnet = network.subnets.get(sp.get("resourcegroups", rg),
+                                             sp.get("virtualnetworks", ""),
+                                             sp.get("subnets", ""))
+                if subnet.network_security_group:
+                    p = _parse_id(subnet.network_security_group.id)
+                    nsg_rg, nsg_name = p.get("resourcegroups", rg), p.get("networksecuritygroups", "")
+        if not nsg_name:
+            raise ValueError("网卡/子网均未关联网络安全组，无法放行端口")
+        rules = list(network.security_rules.list(nsg_rg, nsg_name))
+        for r in rules:
+            if (r.destination_port_range == str(port) and r.access == "Allow"
+                    and r.direction == "Inbound" and r.protocol in ("Tcp", "*")):
+                return f"端口 {port} 已在 NSG 放行，无需重复操作"
+        prio = 100
+        used = {r.priority for r in rules if r.priority}
+        while prio in used and prio < 4096:
+            prio += 10
+        from azure.mgmt.network.models import SecurityRule
+        poller = network.security_rules.begin_create_or_update(
+            nsg_rg, nsg_name, f"tricloud-open-{port}",
+            SecurityRule(protocol="Tcp", source_port_range="*",
+                         destination_port_range=str(port),
+                         source_address_prefix="*", destination_address_prefix="*",
+                         access="Allow", priority=prio, direction="Inbound"))
+        poller.result()
+        return f"已在 NSG {nsg_name} 放行 TCP 端口 {port}（来源 *）"
+
+    def _extend_disk(self, compute, rg: str, vm_name: str, ctx) -> str:
+        size = int((getattr(ctx, "params", {}) or {}).get("size_gb") or 0)
+        if size <= 0:
+            raise ValueError("请提供目标磁盘大小（GB）")
+        vm = compute.virtual_machines.get(rg, vm_name)
+        disk_ref = (vm.storage_profile.os_disk.managed_disk
+                    if vm.storage_profile and vm.storage_profile.os_disk else None)
+        if not disk_ref or not disk_ref.id:
+            raise ValueError("未找到系统托管磁盘")
+        p = _parse_id(disk_ref.id)
+        d_rg, d_name = p.get("resourcegroups", rg), p.get("disks", "")
+        disk = compute.disks.get(d_rg, d_name)
+        cur = disk.disk_size_gb or 0
+        if size <= cur:
+            raise ValueError(f"目标大小 {size}GB 必须大于当前 {cur}GB（只支持扩容）")
+        ctx.log(f"磁盘 {d_name} {cur}GB → {size}GB…")
+        from azure.mgmt.compute.models import DiskUpdate
+        compute.disks.begin_create_or_update(d_rg, d_name, DiskUpdate(disk_size_gb=size)).result()
+        return f"磁盘扩容已提交: {cur}GB → {size}GB（系统内需手动扩展分区）"
+
+    def get_quotas(self, creds: dict) -> dict:
+        """配额查询：各区域计算资源用量/上限。"""
+        compute, _, _ = _clients(creds)
+        try:
+            vms = list(compute.virtual_machines.list_all())
+        except HttpResponseError as e:
+            raise ValueError(f"查询实例失败: {e}") from e
+        locations = sorted({vm.location for vm in vms if vm.location}) or ["japaneast"]
+        groups = []
+        for loc in locations[:4]:
+            try:
+                usages = list(compute.usage.list(loc))
+            except HttpResponseError as e:
+                log.warning("quota %s failed: %s", loc, e)
+                continue
+            items = []
+            for u in usages:
+                name = (u.name.localized_value or u.name.value or "")
+                if u.limit and u.limit > 0 and ("virtual machines" in name.lower()
+                                                or "cores" in name.lower()):
+                    items.append({"name": name,
+                                  "detail": f"已用 {u.current_value}/{u.limit}"})
+            if items:
+                groups.append({"title": f"计算配额 · {loc}", "items": items[:10]})
+        return {
+            "groups": groups,
+            "note": "为各区域 vCPU/虚拟机数量配额；详情见 Azure 门户订阅-用量+配额页",
+        }
 
     def _change_ip(self, network, rg: str, vm_name: str, ctx) -> str:
         # 通过 VM 找到主网卡

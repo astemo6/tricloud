@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, config, db, jobs, tasks, tg
+from . import auth, config, db, jobs, monitor, tasks, tg
 from .providers import get_provider, list_providers
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -25,6 +25,10 @@ async def lifespan(app: FastAPI):
         tg.refresh_bot()
     except Exception as e:
         log.warning("tg bot start failed: %s", e)
+    try:
+        monitor.start()
+    except Exception as e:
+        log.warning("monitor start failed: %s", e)
     yield
 
 
@@ -99,6 +103,8 @@ def providers(request: Request):
             "id": p.id, "name": p.name,
             "supports_snatch": p.supports_snatch,
             "supports_billing": p.supports_billing,
+            "supports_quotas": p.supports_quotas,
+            "supports_subscription": p.supports_subscription,
             "supports_lightsail": getattr(p, "supports_lightsail", False),
             "supports_cloudfront": getattr(p, "supports_cloudfront", False),
             "fields": [f.__dict__ for f in p.fields],
@@ -265,6 +271,73 @@ def get_billing(request: Request, account_id: int):
         raise HTTPException(status_code=502, detail=f"获取账单失败: {e}") from e
 
 
+# ---------- 配额 / 订阅 ----------
+@app.get("/api/accounts/{account_id}/quotas")
+def get_quotas(request: Request, account_id: int):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = get_provider(acc["provider"])
+    if not provider.supports_quotas:
+        raise HTTPException(status_code=400, detail="该云厂商不支持配额查询")
+    try:
+        return provider.get_quotas(acc["creds"])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"获取配额失败: {e}") from e
+
+
+@app.get("/api/accounts/{account_id}/subscription")
+def get_subscription(request: Request, account_id: int):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = get_provider(acc["provider"])
+    if not provider.supports_subscription:
+        raise HTTPException(status_code=400, detail="该云厂商不支持订阅信息查询")
+    try:
+        return provider.get_subscription(acc["creds"])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"获取订阅信息失败: {e}") from e
+
+
+# ---------- 一键测活 ----------
+@app.post("/api/accounts/test-all")
+def test_all_accounts(request: Request, provider: str = ""):
+    _require_login(request)
+    result = []
+    for acc in db.account_list(provider or None):
+        p = get_provider(acc["provider"])
+        try:
+            full = db.account_get(acc["id"])
+            p.test(full["creds"])
+            result.append({"id": acc["id"], "provider": acc["provider"],
+                           "name": acc["name"], "ok": True, "message": "连接正常"})
+        except Exception as e:  # noqa: BLE001
+            result.append({"id": acc["id"], "provider": acc["provider"],
+                           "name": acc["name"], "ok": False, "message": str(e)[:200]})
+    return result
+
+
+# ---------- 监控设置 ----------
+class MonitorBody(BaseModel):
+    monitor_alert: bool = False
+    monitor_restart: bool = False
+
+
+@app.get("/api/accounts/{account_id}/monitor")
+def get_monitor(request: Request, account_id: int):
+    _require_login(request)
+    acc = _get_account(account_id)
+    return {"monitor_alert": bool(acc.get("monitor_alert")),
+            "monitor_restart": bool(acc.get("monitor_restart"))}
+
+
+@app.put("/api/accounts/{account_id}/monitor")
+def set_monitor(request: Request, account_id: int, body: MonitorBody):
+    _require_login(request)
+    _get_account(account_id)
+    db.account_set_monitor(account_id, body.monitor_alert, body.monitor_restart)
+    return {"ok": True}
+
+
 # ---------- AWS Lightsail ----------
 def _require_aws(acc: dict):
     provider = get_provider(acc["provider"])
@@ -354,6 +427,9 @@ def cloudfront_toggle(request: Request, account_id: int, body: CloudFrontToggleB
 class SettingsBody(BaseModel):
     tg_bot_token: str = ""
     tg_chat_id: str = ""
+    daily_report: bool | None = None
+    daily_report_hour: int | None = None
+    monitor_interval_min: int | None = None
 
 
 @app.get("/api/settings")
@@ -364,6 +440,9 @@ def get_settings(request: Request):
         "tg_bot_token_set": bool(token),
         "tg_chat_id": chat_id,
         "tg_bot_running": bool(tg._state["thread"] and tg._state["thread"].is_alive()),
+        "daily_report": db.meta_get("daily_report") == "1",
+        "daily_report_hour": int(db.meta_get("daily_report_hour") or 9),
+        "monitor_interval_min": int(db.meta_get("monitor_interval_min") or 5),
     }
 
 
@@ -376,6 +455,12 @@ def update_settings(request: Request, body: SettingsBody):
         db.meta_set("tg_bot_token", token)
     if chat_id:
         db.meta_set("tg_chat_id", chat_id)
+    if body.daily_report is not None:
+        db.meta_set("daily_report", "1" if body.daily_report else "0")
+    if body.daily_report_hour is not None:
+        db.meta_set("daily_report_hour", str(max(0, min(23, body.daily_report_hour))))
+    if body.monitor_interval_min is not None:
+        db.meta_set("monitor_interval_min", str(max(1, min(120, body.monitor_interval_min))))
     state = tg.refresh_bot()
     return {"ok": True, **state}
 

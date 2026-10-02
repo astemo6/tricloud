@@ -67,6 +67,7 @@ def _allowed(chat_id: int) -> bool:
 _ACTION_LABELS = {
     "start": "启动", "stop": "停止", "reboot": "重启", "restart": "重启",
     "terminate": "终止/删除", "change_ip": "更换公网 IP", "assign_ipv6": "分配 IPv6",
+    "delete_ipv6": "删除 IPv6",
     "rename": "改名", "extend_disk": "磁盘扩容", "open_port": "开放端口",
     "reimage": "重置系统",
 }

@@ -254,6 +254,7 @@ class OciProvider(Provider):
         {"key": "terminate", "label": "终止", "danger": True},
         {"key": "change_ip", "label": "更换公网 IP"},
         {"key": "assign_ipv6", "label": "分配 IPv6"},
+        {"key": "delete_ipv6", "label": "删除 IPv6"},
         {"key": "update_shape", "label": "更改配置"},
         {"key": "rename", "label": "改名"},
         {"key": "extend_disk", "label": "磁盘扩容"},
@@ -341,6 +342,8 @@ class OciProvider(Provider):
             return self._change_ip(compute, vnet, creds, inst)
         if action == "assign_ipv6":
             return self._assign_ipv6(vnet, inst)
+        if action == "delete_ipv6":
+            return self._delete_ipv6(vnet, inst)
         if action == "update_shape":
             raise ValueError("更改配置需要提供 shape/ocpus/memory 参数，请用专用接口")
         if action == "rename":
@@ -419,6 +422,18 @@ class OciProvider(Provider):
             vnet.update_security_list(seclist.id, UpdateSecurityListDetails(egress_security_rules=egress))
         new_v6 = vnet.create_ipv6(CreateIpv6Details(vnic_id=vnic_id)).data
         return f"IPv6 分配成功: {new_v6.ip_address}"
+
+    def _delete_ipv6(self, vnet, inst: InstanceInfo) -> str:
+        vnic_id = inst.extra.get("vnic_id")
+        if not vnic_id:
+            raise ValueError("缺少 vnic_id，请刷新实例列表后重试")
+        ipv6s = vnet.list_ipv6s(vnic_id=vnic_id).data
+        if not ipv6s:
+            raise ValueError("该实例未分配 IPv6，无需删除")
+        for ip in ipv6s:
+            vnet.delete_ipv6(ip.id)
+        addrs = ", ".join(ip.ip_address for ip in ipv6s)
+        return f"已删除 {len(ipv6s)} 个 IPv6 地址: {addrs}"
 
     def _extend_disk(self, compute, creds: dict, inst: InstanceInfo, ctx) -> str:
         size = int((getattr(ctx, "params", {}) or {}).get("size_gb") or 0)

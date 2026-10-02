@@ -122,8 +122,9 @@ class OciProvider(Provider):
         import datetime
         cfg = _sdk_config(creds)
         tenancy = cfg["tenancy"]
-        now = datetime.datetime.now(datetime.timezone.utc)
-        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        now = datetime.datetime.now(datetime.timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0)  # Usage API 要求精确到天
+        start = now.replace(day=1)
         usage = oci.usage_api.UsageapiClient(cfg)
         details = oci.usage_api.models.RequestSummarizedUsagesDetails(
             tenant_id=tenancy,

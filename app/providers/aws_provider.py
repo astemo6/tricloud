@@ -771,8 +771,22 @@ class AwsProvider(Provider):
 
     def create_options(self, creds: dict) -> dict:
         ec2 = _client(creds)
-        regions = [r["RegionName"] for r in ec2.describe_regions()["Regions"]]
-        keys = [k["KeyName"] for k in ec2.describe_key_pairs()["KeyPairs"]]
+        try:
+            regions = [r["RegionName"] for r in ec2.describe_regions()["Regions"]]
+        except ClientError:
+            # 无 DescribeRegions 权限时用内置区域列表降级
+            regions = [
+                "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+                "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-north-1",
+                "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
+                "ap-southeast-1", "ap-southeast-2",
+                "ap-south-1", "sa-east-1", "ca-central-1",
+                "me-south-1", "af-south-1",
+            ]
+        try:
+            keys = [k["KeyName"] for k in ec2.describe_key_pairs()["KeyPairs"]]
+        except ClientError:
+            keys = []
         return {
             "regions": sorted(regions),
             "default_region": creds["region"].strip(),

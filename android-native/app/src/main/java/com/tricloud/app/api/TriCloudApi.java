@@ -108,6 +108,12 @@ public class TriCloudApi {
 
     public String instanceAction(int accountId, Models.Instance inst, String action)
             throws IOException, ApiException {
+        return instanceAction(accountId, inst, action, new HashMap<String, Object>());
+    }
+
+    public String instanceAction(int accountId, Models.Instance inst,
+                                 String action, Map<String, Object> params)
+            throws IOException, ApiException {
         Map<String, Object> instMap = new HashMap<>();
         instMap.put("id", inst.id);
         instMap.put("name", inst.name);
@@ -115,13 +121,19 @@ public class TriCloudApi {
         Map<String, Object> payload = new HashMap<>();
         payload.put("instance", instMap);
         payload.put("action", action);
-        payload.put("params", new HashMap<>());
+        payload.put("params", params);
         String body = post("/api/accounts/" + accountId + "/action",
                 gson.toJson(payload));
         Type t = new TypeToken<Map<String, Object>>() {}.getType();
         Map<String, Object> map = gson.fromJson(body, t);
         Object jid = map.get("job_id");
         return jid instanceof String ? (String) jid : "";
+    }
+
+    public List<Models.InstanceAction> actions(int accountId)
+            throws IOException, ApiException {
+        Type t = new TypeToken<List<Models.InstanceAction>>() {}.getType();
+        return gson.fromJson(get("/api/accounts/" + accountId + "/actions"), t);
     }
 
     public Models.Billing billing(int accountId) throws IOException, ApiException {
@@ -178,5 +190,187 @@ public class TriCloudApi {
 
     public void jobStop(String jobId) throws IOException, ApiException {
         post("/api/jobs/" + jobId + "/stop", "{}");
+    }
+
+    public void jobDelete(String jobId) throws IOException, ApiException {
+        delete("/api/jobs/" + jobId);
+    }
+
+    private String delete(String path) throws IOException, ApiException {
+        Request req = new Request.Builder().url(base + path).delete().build();
+        return exec(req);
+    }
+
+    private String put(String path, String json) throws IOException, ApiException {
+        Request req = new Request.Builder()
+                .url(base + path)
+                .put(RequestBody.create(json, JSON))
+                .build();
+        return exec(req);
+    }
+
+    // ---------- 账号管理 ----------
+
+    public int createAccount(String provider, String name, Map<String, String> creds)
+            throws IOException, ApiException {
+        Map<String, Object> p = new HashMap<>();
+        p.put("provider", provider);
+        p.put("name", name);
+        p.put("creds", creds);
+        String body = post("/api/accounts", gson.toJson(p));
+        Type t = new TypeToken<Map<String, Object>>() {}.getType();
+        Map<String, Object> map = gson.fromJson(body, t);
+        Object id = map.get("id");
+        return id instanceof Number ? ((Number) id).intValue() : 0;
+    }
+
+    public void deleteAccount(int accountId) throws IOException, ApiException {
+        delete("/api/accounts/" + accountId);
+    }
+
+    public void testAccount(int accountId) throws IOException, ApiException {
+        post("/api/accounts/" + accountId + "/test", "{}");
+    }
+
+    public String recycleBin() throws IOException, ApiException {
+        return get("/api/recycle-bin");
+    }
+
+    public void testAll() throws IOException, ApiException {
+        post("/api/accounts/test-all", "{}");
+    }
+
+    public String batchAddAccounts(String provider, List<Map<String, Object>> accounts)
+            throws IOException, ApiException {
+        Map<String, Object> p = new HashMap<>();
+        p.put("provider", provider);
+        p.put("accounts", accounts);
+        return post("/api/accounts/batch", gson.toJson(p));
+    }
+
+    public String subscription(int accountId) throws IOException, ApiException {
+        return get("/api/accounts/" + accountId + "/subscription");
+    }
+
+    // ---------- 设置 ----------
+
+    public void changePassword(String oldPwd, String newPwd)
+            throws IOException, ApiException {
+        Map<String, String> p = new HashMap<>();
+        p.put("old_password", oldPwd);
+        p.put("new_password", newPwd);
+        post("/api/change-password", gson.toJson(p));
+    }
+
+    public String getSettings() throws IOException, ApiException {
+        return get("/api/settings");
+    }
+
+    public void updateSettings(Map<String, String> settings)
+            throws IOException, ApiException {
+        put("/api/settings", gson.toJson(settings));
+    }
+
+    public void tgTest() throws IOException, ApiException {
+        post("/api/settings/tg-test", "{}");
+    }
+
+    // ---------- 创建实例 ----------
+
+    public String createOptions(int accountId) throws IOException, ApiException {
+        return get("/api/accounts/" + accountId + "/create-options");
+    }
+
+    public String createInstance(int accountId, Map<String, Object> params)
+            throws IOException, ApiException {
+        String body = post("/api/accounts/" + accountId + "/create",
+                gson.toJson(params));
+        Type t = new TypeToken<Map<String, Object>>() {}.getType();
+        Map<String, Object> map = gson.fromJson(body, t);
+        Object jid = map.get("job_id");
+        return jid instanceof String ? (String) jid : "";
+    }
+
+    // ---------- Lightsail 增强 ----------
+
+    public void lightsailChangeIp(int accountId, String name, String region)
+            throws IOException, ApiException {
+        Map<String, String> p = new HashMap<>();
+        p.put("name", name);
+        p.put("region", region);
+        post("/api/accounts/" + accountId + "/lightsail/change-ip", gson.toJson(p));
+    }
+
+    // ---------- CloudFront 增强 ----------
+
+    public void cloudfrontDelete(int accountId, String distId)
+            throws IOException, ApiException {
+        delete("/api/accounts/" + accountId + "/cloudfront/" + distId);
+    }
+
+    public void cloudfrontPlan(int accountId, String distId, String plan)
+            throws IOException, ApiException {
+        Map<String, String> p = new HashMap<>();
+        p.put("distribution_id", distId);
+        p.put("plan_tier", plan);
+        post("/api/accounts/" + accountId + "/cloudfront/plan", gson.toJson(p));
+    }
+
+    public void cloudfrontUpdate(int accountId, String distId,
+                                 Map<String, Object> fields)
+            throws IOException, ApiException {
+        put("/api/accounts/" + accountId + "/cloudfront/" + distId,
+                gson.toJson(fields));
+    }
+
+    // ---------- 账单 Credit ----------
+
+    public String creditsManual(int accountId) throws IOException, ApiException {
+        return get("/api/accounts/" + accountId + "/credits-manual");
+    }
+
+    public void creditAdd(int accountId, String name, double amount,
+                          Double startAt, Double expiresAt)
+            throws IOException, ApiException {
+        Map<String, Object> p = new HashMap<>();
+        p.put("name", name);
+        p.put("amount", amount);
+        if (startAt != null) p.put("start_at", startAt);
+        if (expiresAt != null) p.put("expires_at", expiresAt);
+        post("/api/accounts/" + accountId + "/credits-manual", gson.toJson(p));
+    }
+
+    public void creditUpdate(int creditId, int accountId, String name, double amount,
+                             Double startAt, Double expiresAt)
+            throws IOException, ApiException {
+        Map<String, Object> p = new HashMap<>();
+        p.put("name", name);
+        p.put("amount", amount);
+        if (startAt != null) p.put("start_at", startAt);
+        if (expiresAt != null) p.put("expires_at", expiresAt);
+        put("/api/accounts/" + accountId + "/credits-manual/" + creditId,
+                gson.toJson(p));
+    }
+
+    public void creditDelete(int accountId, int creditId)
+            throws IOException, ApiException {
+        delete("/api/accounts/" + accountId + "/credits-manual/" + creditId);
+    }
+
+    // ---------- 流量控制 ----------
+
+    public String trafficRules(Integer accountId) throws IOException, ApiException {
+        String path = "/api/traffic-rules";
+        if (accountId != null) path += "?account_id=" + accountId;
+        return get(path);
+    }
+
+    public void trafficRuleAdd(Map<String, Object> rule)
+            throws IOException, ApiException {
+        post("/api/traffic-rules", gson.toJson(rule));
+    }
+
+    public void trafficRuleDelete(int ruleId) throws IOException, ApiException {
+        delete("/api/traffic-rules/" + ruleId);
     }
 }

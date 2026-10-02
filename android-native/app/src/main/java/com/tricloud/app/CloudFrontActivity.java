@@ -10,6 +10,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -18,7 +20,9 @@ import com.tricloud.app.api.Models;
 import com.tricloud.app.api.TriCloudApi;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -106,6 +110,111 @@ public class CloudFrontActivity extends Activity {
                 .show();
     }
 
+    private void doDelete(Models.Distribution d) {
+        new AlertDialog.Builder(this)
+                .setTitle("删除分发")
+                .setMessage("删除分发 " + d.id + "？\n\n⚠ 必须先停用且状态为 Deployed 才能删除，此操作不可恢复！")
+                .setPositiveButton("确认删除", (x, y) -> bg.execute(() -> {
+                    try {
+                        ApiHolder.api.cloudfrontDelete(accountId, d.id);
+                        ui.post(() -> {
+                            Toast.makeText(this, "删除任务已提交",
+                                    Toast.LENGTH_SHORT).show();
+                            load();
+                        });
+                    } catch (Exception e) {
+                        String msg = e.getMessage() != null ? e.getMessage() : "操作失败";
+                        ui.post(() -> Toast.makeText(this, msg,
+                                Toast.LENGTH_LONG).show());
+                    }
+                }))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void doEdit(Models.Distribution d) {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(48, 24, 48, 0);
+
+        EditText etComment = addField(layout, "备注",
+                d.comment != null ? d.comment : "");
+        EditText etOrigin = addField(layout, "源站域名", "");
+        EditText etRoot = addField(layout, "默认根对象 (如 index.html)", "");
+
+        new AlertDialog.Builder(this)
+                .setTitle("编辑分发 · " + d.id)
+                .setView(layout)
+                .setPositiveButton("保存", (x, y) -> {
+                    Map<String, Object> fields = new HashMap<>();
+                    String comment = etComment.getText().toString().trim();
+                    String origin = etOrigin.getText().toString().trim();
+                    String root = etRoot.getText().toString().trim();
+                    if (!comment.isEmpty()) fields.put("comment", comment);
+                    if (!origin.isEmpty()) fields.put("origin_domain", origin);
+                    if (!root.isEmpty()) fields.put("default_root_object", root);
+                    if (fields.isEmpty()) {
+                        Toast.makeText(this, "没有修改", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    bg.execute(() -> {
+                        try {
+                            ApiHolder.api.cloudfrontUpdate(accountId, d.id, fields);
+                            ui.post(() -> {
+                                Toast.makeText(this, "已提交更新",
+                                        Toast.LENGTH_SHORT).show();
+                                load();
+                            });
+                        } catch (Exception e) {
+                            String msg = e.getMessage() != null
+                                    ? e.getMessage() : "操作失败";
+                            ui.post(() -> Toast.makeText(this, msg,
+                                    Toast.LENGTH_LONG).show());
+                        }
+                    });
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private EditText addField(LinearLayout layout, String label, String def) {
+        TextView tv = new TextView(this);
+        tv.setText(label);
+        tv.setTextColor(0xFFE6E9F0);
+        tv.setPadding(0, 12, 0, 4);
+        layout.addView(tv);
+        EditText et = new EditText(this);
+        et.setHint(label);
+        et.setTextColor(0xFFE6E9F0);
+        et.setHintTextColor(0xFF5A6480);
+        if (def != null && !def.isEmpty()) et.setText(def);
+        layout.addView(et);
+        return et;
+    }
+
+    private void doPlan(Models.Distribution d) {
+        final String[] plans = {"paygo", "FREE", "PRO", "BUSINESS", "PREMIUM"};
+        final String[] labels = {"按量付费", "FREE", "PRO ($15/月)",
+                "BUSINESS ($200/月)", "PREMIUM ($1000/月起)"};
+        new AlertDialog.Builder(this)
+                .setTitle("切换套餐 · " + d.id)
+                .setItems(labels, (x, which) -> bg.execute(() -> {
+                    try {
+                        ApiHolder.api.cloudfrontPlan(accountId, d.id, plans[which]);
+                        ui.post(() -> {
+                            Toast.makeText(this, "套餐切换已提交",
+                                    Toast.LENGTH_SHORT).show();
+                            load();
+                        });
+                    } catch (Exception e) {
+                        String msg = e.getMessage() != null ? e.getMessage() : "操作失败";
+                        ui.post(() -> Toast.makeText(this, msg,
+                                Toast.LENGTH_LONG).show());
+                    }
+                }))
+                .show();
+    }
+
     private class CfAdapter extends BaseAdapter {
         private final List<Models.Distribution> items;
         private final LayoutInflater inflater;
@@ -141,6 +250,9 @@ public class CloudFrontActivity extends Activity {
             Button btnToggle = v.findViewById(R.id.btnToggle);
             btnToggle.setText(d.enabled ? "停用" : "启用");
             btnToggle.setOnClickListener(b -> doToggle(d));
+            v.findViewById(R.id.btnPlan).setOnClickListener(b -> doPlan(d));
+            v.findViewById(R.id.btnDelete).setOnClickListener(b -> doDelete(d));
+            v.findViewById(R.id.btnEdit).setOnClickListener(b -> doEdit(d));
             return v;
         }
     }

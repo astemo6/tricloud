@@ -95,6 +95,29 @@ public class LightsailActivity extends Activity {
         });
     }
 
+    private void doChangeIp(Models.LightsailInstance inst) {
+        new AlertDialog.Builder(this)
+                .setTitle("更换 IP")
+                .setMessage("更换「" + inst.name + "」的公网 IP？")
+                .setPositiveButton("确认", (d, w) -> bg.execute(() -> {
+                    try {
+                        ApiHolder.api.lightsailChangeIp(accountId, inst.name,
+                                inst.region != null ? inst.region : "");
+                        ui.post(() -> {
+                            Toast.makeText(this, "换 IP 任务已提交",
+                                    Toast.LENGTH_SHORT).show();
+                            load();
+                        });
+                    } catch (Exception e) {
+                        String msg = e.getMessage() != null ? e.getMessage() : "操作失败";
+                        ui.post(() -> Toast.makeText(this, msg,
+                                Toast.LENGTH_SHORT).show());
+                    }
+                }))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
     private class LsAdapter extends BaseAdapter {
         private final List<Models.LightsailInstance> items;
         private final LayoutInflater inflater;
@@ -131,6 +154,8 @@ public class LightsailActivity extends Activity {
                     b -> confirmAction(inst, "stop", "关机"));
             v.findViewById(R.id.btnReboot).setOnClickListener(
                     b -> confirmAction(inst, "reboot", "重启"));
+            v.findViewById(R.id.btnChangeIp).setOnClickListener(
+                    b -> doChangeIp(inst));
             return v;
         }
     }

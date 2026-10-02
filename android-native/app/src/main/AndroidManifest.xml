@@ -20,6 +20,14 @@
         </activity>
 
         <activity android:name=".AccountActivity" android:exported="false" />
+        <activity android:name=".AccountManageActivity" android:exported="false" />
+        <activity android:name=".AddAccountActivity" android:exported="false" />
+        <activity android:name=".RecycleActivity" android:exported="false" />
+        <activity android:name=".SettingsActivity" android:exported="false" />
+        <activity android:name=".CreateInstanceActivity" android:exported="false" />
+        <activity android:name=".TrafficActivity" android:exported="false" />
+        <activity android:name=".BatchAddActivity" android:exported="false" />
+        <activity android:name=".SubscriptionActivity" android:exported="false" />
         <activity android:name=".DashboardActivity" android:exported="false" />
         <activity android:name=".InstanceActivity" android:exported="false" />
         <activity android:name=".LightsailActivity" android:exported="false" />

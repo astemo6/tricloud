@@ -50,7 +50,49 @@
             android:id="@+id/llServices"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical" />
+            android:orientation="vertical"
+            android:layout_marginBottom="16dp" />
+
+        <LinearLayout
+            android:id="@+id/llCredit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="手动 Credit"
+                    android:textColor="#e6e9f0"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnCreditAdd"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="+ 添加"
+                    android:textSize="12sp" />
+
+            </LinearLayout>
+
+            <ListView
+                android:id="@+id/lvCredits"
+                android:layout_width="match_parent"
+                android:layout_height="300dp"
+                android:divider="#2a3350"
+                android:dividerHeight="1dp" />
+
+        </LinearLayout>
 
     </LinearLayout>
 

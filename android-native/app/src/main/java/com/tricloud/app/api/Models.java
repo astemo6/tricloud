@@ -71,4 +71,17 @@ public class Models {
         public double created_at;
         public Double finished_at;
     }
+
+    public static class ActionParam {
+        public String name;
+        public String label;
+        public String type;  // text|number
+    }
+
+    public static class InstanceAction {
+        public String key;
+        public String label;
+        public boolean danger;
+        public List<ActionParam> params;
+    }
 }

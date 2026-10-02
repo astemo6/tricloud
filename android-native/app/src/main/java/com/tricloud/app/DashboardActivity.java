@@ -43,9 +43,16 @@ public class DashboardActivity extends Activity {
 
         List<MenuItem> menu = new ArrayList<>();
         menu.add(new MenuItem("实例", "EC2 / 虚拟机 / Droplet", InstanceActivity.class));
+        menu.add(new MenuItem("创建实例", "新建云服务器", CreateInstanceActivity.class));
         if ("aws".equals(provider)) {
             menu.add(new MenuItem("Lightsail", "轻量实例管理", LightsailActivity.class));
             menu.add(new MenuItem("CloudFront", "CDN 分发管理", CloudFrontActivity.class));
+        }
+        if ("azure".equals(provider)) {
+            menu.add(new MenuItem("流量控制", "超限自动关机", TrafficActivity.class));
+        }
+        if ("oci".equals(provider)) {
+            menu.add(new MenuItem("订阅信息", "租户订阅详情", SubscriptionActivity.class));
         }
         menu.add(new MenuItem("配额", "查询云资源配额余量", QuotaActivity.class));
         menu.add(new MenuItem("账单", "本月费用明细", BillingActivity.class));

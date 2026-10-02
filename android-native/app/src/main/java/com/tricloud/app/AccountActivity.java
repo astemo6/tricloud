@@ -41,6 +41,10 @@ public class AccountActivity extends Activity {
         ListView lv = findViewById(R.id.lvAccounts);
         findViewById(R.id.btnJobs).setOnClickListener(v ->
                 startActivity(new Intent(this, JobActivity.class)));
+        findViewById(R.id.btnManage).setOnClickListener(v ->
+                startActivity(new Intent(this, AccountManageActivity.class)));
+        findViewById(R.id.btnSettings).setOnClickListener(v ->
+                startActivity(new Intent(this, SettingsActivity.class)));
 
         List<Models.CloudAccount> all = new ArrayList<>();        ArrayAdapter<Models.CloudAccount> adapter =
                 new ArrayAdapter<Models.CloudAccount>(this,

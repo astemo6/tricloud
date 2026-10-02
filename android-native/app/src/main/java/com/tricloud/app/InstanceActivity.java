@@ -6,11 +6,14 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.InputType;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -19,13 +22,16 @@ import com.tricloud.app.api.Models;
 import com.tricloud.app.api.TriCloudApi;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class InstanceActivity extends Activity {
 
     private int accountId;
+    private List<Models.InstanceAction> allActions = new ArrayList<>();
     private final ExecutorService bg = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -46,7 +52,19 @@ public class InstanceActivity extends Activity {
             startActivity(i);
         });
 
+        loadActions();
         loadInstances();
+    }
+
+    private void loadActions() {
+        TriCloudApi api = ApiHolder.api;
+        if (api == null) return;
+        bg.execute(() -> {
+            try {
+                List<Models.InstanceAction> list = api.actions(accountId);
+                ui.post(() -> allActions = list);
+            } catch (Exception ignored) {}
+        });
     }
 
     private void loadInstances() {
@@ -72,22 +90,94 @@ public class InstanceActivity extends Activity {
         });
     }
 
-    private void confirmAction(Models.Instance inst, String action, String label) {
+    /** 点击"更多操作"：弹出该云所有可用操作。 */
+    private void showActionPicker(Models.Instance inst) {
+        if (allActions.isEmpty()) {
+            Toast.makeText(this, "操作列表加载中，请稍候", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] labels = new String[allActions.size()];
+        for (int i = 0; i < allActions.size(); i++) {
+            Models.InstanceAction a = allActions.get(i);
+            labels[i] = a.label + (a.danger ? " ⚠" : "");
+        }
         new AlertDialog.Builder(this)
-                .setTitle("确认" + label)
-                .setMessage("对实例「" + inst.name + "」执行" + label + "？")
-                .setPositiveButton("确认", (d, w) -> doAction(inst, action))
+                .setTitle("选择操作 · " + inst.name)
+                .setItems(labels, (d, which) -> {
+                    Models.InstanceAction a = allActions.get(which);
+                    startAction(inst, a);
+                })
+                .show();
+    }
+
+    private void startAction(Models.Instance inst, Models.InstanceAction action) {
+        if (action.params != null && !action.params.isEmpty()) {
+            showParamDialog(inst, action);
+        } else {
+            confirmAndRun(inst, action, new HashMap<>());
+        }
+    }
+
+    /** 需要输入参数的操作：动态生成输入框。 */
+    private void showParamDialog(Models.Instance inst, Models.InstanceAction action) {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(48, 24, 48, 0);
+        List<EditText> inputs = new ArrayList<>();
+        for (Models.ActionParam p : action.params) {
+            TextView label = new TextView(this);
+            label.setText(p.label);
+            label.setTextColor(0xFFE6E9F0);
+            layout.addView(label);
+            EditText et = new EditText(this);
+            et.setHint(p.label);
+            et.setTextColor(0xFFE6E9F0);
+            et.setHintTextColor(0xFF5A6480);
+            if ("number".equals(p.type)) {
+                et.setInputType(InputType.TYPE_CLASS_NUMBER);
+            }
+            layout.addView(et);
+            inputs.add(et);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(action.label + " · " + inst.name)
+                .setView(layout)
+                .setPositiveButton("确认", (d, w) -> {
+                    Map<String, Object> params = new HashMap<>();
+                    for (int i = 0; i < action.params.size(); i++) {
+                        String v = inputs.get(i).getText().toString().trim();
+                        if (!v.isEmpty()) {
+                            params.put(action.params.get(i).name, v);
+                        }
+                    }
+                    confirmAndRun(inst, action, params);
+                })
                 .setNegativeButton("取消", null)
                 .show();
     }
 
-    private void doAction(Models.Instance inst, String action) {
+    private void confirmAndRun(Models.Instance inst, Models.InstanceAction action,
+                               Map<String, Object> params) {
+        String msg = "对实例「" + inst.name + "」执行「" + action.label + "」？";
+        if (action.danger) {
+            msg += "\n\n⚠ 这是危险操作，请再次确认！";
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("确认" + action.label)
+                .setMessage(msg)
+                .setPositiveButton("确认", (d, w) -> doAction(inst, action.key, params))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void doAction(Models.Instance inst, String action,
+                          Map<String, Object> params) {
         TriCloudApi api = ApiHolder.api;
         if (api == null) return;
         bg.execute(() -> {
             try {
-                api.instanceAction(accountId, inst, action);
-                ui.post(() -> Toast.makeText(this, "任务已提交",
+                api.instanceAction(accountId, inst, action, params);
+                ui.post(() -> Toast.makeText(this, "任务已提交，可在任务历史查看",
                         Toast.LENGTH_SHORT).show());
             } catch (Exception e) {
                 String msg = e.getMessage() != null ? e.getMessage() : "操作失败";
@@ -129,13 +219,29 @@ public class InstanceActivity extends Activity {
                     && inst.status.toUpperCase().contains("RUN")
                     ? 0xFF4CAF50 : 0xFFFF9800);
 
+            // 快捷按钮：开机/关机/重启（兼容各云的 key 差异）
             v.findViewById(R.id.btnStart).setOnClickListener(
-                    b -> confirmAction(inst, "start", "开机"));
+                    b -> quickAction(inst, "start"));
             v.findViewById(R.id.btnStop).setOnClickListener(
-                    b -> confirmAction(inst, "stop", "关机"));
+                    b -> quickAction(inst, "stop"));
             v.findViewById(R.id.btnReboot).setOnClickListener(
-                    b -> confirmAction(inst, "reboot", "重启"));
+                    b -> quickAction(inst, "reboot", "restart"));
+            v.findViewById(R.id.btnMore).setOnClickListener(
+                    b -> showActionPicker(inst));
             return v;
+        }
+
+        private void quickAction(Models.Instance inst, String... keys) {
+            for (String k : keys) {
+                for (Models.InstanceAction a : allActions) {
+                    if (a.key.equals(k)) {
+                        startAction(inst, a);
+                        return;
+                    }
+                }
+            }
+            Toast.makeText(InstanceActivity.this, "该云不支持此操作",
+                    Toast.LENGTH_SHORT).show();
         }
     }
 

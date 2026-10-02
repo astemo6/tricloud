@@ -64,4 +64,12 @@
 
     </LinearLayout>
 
+    <Button
+        android:id="@+id/btnChangeIp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="更换 IP"
+        android:textSize="13sp"
+        android:layout_marginTop="8dp" />
+
 </LinearLayout>

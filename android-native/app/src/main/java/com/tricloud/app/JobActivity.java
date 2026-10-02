@@ -76,6 +76,27 @@ public class JobActivity extends Activity {
                 .show();
     }
 
+    private void deleteJob(Models.Job job) {
+        new AlertDialog.Builder(this)
+                .setTitle("删除任务记录")
+                .setMessage("删除「" + job.title + "」的历史记录？")
+                .setPositiveButton("删除", (d, w) -> bg.execute(() -> {
+                    try {
+                        ApiHolder.api.jobDelete(job.id);
+                        ui.post(() -> {
+                            Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show();
+                            load();
+                        });
+                    } catch (Exception e) {
+                        String msg = e.getMessage() != null ? e.getMessage() : "删除失败";
+                        ui.post(() -> Toast.makeText(this, msg,
+                                Toast.LENGTH_SHORT).show());
+                    }
+                }))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
     private void stopJob(Models.Job job) {
         new AlertDialog.Builder(this)
                 .setTitle("停止任务")
@@ -131,6 +152,7 @@ public class JobActivity extends Activity {
             boolean canStop = "queued".equals(job.status) || "running".equals(job.status);
             btnStop.setVisibility(canStop ? View.VISIBLE : View.GONE);
             btnStop.setOnClickListener(b -> stopJob(job));
+            v.findViewById(R.id.btnDelete).setOnClickListener(b -> deleteJob(job));
             return v;
         }
 

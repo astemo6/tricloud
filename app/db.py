@@ -63,6 +63,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE accounts ADD COLUMN monitor_restart INTEGER DEFAULT 0")
         if "credit_total" not in cols:
             conn.execute("ALTER TABLE accounts ADD COLUMN credit_total REAL")
+        if "cloud_created_at" not in cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN cloud_created_at REAL")
     # 启动时把上次异常中断的任务标记出来
     with _lock, _connect() as conn:
         conn.execute(
@@ -88,7 +90,7 @@ def meta_set(key: str, value: str) -> None:
 def account_list(provider: str | None = None) -> list[dict]:
     with _lock, _connect() as conn:
         rows = conn.execute(
-            "SELECT id, provider, name, created_at, credit_total FROM accounts"
+            "SELECT id, provider, name, created_at, credit_total, cloud_created_at FROM accounts"
             + (" WHERE provider=?" if provider else "")
             + " ORDER BY id",
             (provider,) if provider else (),
@@ -140,6 +142,15 @@ def account_set_credit_total(account_id: int, total: float | None) -> bool:
         cur = conn.execute(
             "UPDATE accounts SET credit_total=?, updated_at=? WHERE id=?",
             (total, time.time(), account_id),
+        )
+        return cur.rowcount > 0
+
+
+def account_set_cloud_created_at(account_id: int, ts: float | None) -> bool:
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "UPDATE accounts SET cloud_created_at=?, updated_at=? WHERE id=?",
+            (ts, time.time(), account_id),
         )
         return cur.rowcount > 0
 

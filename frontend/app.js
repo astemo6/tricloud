@@ -77,9 +77,10 @@ else if (curTab === 'subscription') loadSubscription();
 else loadInstances();
 }
 
-/* ---------- 账号存活天数 ---------- */
-const aliveDays = a => a.created_at != null? Math.max(0, Math.floor((Date.now() / 1000 - a.created_at) / 86400)): null;
+/* ---------- 账号存活天数（按云账号创建时间） ---------- */
+const aliveDays = a => a.cloud_created_at != null? Math.max(0, Math.floor((Date.now() / 1000 - a.cloud_created_at) / 86400)): null;
 const aliveLabel = a => { const d = aliveDays(a); return d == null? '': `（存活${d}天）`; };
+const fmtDate = ts => { const d = new Date(ts * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 async function loadAccounts(selectId) {
 accounts = await api('GET', `/api/accounts?provider=${curProvider.id}`);
@@ -456,12 +457,14 @@ const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>账号管理 · ${esc(p.name)}</h2>
 <div style="margin-bottom:10px"><button class="btn sm" onclick="testAllAccounts()">🔍 一键测活（测试本云全部账号）</button></div>
 <div id="testAllResult"></div>
-${accounts.map(a => `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid #232b45">
-<span style="flex:1">${esc(a.name)}${aliveDays(a) != null? `<br><span style="color:#6f7794;font-size:12px">存活 ${aliveDays(a)} 天</span>`: ''}</span>
+${accounts.map(a => { const d = aliveDays(a); return `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid #232b45">
+<span style="flex:1">${esc(a.name)}<br><span style="color:#6f7794;font-size:12px">${
+d != null? `存活 ${d} 天（${fmtDate(a.cloud_created_at)}创建） <a href="javascript:void(0)" onclick="setCloudCreatedAt(${a.id},'${p.id}')" style="color:#5aa9ff">修改</a>`
+: `云账号创建时间未设置 <a href="javascript:void(0)" onclick="setCloudCreatedAt(${a.id},'${p.id}')" style="color:#5aa9ff">${p.id === 'oci'? '自动获取': '设置'}</a>`}</span></span>
 <button class="btn sm" onclick="testAccount(${a.id})">测试连接</button>
 <button class="btn sm" onclick="openMonitorModal(${a.id})">🔔 监控</button>
 <button class="btn sm" onclick="editAccount(${a.id})">编辑</button>
-<button class="btn sm danger" onclick="delAccount(${a.id})">删除</button></div>`).join('')
+<button class="btn sm danger" onclick="delAccount(${a.id})">删除</button></div>`; }).join('')
 || '<div style="color:#8b93ad;padding:8px 0">暂无账号</div>'}
 <h2 style="margin-top:20px">添加账号</h2>
 <form id="accForm">
@@ -513,6 +516,25 @@ async function delAccount(id) {
 if (!confirm('确定删除该账号吗？其凭证将从本地彻底删除。')) return;
 try { await api('DELETE', `/api/accounts/${id}`); toast('已删除'); openAccountModal(); loadAccounts();}
 catch (e) { toast(e.message, true);}
+}
+
+async function setCloudCreatedAt(id, provider) {
+if (provider === 'oci' && confirm('OCI 支持从租户信息自动获取创建时间，是否自动获取？\n（取消则手动输入日期）')) {
+try {
+const r = await api('POST', `/api/accounts/${id}/cloud-created-at/detect`);
+toast(`已获取创建时间：${fmtDate(r.timestamp)}`); openAccountModal(); loadAccounts(); return;
+} catch (e) { toast(`自动获取失败：${e.message}，请手动输入`, true);}
+}
+const v = prompt('请输入云账号创建日期（格式 YYYY-MM-DD）：');
+if (v === null) return;
+const m = v.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+if (!m) { toast('日期格式不正确', true); return;}
+const ts = new Date(`${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}T00:00:00`).getTime() / 1000;
+if (!isFinite(ts) || ts <= 0 || ts > Date.now() / 1000) { toast('日期无效', true); return;}
+try {
+await api('PUT', `/api/accounts/${id}/cloud-created-at`, {timestamp: ts});
+toast('已保存'); openAccountModal(); loadAccounts();
+} catch (e) { toast(e.message, true);}
 }
 
 async function testAccount(id) {

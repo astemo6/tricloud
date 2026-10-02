@@ -106,7 +106,7 @@ def _ls_region_label(r: str) -> str:
 
 def _acc_label(a: dict) -> str:
     import time as _time
-    ca = a.get("created_at")
+    ca = a.get("cloud_created_at")
     if ca is not None:
         days = max(0, int((_time.time() - ca) / 86400))
         return f"{a['name']}（存活{days}天）"

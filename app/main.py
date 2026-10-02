@@ -595,6 +595,37 @@ def cloudfront_toggle(request: Request, account_id: int, body: CloudFrontToggleB
     return {"ok": True, "message": msg}
 
 
+@app.get("/api/accounts/{account_id}/cloudfront/{dist_id}/config")
+def cloudfront_config(request: Request, account_id: int, dist_id: str):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = _require_aws(acc)
+    try:
+        return provider.get_distribution_config(acc["creds"], dist_id)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"获取配置失败: {e}") from e
+
+
+class CloudFrontUpdateBody(BaseModel):
+    comment: str | None = None
+    origin_domain: str | None = None
+    price_class: str | None = None
+    default_root_object: str | None = None
+
+
+@app.put("/api/accounts/{account_id}/cloudfront/{dist_id}")
+def cloudfront_update(request: Request, account_id: int, dist_id: str, body: CloudFrontUpdateBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = _require_aws(acc)
+    params = {k: v for k, v in body.dict().items() if v is not None}
+    try:
+        msg = provider.update_distribution(acc["creds"], dist_id, params)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"更新失败: {e}") from e
+    return {"ok": True, "message": msg}
+
+
 class CloudFrontCreateBody(BaseModel):
     origin_domain: str
     comment: str = ""

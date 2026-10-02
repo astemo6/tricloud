@@ -417,6 +417,7 @@ ${d.comment? `<br><span style="font-size:12px">${esc(d.comment)}</span>`: ''}</t
 <td>${esc(d.price_class || '-')}</td>
 <td><div class="row-actions">
 <button class="btn sm" onclick="openInvalidateModal('${esc(d.id)}')">刷新缓存</button>
+<button class="btn sm" onclick="openCfEditModal('${esc(d.id)}')">编辑</button>
 ${d.enabled
 ? `<button class="btn sm danger" onclick="cfToggle('${esc(d.id)}', false)">停用</button>`
 : `<button class="btn sm" onclick="cfToggle('${esc(d.id)}', true)">启用</button>`}
@@ -459,6 +460,44 @@ const r = await api('POST', `/api/accounts/${curAccount.id}/cloudfront/toggle`,
 toast(r.message);
 loadCloudFront();
 } catch (e) { toast(e.message, true);}
+}
+
+async function openCfEditModal(distId) {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>编辑分发</h2><div class="empty">加载配置中…</div>`;
+document.getElementById('modalMask').classList.add('show');
+try {
+const cfg = await api('GET', `/api/accounts/${curAccount.id}/cloudfront/${distId}/config`);
+box.innerHTML = `<h2>编辑分发 <span class="mono" style="font-size:13px">${esc(distId)}</span></h2>
+<form id="cfEditForm">
+${formField({key: 'comment', label: '备注', placeholder: '分发说明，可空'}, cfg.comment)}
+${formField({key: 'origin_domain', label: '源站域名', required: true, placeholder: '如 example.com（不带 https://）'}, cfg.origin_domain)}
+${row({key: 'price_class', label: '价格等级', type: 'select',
+options: ['100', '200', 'All'], value: cfg.price_class || '100'},
+{key: 'default_root_object', label: '默认根对象', placeholder: '如 index.html，可空', value: cfg.default_root_object || ''})}
+<div class="help" style="color:#8b93ad;margin-bottom:14px">修改后配置部署约需几分钟生效；源站只改第一个源站的域名。</div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="submit" class="btn primary">保存</button>
+</div></form>`;
+document.getElementById('cfEditForm').onsubmit = async e => {
+e.preventDefault();
+const fd = new FormData(e.target);
+const params = {
+comment: (fd.get('comment') || '').trim(),
+origin_domain: (fd.get('origin_domain') || '').trim(),
+price_class: fd.get('price_class'),
+default_root_object: (fd.get('default_root_object') || '').trim(),
+};
+if (!params.origin_domain) { toast('源站域名不能为空', true); return;}
+try {
+const r = await api('PUT', `/api/accounts/${curAccount.id}/cloudfront/${distId}`, params);
+toast(r.message); closeModal(); loadCloudFront();
+} catch (err) { toast(err.message, true);}
+};
+} catch (e) {
+box.innerHTML = `<h2>编辑分发</h2><div class="empty">加载失败: ${esc(e.message)}</div>`;
+}
 }
 
 function openCfCreateModal() {

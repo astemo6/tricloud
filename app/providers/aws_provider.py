@@ -515,6 +515,56 @@ class AwsProvider(Provider):
         cf.update_distribution(DistributionConfig=cfg, Id=dist_id, IfMatch=etag)
         return f"分发 {dist_id} 已{'启用' if enabled else '停用'}（配置部署中，约需几分钟生效）"
 
+    def get_distribution_config(self, creds: dict, dist_id: str) -> dict:
+        """取分发的可编辑配置摘要。"""
+        cf = self._cf_client(creds)
+        cfg = cf.get_distribution_config(Id=dist_id)["DistributionConfig"]
+        origins = (cfg.get("Origins") or {}).get("Items", [])
+        return {
+            "comment": cfg.get("Comment", ""),
+            "origin_domain": origins[0].get("DomainName", "") if origins else "",
+            "price_class": (cfg.get("PriceClass") or "").replace("PriceClass_", ""),
+            "default_root_object": cfg.get("DefaultRootObject", ""),
+            "enabled": bool(cfg.get("Enabled")),
+        }
+
+    def update_distribution(self, creds: dict, dist_id: str, params: dict) -> str:
+        """更新分发配置：备注/源站域名/价格等级/默认根对象。"""
+        cf = self._cf_client(creds)
+        cfg_resp = cf.get_distribution_config(Id=dist_id)
+        etag = cfg_resp["ETag"]
+        cfg = cfg_resp["DistributionConfig"]
+        changed = []
+        if "comment" in params:
+            cfg["Comment"] = params["comment"] or ""
+            changed.append("备注")
+        if "origin_domain" in params and params["origin_domain"]:
+            origins = (cfg.get("Origins") or {}).get("Items", [])
+            if not origins:
+                raise ValueError("该分发没有源站，无法修改")
+            old = origins[0].get("DomainName", "")
+            origins[0]["DomainName"] = params["origin_domain"].strip()
+            # 源站 ID 默认就是域名，同步更新避免不一致
+            if origins[0].get("Id") == old:
+                origins[0]["Id"] = params["origin_domain"].strip()
+            changed.append(f"源站 {old} → {params['origin_domain'].strip()}")
+        if "price_class" in params and params["price_class"]:
+            pc = params["price_class"].strip()
+            if pc not in ("100", "200", "All"):
+                raise ValueError("价格等级只能是 100/200/All")
+            cfg["PriceClass"] = f"PriceClass_{pc}"
+            changed.append(f"价格等级 {pc}")
+        if "default_root_object" in params:
+            cfg["DefaultRootObject"] = (params["default_root_object"] or "").strip()
+            changed.append("默认根对象")
+        if not changed:
+            raise ValueError("没有要修改的字段")
+        try:
+            cf.update_distribution(DistributionConfig=cfg, Id=dist_id, IfMatch=etag)
+        except cf.exceptions.InvalidIfMatchVersion:
+            raise ValueError("配置已被他人修改，请刷新后重试") from None
+        return f"分发 {dist_id} 已更新（{ '、'.join(changed)}），配置部署中约需几分钟生效"
+
     # AWS 托管的缓存优化策略（CachingOptimized），免得手写 ForwardedValues
     _CF_CACHE_POLICY_OPTIMIZED = "658327ea-f89d-4fab-a63d-7e88639e58f6"
 

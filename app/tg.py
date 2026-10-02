@@ -263,6 +263,21 @@ async def _on_text(update, context):
         except Exception as e:  # noqa: BLE001
             await update.message.reply_text(f"❌ 刷新失败: {e}")
         return
+    if kind == "cf_comment":
+        item = _cf_cache.get(pend["key"])
+        if not item:
+            await update.message.reply_text("信息已过期，请重新进入。")
+            return
+        comment = "" if text.strip() == "清空" else text.strip()
+        from .providers import get_provider
+        acc = db.account_get(item["account_id"])
+        try:
+            msg = get_provider("aws").update_distribution(
+                acc["creds"], item["dist_id"], {"comment": comment})
+            await update.message.reply_text(f"✅ {msg}")
+        except Exception as e:  # noqa: BLE001
+            await update.message.reply_text(f"❌ 更新失败: {e}")
+        return
     if kind == "cf_create":
         acc = db.account_get(pend["account_id"])
         try:
@@ -672,6 +687,7 @@ async def _on_button(update, context):
             parse_mode="HTML",
             reply_markup=_kb([
                 [InlineKeyboardButton("🧹 刷新缓存", callback_data=f"cfi:{key}")],
+                [InlineKeyboardButton("✏️ 编辑备注", callback_data=f"cfe:{key}")],
                 [InlineKeyboardButton("⏸️ 停用" if item.get("enabled", True) else "▶️ 启用",
                                      callback_data=f"cft:{key}")],
                 [InlineKeyboardButton("🔙 返回",
@@ -684,6 +700,18 @@ async def _on_button(update, context):
         _pending[chat_id] = {"kind": "invalidate", "key": key}
         await query.edit_message_text(
             "请直接回复要刷新的路径（每行一个；回复“全部”则刷新 /*）：")
+        return
+
+    if data.startswith("cfe:"):
+        key = data[4:]
+        item = _cf_cache.get(key)
+        if not item:
+            await query.edit_message_text("信息已过期，请重新进入")
+            return
+        _pending[chat_id] = {"kind": "cf_comment", "key": key}
+        await query.edit_message_text(
+            f"请直接回复分发 <b>{_esc(item['dist_id'])}</b> 的新备注（回复“清空”则清除备注）：",
+            parse_mode="HTML")
         return
 
     if data.startswith("cft:"):

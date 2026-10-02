@@ -187,6 +187,13 @@ def test_account(request: Request, account_id: int):
 
 
 # ---------- 实例 ----------
+def _fmt_ts(ts: float | None) -> str:
+    if not ts:
+        return ""
+    import datetime as _dt
+    return _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+
+
 def _get_account(account_id: int) -> dict:
     acc = db.account_get(account_id)
     if not acc:
@@ -268,9 +275,22 @@ def get_billing(request: Request, account_id: int):
     if not provider.supports_billing:
         raise HTTPException(status_code=400, detail="该云厂商不支持查看账单")
     try:
-        return provider.get_billing(acc["creds"])
+        data = provider.get_billing(acc["creds"])
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"获取账单失败: {e}") from e
+    if acc["provider"] == "aws":
+        # 手动维护的 credit（API 查不到的类型，如 Explore AWS 教程奖励）
+        manual = db.credit_list(account_id)
+        for m in manual:
+            m["source"] = "manual"
+            m["initial"] = m.pop("amount")
+            m["remaining"] = m["initial"]  # 手动的不追踪已用，按总额算
+            m["used"] = 0.0
+            exp = m.pop("expires_at")
+            m["expires"] = _fmt_ts(exp) if exp else ""
+            m["status"] = "手动"
+        data["manual_credits"] = manual
+    return data
 
 
 class CreditTotalBody(BaseModel):
@@ -302,6 +322,45 @@ def set_cloud_created_at(request: Request, account_id: int, body: CloudCreatedAt
     if ts is not None and ts <= 0:
         raise HTTPException(status_code=400, detail="时间戳无效")
     db.account_set_cloud_created_at(account_id, ts)
+    return {"ok": True}
+
+
+class ManualCreditBody(BaseModel):
+    name: str
+    amount: float
+    expires_at: float | None = None  # unix 时间戳，可空
+
+
+@app.get("/api/accounts/{account_id}/credits-manual")
+def list_manual_credits(request: Request, account_id: int):
+    _require_login(request)
+    acc = _get_account(account_id)
+    if acc["provider"] != "aws":
+        raise HTTPException(status_code=400, detail="只有 AWS 账号支持维护 Credit")
+    return db.credit_list(account_id)
+
+
+@app.post("/api/accounts/{account_id}/credits-manual")
+def add_manual_credit(request: Request, account_id: int, body: ManualCreditBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    if acc["provider"] != "aws":
+        raise HTTPException(status_code=400, detail="只有 AWS 账号支持维护 Credit")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="请填写 Credit 名称")
+    if body.amount <= 0:
+        raise HTTPException(status_code=400, detail="金额必须大于 0")
+    cid = db.credit_add(account_id, name, body.amount, body.expires_at)
+    return {"ok": True, "id": cid}
+
+
+@app.delete("/api/accounts/{account_id}/credits-manual/{credit_id}")
+def del_manual_credit(request: Request, account_id: int, credit_id: int):
+    _require_login(request)
+    _get_account(account_id)
+    if not db.credit_delete(credit_id, account_id):
+        raise HTTPException(status_code=404, detail="记录不存在")
     return {"ok": True}
 
 

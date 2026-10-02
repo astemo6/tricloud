@@ -162,6 +162,13 @@ def _account_menu(acc):
             _kb(rows))
 
 
+def _fmt_ts(ts) -> str:
+    if not ts:
+        return ""
+    import datetime as _dt
+    return _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+
+
 def _fmt_billing(b: dict) -> str:
     cur = b.get("currency") or ""
     lines = [f"💰 <b>账单</b>（{ _esc(b.get('period', '')) }）",
@@ -169,13 +176,18 @@ def _fmt_billing(b: dict) -> str:
     if b.get("credit_used"):
         lines.append(f"Credit 抵扣（本月）：<b>−{cur} {b['credit_used']:.2f}</b>")
     credits = b.get("credits") or []
-    if credits:
-        lines.append(f"\n🎟️ <b>Credits（{len(credits)}）</b>")
-        lines.append(f"剩余：<b>{cur} {b.get('credit_remaining', 0):.2f}</b> / "
-                     f"已用：{cur} {(b.get('credit_initial', 0) - b.get('credit_remaining', 0)):.2f}")
+    manual = b.get("manual_credits") or []
+    if credits or manual:
+        lines.append(f"\n🎟️ <b>Credits（{len(credits) + len(manual)}）</b>")
+        if credits:
+            lines.append(f"API 剩余：<b>{cur} {b.get('credit_remaining', 0):.2f}</b> / "
+                         f"已用：{cur} {(b.get('credit_initial', 0) - b.get('credit_remaining', 0)):.2f}")
         for c in credits[:8]:
             lines.append(f"· {_esc(c['name'])}: 剩余 {cur} {c['remaining']:.2f}，"
                          f"到期 {c['expires']}（{c['status']}）")
+        for c in manual:
+            exp = f"，到期 {c['expires']}" if c.get('expires') else ""
+            lines.append(f"· {_esc(c['name'])}（手动）: {cur} {c['initial']:.2f}{exp}")
     for s in (b.get("services") or [])[:10]:
         lines.append(f"· {_esc(s['name'])}: {cur} {s['cost']:.2f}")
     if b.get("note"):
@@ -435,7 +447,13 @@ async def _on_button(update, context):
                 if tab == "quota":
                     text = _fmt_quotas(provider.get_quotas(acc["creds"]))
                 elif tab == "billing":
-                    text = _fmt_billing(provider.get_billing(acc["creds"]))
+                    bdata = provider.get_billing(acc["creds"])
+                    if acc["provider"] == "aws":
+                        bdata["manual_credits"] = [{
+                            "name": m["name"], "initial": m["amount"],
+                            "expires": _fmt_ts(m["expires_at"]) if m.get("expires_at") else "",
+                        } for m in db.credit_list(acc["id"])]
+                    text = _fmt_billing(bdata)
                 else:
                     s = provider.get_subscription(acc["creds"])
                     text = "📋 <b>订阅信息</b>\n" + "\n".join(

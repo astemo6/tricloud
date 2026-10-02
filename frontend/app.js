@@ -169,26 +169,37 @@ try {
 const b = await api('GET', `/api/accounts/${curAccount.id}/billing`);
 const money = v => (b.currency? b.currency + ' ': '') + Number(v).toFixed(2);
 let creditHtml = '';
-if (b.credits && b.credits.length) {
+const apiCredits = b.credits || [];
+const manualCredits = b.manual_credits || [];
+const allCredits = [...apiCredits, ...manualCredits];
+if (allCredits.length) {
+const apiRemain = b.credit_remaining || 0;
+const apiInit = b.credit_initial || 0;
+const manTotal = manualCredits.reduce((s, c) => s + c.initial, 0);
 creditHtml = `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:#1a2138;border-radius:8px;flex-wrap:wrap">
-<div><div style="color:#8b93ad;font-size:12px">Credit 剩余</div>
-<div style="font-size:18px;color:#4ade80">${money(b.credit_remaining)}</div></div>
-<div><div style="color:#8b93ad;font-size:12px">Credit 已用</div>
-<div style="font-size:18px;color:#fbbf24">${money(b.credit_initial - b.credit_remaining)}</div></div>
+<div><div style="color:#8b93ad;font-size:12px">Credit 剩余（合计）</div>
+<div style="font-size:18px;color:#4ade80">${money(apiRemain + manTotal)}</div></div>
+${apiCredits.length? `<div><div style="color:#8b93ad;font-size:12px">API 已用</div>
+<div style="font-size:18px;color:#fbbf24">${money(apiInit - apiRemain)}</div></div>`: ''}
 <div><div style="color:#8b93ad;font-size:12px">本月抵扣</div>
-<div style="font-size:18px">-${money(b.credit_used || 0)}</div></div></div>
+<div style="font-size:18px">-${money(b.credit_used || 0)}</div></div>
+<div style="margin-left:auto;align-self:center">
+<button class="btn sm" onclick="addManualCredit()">+ 添加 Credit</button></div></div>
 <table><thead><tr><th>Credit</th><th style="width:110px">总额</th><th style="width:110px">剩余</th>
-<th style="width:110px">已用</th><th style="width:120px">到期日</th><th style="width:90px">状态</th></tr></thead><tbody>` +
-b.credits.map(cr => `<tr><td>${esc(cr.name)}</td><td class="mono">${money(cr.initial)}</td>
+<th style="width:120px">到期日</th><th style="width:90px">状态</th><th style="width:70px"></th></tr></thead><tbody>` +
+allCredits.map(cr => `<tr><td>${esc(cr.name)}</td><td class="mono">${money(cr.initial)}</td>
 <td class="mono" style="color:#4ade80">${money(cr.remaining)}</td>
-<td class="mono">${money(cr.used)}</td>
 <td class="mono">${esc(cr.expires)}</td>
-<td>${esc(cr.status)}</td></tr>`).join('') + '</tbody></table>';
-} else if (b.credit_used > 0) {
-creditHtml = `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:#1a2138;border-radius:8px">
+<td>${esc(cr.status)}${cr.source === 'manual'? '（手动）': ''}</td>
+<td>${cr.source === 'manual'? `<button class="btn sm danger" onclick="delManualCredit(${cr.id})">删除</button>`: ''}</td></tr>`).join('') + '</tbody></table>';
+} else {
+creditHtml = `<div style="margin:12px 0"><button class="btn sm" onclick="addManualCredit()">+ 添加 Credit</button>
+<span style="color:#6f7794;font-size:12px;margin-left:8px">API 未返回 credit 明细（如教程奖励类），可手动添加</span></div>`;
+if (b.credit_used > 0) {
+creditHtml += `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:#1a2138;border-radius:8px">
 <div><div style="color:#8b93ad;font-size:12px">Credit 抵扣（本月）</div>
-<div style="font-size:18px;color:#4ade80">-${money(b.credit_used)}</div></div></div>
-<div class="help" style="color:#6f7794;font-size:12px;margin-bottom:12px">如需查看 credit 明细（剩余额度/到期日），请给 IAM 用户添加 billing:GetCredits 权限</div>`;
+<div style="font-size:18px;color:#4ade80">-${money(b.credit_used)}</div></div></div>`;
+}
 }
 c.innerHTML = `<div class="bill-total"><div class="amount">${money(b.total)}</div>
 <div class="meta">统计周期：${esc(b.period)}${b.note? '<br>' + esc(b.note): ''}</div></div>` +
@@ -201,6 +212,34 @@ b.services.map(s => `<tr><td>${esc(s.name)}</td><td class="mono">${money(s.cost)
 } catch (e) {
 c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadBilling()">重试</button></div>`;
 }
+}
+
+async function addManualCredit() {
+const name = prompt('Credit 名称（如：Explore AWS: Launch an instance using EC2）：');
+if (name === null || !name.trim()) return;
+const amt = prompt('金额（美元数字，如 20）：');
+if (amt === null) return;
+const amount = Number(amt.trim());
+if (!isFinite(amount) || amount <= 0) { toast('金额无效', true); return;}
+const exp = prompt('到期日（格式 YYYY-MM-DD，留空则不设）：');
+let expires_at = null;
+if (exp !== null && exp.trim()) {
+const m = exp.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+if (!m) { toast('日期格式不正确', true); return;}
+expires_at = new Date(`${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}T00:00:00`).getTime() / 1000;
+}
+try {
+await api('POST', `/api/accounts/${curAccount.id}/credits-manual`, {name: name.trim(), amount, expires_at});
+toast('已添加'); loadBilling();
+} catch (e) { toast(e.message, true);}
+}
+
+async function delManualCredit(id) {
+if (!confirm('确定删除这条 Credit 记录吗？')) return;
+try {
+await api('DELETE', `/api/accounts/${curAccount.id}/credits-manual/${id}`);
+toast('已删除'); loadBilling();
+} catch (e) { toast(e.message, true);}
 }
 
 /* ---------- 配额 / 订阅 ---------- */

@@ -21,6 +21,14 @@ CREATE TABLE IF NOT EXISTS accounts (
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS account_credits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    amount REAL NOT NULL,
+    expires_at REAL,
+    created_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
@@ -151,6 +159,37 @@ def account_set_cloud_created_at(account_id: int, ts: float | None) -> bool:
         cur = conn.execute(
             "UPDATE accounts SET cloud_created_at=?, updated_at=? WHERE id=?",
             (ts, time.time(), account_id),
+        )
+        return cur.rowcount > 0
+
+
+# ---------- 手动维护的 credit ----------
+
+def credit_list(account_id: int) -> list[dict]:
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, name, amount, expires_at FROM account_credits"
+            " WHERE account_id=? ORDER BY expires_at IS NULL, expires_at",
+            (account_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def credit_add(account_id: int, name: str, amount: float, expires_at: float | None) -> int:
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO account_credits(account_id, name, amount, expires_at, created_at)"
+            " VALUES (?,?,?,?,?)",
+            (account_id, name, amount, expires_at, time.time()),
+        )
+        return cur.lastrowid
+
+
+def credit_delete(credit_id: int, account_id: int) -> bool:
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM account_credits WHERE id=? AND account_id=?",
+            (credit_id, account_id),
         )
         return cur.rowcount > 0
 

@@ -9,9 +9,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, config, db, jobs
+from . import auth, config, db, jobs, tasks, tg
 from .providers import get_provider, list_providers
-from .providers.base import InstanceInfo
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("tricloud")
@@ -22,6 +21,10 @@ async def lifespan(app: FastAPI):
     db.init_db()
     auth.ensure_password_initialized()
     log.info("TriCloud started, data dir: %s", config.DATA_DIR)
+    try:
+        tg.refresh_bot()
+    except Exception as e:
+        log.warning("tg bot start failed: %s", e)
     yield
 
 
@@ -189,23 +192,6 @@ class ActionBody(BaseModel):
     params: dict = {}
 
 
-def _job_action(ctx, provider_id: str, account_id: int, inst_dict: dict, action: str, params: dict):
-    provider = get_provider(provider_id)
-    acc = db.account_get(account_id)
-    if not acc:
-        raise ValueError("账号不存在")
-    inst = InstanceInfo(**{k: v for k, v in inst_dict.items()
-                           if k in InstanceInfo.__dataclass_fields__})
-    if provider_id == "oci" and action == "update_shape":
-        return provider.update_shape(
-            acc["creds"], inst.id, params.get("shape"),
-            float(params["ocpus"]) if params.get("ocpus") else None,
-            float(params.get("memory_gbs")) if params.get("memory_gbs") else None,
-            ctx)
-    ctx.log(f"执行操作: {action} / {inst.name}")
-    return provider.instance_action(acc["creds"], inst, action, ctx)
-
-
 @app.post("/api/accounts/{account_id}/action")
 def instance_action(request: Request, account_id: int, body: ActionBody):
     _require_login(request)
@@ -214,9 +200,8 @@ def instance_action(request: Request, account_id: int, body: ActionBody):
     if body.action not in [a["key"] for a in provider.actions]:
         raise HTTPException(status_code=400, detail="不支持的操作")
     title = f"{body.action} / {body.instance.get('name', body.instance.get('id', ''))}"
-    job_id = jobs.submit("action", acc["provider"], account_id, title,
-                         _job_action, acc["provider"], account_id,
-                         body.instance, body.action, body.params)
+    job_id = tasks.submit_action(acc["provider"], account_id,
+                                 body.instance, body.action, body.params, title)
     return {"ok": True, "job_id": job_id}
 
 
@@ -231,32 +216,14 @@ def create_options(request: Request, account_id: int):
         raise HTTPException(status_code=502, detail=f"获取创建选项失败: {e}") from e
 
 
-def _job_create(ctx, provider_id: str, account_id: int, params: dict):
-    provider = get_provider(provider_id)
-    acc = db.account_get(account_id)
-    if not acc:
-        raise ValueError("账号不存在")
-    params["_account_id"] = account_id
-    return provider.create_instance(acc["creds"], params, ctx)
-
-
 @app.post("/api/accounts/{account_id}/create")
 def create_instance(request: Request, account_id: int, params: dict):
     _require_login(request)
     acc = _get_account(account_id)
     job_id = jobs.submit("create", acc["provider"], account_id,
                          f"创建实例 / {params.get('name', '')}",
-                         _job_create, acc["provider"], account_id, params)
+                         tasks.job_create, acc["provider"], account_id, params)
     return {"ok": True, "job_id": job_id}
-
-
-def _job_snatch(ctx, provider_id: str, account_id: int, params: dict):
-    provider = get_provider(provider_id)
-    acc = db.account_get(account_id)
-    if not acc:
-        raise ValueError("账号不存在")
-    params["_account_id"] = account_id
-    return provider.snatch_instance(acc["creds"], params, ctx)
 
 
 @app.post("/api/accounts/{account_id}/snatch")
@@ -268,8 +235,46 @@ def snatch_instance(request: Request, account_id: int, params: dict):
         raise HTTPException(status_code=400, detail="该云厂商不支持抢机")
     job_id = jobs.submit("snatch", acc["provider"], account_id,
                          f"抢机 / {params.get('shape', '')}",
-                         _job_snatch, acc["provider"], account_id, params)
+                         tasks.job_snatch, acc["provider"], account_id, params)
     return {"ok": True, "job_id": job_id}
+
+
+# ---------- 设置（Telegram 联动） ----------
+class SettingsBody(BaseModel):
+    tg_bot_token: str = ""
+    tg_chat_id: str = ""
+
+
+@app.get("/api/settings")
+def get_settings(request: Request):
+    _require_login(request)
+    token, chat_id = tg.get_tg_config()
+    return {
+        "tg_bot_token_set": bool(token),
+        "tg_chat_id": chat_id,
+        "tg_bot_running": bool(tg._state["thread"] and tg._state["thread"].is_alive()),
+    }
+
+
+@app.put("/api/settings")
+def update_settings(request: Request, body: SettingsBody):
+    _require_login(request)
+    token = body.tg_bot_token.strip()
+    chat_id = body.tg_chat_id.strip()
+    if token:
+        db.meta_set("tg_bot_token", token)
+    if chat_id:
+        db.meta_set("tg_chat_id", chat_id)
+    state = tg.refresh_bot()
+    return {"ok": True, **state}
+
+
+@app.post("/api/settings/tg-test")
+def tg_test(request: Request):
+    _require_login(request)
+    if tg.send_message("✅ TriCloud Telegram 联动测试成功"):
+        return {"ok": True}
+    raise HTTPException(status_code=400, detail="发送失败，请检查 Bot Token 和 Chat ID")
 
 
 # ---------- 任务 ----------

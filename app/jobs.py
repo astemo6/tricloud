@@ -65,6 +65,13 @@ def _run_job(job_id: str, func, *args, **kwargs) -> None:
         )
         ctx.log(f"任务失败: {e}")
         ctx.log(traceback.format_exc(limit=5))
+    finally:
+        # Telegram 推送（未配置则静默跳过）
+        try:
+            from . import tg as _tg
+            _tg.notify_job_finished(db.job_get(job_id) or {})
+        except Exception:  # noqa: BLE001, S110 - 推送失败不影响任务本身
+            pass
 
 
 def submit(job_type: str, provider: str, account_id: int | None, title: str, func, *args, **kwargs) -> str:

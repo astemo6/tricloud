@@ -149,6 +149,44 @@ def main():
         assert b"v secret" not in raw, "凭证明文落盘！"
         print("12. 凭证加密存储 OK", flush=True)
 
+
+        # 13. 设置 API：TG 配置读写
+        s = c.get("/api/settings").json()
+        assert s["tg_bot_token_set"] is False and s["tg_bot_running"] is False, s
+        r = c.put("/api/settings", json={"tg_bot_token": "", "tg_chat_id": "12345"})
+        assert r.status_code == 200, r.text
+        s = c.get("/api/settings").json()
+        assert s["tg_chat_id"] == "12345", s
+        print("13. 设置 API OK", flush=True)
+
+        # 14. TG 推送：mock send_message，验证任务结束触发通知
+        from unittest.mock import patch as _patch
+        sent = []
+        from app import tg as _tg
+        with _patch("app.tg.get_tg_config", return_value=("tok", "123")), \
+             _patch("app.tg.send_message", side_effect=lambda t, parse_mode="HTML": sent.append(t) or True):
+            _tg.notify_job_finished({"title": "测试任务", "status": "success", "result": "ok"})
+            assert sent and "测试任务" in sent[0], sent
+        # 未配置 token 时静默跳过
+        with _patch("app.tg.send_message", side_effect=lambda t, parse_mode="HTML": sent.append(t) or True):
+            _tg.notify_job_finished({"title": "x", "status": "success", "result": ""})
+            assert len(sent) == 1, sent
+        print("14. TG 通知钩子 OK", flush=True)
+
+        # 15. jobs._run_job 完成后自动走通知（mock urllib 层）
+        with _patch("app.tg.get_tg_config", return_value=("tok", "123")), \
+             _patch("urllib.request.urlopen") as _url:
+            _url.return_value.__enter__.return_value.status = 200
+            jidn = jobs.submit("test", "oci", None, "通知测试", lambda ctx: "done")
+            for _ in range(50):
+                jn = db.job_get(jidn)
+                if jn["status"] not in ("queued", "running"):
+                    break
+                time.sleep(0.2)
+            assert jn["status"] == "success", jn
+            assert _url.called, "任务完成未触发 TG 推送"
+        print("15. 任务完成自动推送 OK", flush=True)
+
         print("\n全部冒烟测试通过", flush=True)
 
 

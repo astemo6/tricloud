@@ -411,4 +411,41 @@ closeModal(); toast('密码已修改');
 };
 }
 
+function openSettingsModal() {
+api('GET', '/api/settings').then(s => {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>设置 · Telegram 联动</h2>
+<div class="help" style="color:#8b93ad;margin-bottom:14px">
+1. 在 Telegram 里找 @BotFather 创建 Bot，拿到 Token<br>
+2. 给你的 Bot 发任意消息，然后访问 <span class="mono">https://api.telegram.org/bot&lt;Token&gt;/getUpdates</span> 查出 chat.id<br>
+3. 填到下面保存。之后任务完成/失败会自动推送，Bot 里点 /start 可用按钮操作实例。<br>
+${s.tg_bot_token_set ? '当前状态：' + (s.tg_bot_running ? 'Bot 运行中 ✅' : 'Token 已保存，Bot 未运行') : '当前状态：未配置'}</div>
+<form id="tgForm">
+<div class="field"><label>Bot Token</label>
+<input name="tg_bot_token" type="password" placeholder="${s.tg_bot_token_set ? '已保存，留空不修改' : '如 123456:ABC-DEF…'}"></div>
+<div class="field"><label>Chat ID</label>
+<input name="tg_chat_id" value="${esc(s.tg_chat_id || '')}" placeholder="如 123456789"></div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="tgTest()">发送测试消息</button>
+<span style="flex:1"></span>
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="submit" class="btn primary">保存</button>
+</div></form>`;
+document.getElementById('modalMask').classList.add('show');
+document.getElementById('tgForm').onsubmit = async e => {
+e.preventDefault();
+const fd = new FormData(e.target);
+try {
+await api('PUT', '/api/settings', {tg_bot_token: fd.get('tg_bot_token').trim(), tg_chat_id: fd.get('tg_chat_id').trim()});
+closeModal(); toast('设置已保存，Bot 已' + (fd.get('tg_bot_token').trim() ? '启动' : '更新'));
+} catch (err) { toast(err.message, true); }
+};
+}).catch(e => toast(e.message, true));
+}
+
+async function tgTest() {
+try { await api('POST', '/api/settings/tg-test'); toast('测试消息已发送，去 Telegram 看看'); }
+catch (e) { toast(e.message, true); }
+}
+
 init();

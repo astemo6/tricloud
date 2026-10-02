@@ -268,9 +268,29 @@ def get_billing(request: Request, account_id: int):
     if not provider.supports_billing:
         raise HTTPException(status_code=400, detail="该云厂商不支持查看账单")
     try:
-        return provider.get_billing(acc["creds"])
+        data = provider.get_billing(acc["creds"])
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"获取账单失败: {e}") from e
+    if acc["provider"] == "aws":
+        data["credit_total"] = acc.get("credit_total")
+    return data
+
+
+class CreditTotalBody(BaseModel):
+    total: float | None = None  # 传 null 清除
+
+
+@app.put("/api/accounts/{account_id}/credit-total")
+def set_credit_total(request: Request, account_id: int, body: CreditTotalBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    if acc["provider"] != "aws":
+        raise HTTPException(status_code=400, detail="只有 AWS 账号支持设置 Credit 总额")
+    total = body.total
+    if total is not None and total < 0:
+        raise HTTPException(status_code=400, detail="Credit 总额不能为负数")
+    db.account_set_credit_total(account_id, total)
+    return {"ok": True}
 
 
 # ---------- 配额 / 订阅 ----------
@@ -409,6 +429,20 @@ def lightsail_create(request: Request, account_id: int, body: LightsailCreateBod
     job_id = jobs.submit("lightsail_create", "aws", account_id,
                          f"创建 Lightsail / {params.get('name') or 'lightsail'}",
                          tasks.job_lightsail_create, "aws", account_id, params)
+    return {"ok": True, "job_id": job_id}
+
+
+@app.post("/api/accounts/{account_id}/lightsail/change-ip")
+def lightsail_change_ip(request: Request, account_id: int, body: LightsailActionBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    _require_aws(acc)
+    if not body.name or not body.region:
+        raise HTTPException(status_code=400, detail="缺少实例名或区域")
+    job_id = jobs.submit("lightsail_change_ip", "aws", account_id,
+                         f"更换 Lightsail IP / {body.name}",
+                         tasks.job_lightsail_change_ip, "aws", account_id,
+                         {"name": body.name, "region": body.region})
     return {"ok": True, "job_id": job_id}
 
 

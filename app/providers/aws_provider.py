@@ -187,10 +187,25 @@ class AwsProvider(Provider):
             total += amount
             services.append({"name": g["Keys"][0], "cost": round(amount, 4)})
         services.sort(key=lambda x: -x["cost"])
+        # 本月已用 credit（RECORD_TYPE=Credit，金额为负数，取绝对值）
+        credit_used = 0.0
+        try:
+            cr = ce.get_cost_and_usage(
+                TimePeriod={"Start": start, "End": today.isoformat()},
+                Granularity="MONTHLY",
+                Metrics=["UnblendedCost"],
+                Filter={"Dimensions": {"Key": "RECORD_TYPE", "Values": ["Credit"]}},
+            )
+            for r in cr.get("ResultsByTime", []):
+                credit_used += float(r.get("Total", {}).get("UnblendedCost", {}).get("Amount", 0))
+        except ClientError:  # noqa: BLE001
+            pass
+        credit_used = abs(round(credit_used, 4))
         return {
             "currency": "",
             "period": f"{start} ~ {today.isoformat()}",
             "total": round(total, 4),
+            "credit_used": credit_used,
             "services": services,
             "note": "金额为账户结算币种；Cost Explorer 数据约有 24 小时延迟",
         }
@@ -257,6 +272,61 @@ class AwsProvider(Provider):
             ls.reboot_instance(instanceName=name)
             return f"Lightsail 实例 {name} 重启请求已提交"
         raise ValueError(f"未知操作: {action}")
+
+    def lightsail_change_ip(self, creds: dict, name: str, region: str, ctx) -> str:
+        """更换 Lightsail 实例公网 IP（后台任务）。
+        绑定了静态 IP：分配新静态 IP 并绑定，释放旧的；动态 IP：停止后启动。"""
+        import time as _time
+        ls = self._ls_client(creds, region.strip())
+
+        def _pub_ip() -> str:
+            inst = ls.get_instance(instanceName=name)["instance"]
+            return inst.get("publicIpAddress") or ""
+
+        old_ip = _pub_ip()
+        # 查是否有绑定的静态 IP
+        attached = ""
+        try:
+            for sip in ls.get_static_ips().get("staticIps", []):
+                if sip.get("attachedTo") == name:
+                    attached = sip.get("name", "")
+                    break
+        except Exception:  # noqa: BLE001
+            attached = ""
+        if attached:
+            ctx.log(f"实例绑定了静态 IP {attached}（{old_ip}），分配新静态 IP…")
+            new_sip = f"{name}-sip-{int(_time.time()) % 1000000}"[:60]
+            ls.allocate_static_ip(staticIpName=new_sip)
+            ls.attach_static_ip(staticIpName=new_sip, instanceName=name)
+            new_ip = ls.get_static_ip(staticIpName=new_sip)["staticIp"]["ipAddress"]
+            try:
+                ls.release_static_ip(staticIpName=attached)
+                ctx.log(f"已释放旧静态 IP {attached}")
+            except Exception as e:  # noqa: BLE001
+                ctx.log(f"释放旧静态 IP 失败（请手动释放 {attached}，否则会产生费用）：{e}")
+            return f"Lightsail 实例 {name} 已更换静态 IP：{old_ip} → {new_ip}"
+        # 动态 IP：停止→启动
+        ctx.log(f"实例使用动态 IP（当前 {old_ip}），停止实例…")
+        ls.stop_instance(instanceName=name)
+        for _ in range(30):
+            st = (ls.get_instance(instanceName=name)["instance"].get("state") or {}).get("name", "")
+            if st == "stopped":
+                break
+            _time.sleep(10)
+        else:
+            raise TimeoutError("等待实例停止超时")
+        ctx.log("实例已停止，重新启动…")
+        ls.start_instance(instanceName=name)
+        for _ in range(30):
+            inst = ls.get_instance(instanceName=name)["instance"]
+            st = (inst.get("state") or {}).get("name", "")
+            if st == "running":
+                break
+            _time.sleep(10)
+        else:
+            raise TimeoutError("等待实例启动超时")
+        new_ip = _pub_ip()
+        return f"Lightsail 实例 {name} 已更换 IP：{old_ip} → {new_ip}"
 
     def get_lightsail_options(self, creds: dict, region: str) -> dict:
         """Lightsail 创建选项：指定区域的可用区、系统镜像、套餐。"""

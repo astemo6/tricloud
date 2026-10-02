@@ -91,6 +91,18 @@ _ls_cache: dict[str, dict] = {}
 _cf_cache: dict[str, dict] = {}
 _ls_create_cache: dict[str, dict] = {}  # 创建中转：key -> {account_id, name, region, zone, blueprint, bundle}
 
+_LS_REGION_CITY = {"us-east-1": "美东·弗吉尼亚", "us-east-2": "美东·俄亥俄",
+    "us-west-2": "美西·俄勒冈", "eu-west-1": "欧洲·爱尔兰", "eu-west-2": "欧洲·伦敦",
+    "eu-west-3": "欧洲·巴黎", "eu-central-1": "欧洲·法兰克福",
+    "ap-southeast-1": "亚太·新加坡", "ap-southeast-2": "亚太·悉尼",
+    "ap-northeast-1": "亚太·东京", "ap-northeast-2": "亚太·首尔",
+    "ap-south-1": "亚太·孟买", "ca-central-1": "加拿大·中部"}
+
+
+def _ls_region_label(r: str) -> str:
+    city = _LS_REGION_CITY.get(r)
+    return f"{r}（{city}）" if city else r
+
 
 def _esc(s) -> str:
     return str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -145,6 +157,11 @@ def _fmt_billing(b: dict) -> str:
     cur = b.get("currency") or ""
     lines = [f"💰 <b>账单</b>（{ _esc(b.get('period', '')) }）",
              f"总计：<b>{cur} {b.get('total', 0):.2f}</b>"]
+    if b.get("credit_used"):
+        lines.append(f"Credit 抵扣（本月）：<b>−{cur} {b['credit_used']:.2f}</b>")
+    if b.get("credit_total") is not None:
+        remain = max(0.0, b["credit_total"] - (b.get("credit_used") or 0))
+        lines.append(f"Credit 剩余（估算）：<b>{cur} {remain:.2f}</b>")
     for s in (b.get("services") or [])[:10]:
         lines.append(f"· {_esc(s['name'])}: {cur} {s['cost']:.2f}")
     if b.get("note"):
@@ -231,7 +248,7 @@ async def _on_text(update, context):
         key = f"n{len(_ls_create_cache) % 9000 + 1}"
         _ls_create_cache[key] = {"account_id": pend["account_id"], "name": name}
         regions = get_provider("aws").LIGHTSAIL_REGIONS
-        buttons = [[InlineKeyboardButton(r, callback_data=f"lsr:{key}:{r}")]
+        buttons = [[InlineKeyboardButton(_ls_region_label(r), callback_data=f"lsr:{key}:{r}")]
                    for r in regions]
         await update.message.reply_text(
             f"实例名：<b>{_esc(name)}</b>\n请选择区域：",

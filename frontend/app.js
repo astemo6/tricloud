@@ -163,8 +163,22 @@ c.innerHTML = '<div class="empty">加载中…</div>';
 try {
 const b = await api('GET', `/api/accounts/${curAccount.id}/billing`);
 const money = v => (b.currency? b.currency + ' ': '') + Number(v).toFixed(2);
+let creditHtml = '';
+if (b.credit_used > 0 || b.credit_total != null) {
+const remain = b.credit_total != null? Math.max(0, b.credit_total - (b.credit_used || 0)): null;
+creditHtml = `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:#1a2138;border-radius:8px">
+<div><div style="color:#8b93ad;font-size:12px">Credit 抵扣（本月）</div>
+<div style="font-size:18px;color:#4ade80">-${money(b.credit_used || 0)}</div></div>
+${remain != null? `<div><div style="color:#8b93ad;font-size:12px">Credit 剩余（估算）</div>
+<div style="font-size:18px;color:#fbbf24">${money(remain)}</div></div>`: ''}
+<div style="margin-left:auto;align-self:center">
+<button class="btn sm" onclick="setCreditTotal(${b.credit_total != null? b.credit_total: ''})">
+${b.credit_total != null? '修改': '设置'} Credit 总额</button></div></div>
+${remain != null? '<div class="help" style="color:#6f7794;font-size:12px;margin-bottom:12px">剩余 = 总额 − 本月已用；AWS 不提供剩余 credit 的 API，总额需手动填写</div>': ''}`;
+}
 c.innerHTML = `<div class="bill-total"><div class="amount">${money(b.total)}</div>
 <div class="meta">统计周期：${esc(b.period)}${b.note? '<br>' + esc(b.note): ''}</div></div>` +
+creditHtml +
 (b.services && b.services.length
 ? `<table><thead><tr><th>服务</th><th style="width:160px">费用</th></tr></thead><tbody>` +
 b.services.map(s => `<tr><td>${esc(s.name)}</td><td class="mono">${money(s.cost)}</td></tr>`).join('') +
@@ -173,6 +187,17 @@ b.services.map(s => `<tr><td>${esc(s.name)}</td><td class="mono">${money(s.cost)
 } catch (e) {
 c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadBilling()">重试</button></div>`;
 }
+}
+
+async function setCreditTotal(cur) {
+const v = prompt('请输入该 AWS 账号的 Credit 总额（数字，留空则清除）：', cur === ''? '': cur);
+if (v === null) return;
+const t = v.trim() === ''? null: Number(v.trim());
+if (t !== null && (!isFinite(t) || t < 0)) { toast('请输入有效的非负数字', true); return;}
+try {
+await api('PUT', `/api/accounts/${curAccount.id}/credit-total`, {total: t});
+toast('已保存'); loadBilling();
+} catch (e) { toast(e.message, true);}
 }
 
 /* ---------- 配额 / 订阅 ---------- */
@@ -210,6 +235,13 @@ c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button cla
 /* ---------- Lightsail ---------- */const LS_REGIONS = ['us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'eu-west-2',
 'eu-west-3', 'eu-central-1', 'ap-southeast-1', 'ap-southeast-2',
 'ap-northeast-1', 'ap-northeast-2', 'ap-south-1', 'ca-central-1'];
+const LS_REGION_CITY = {'us-east-1': '美东·弗吉尼亚', 'us-east-2': '美东·俄亥俄',
+'us-west-2': '美西·俄勒冈', 'eu-west-1': '欧洲·爱尔兰', 'eu-west-2': '欧洲·伦敦',
+'eu-west-3': '欧洲·巴黎', 'eu-central-1': '欧洲·法兰克福',
+'ap-southeast-1': '亚太·新加坡', 'ap-southeast-2': '亚太·悉尼',
+'ap-northeast-1': '亚太·东京', 'ap-northeast-2': '亚太·首尔',
+'ap-south-1': '亚太·孟买', 'ca-central-1': '加拿大·中部'};
+const lsRegionLabel = r => LS_REGION_CITY[r]? `${r}（${LS_REGION_CITY[r]}）`: r;
 let lsRegion = '';
 
 async function loadLightsail() {
@@ -224,7 +256,7 @@ return `<span class="badge ${cls}">${esc(s || 'unknown')}</span>`;
 c.innerHTML = `<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
 <select id="lsRegionSel" onchange="lsRegion=this.value;loadLightsail()" style="background:#0f1420;color:#e6e9f0;border:1px solid #2a3350;border-radius:8px;padding:8px 10px">
 <option value="">全部区域（自动扫描）</option>
-${LS_REGIONS.map(r => `<option value="${r}"${r === lsRegion? ' selected': ''}>${r}</option>`).join('')}
+${LS_REGIONS.map(r => `<option value="${r}"${r === lsRegion? ' selected': ''}>${esc(lsRegionLabel(r))}</option>`).join('')}
 </select>
 <button class="btn sm" onclick="openLightsailCreateModal()">创建实例</button></div>` +
 (list.length
@@ -236,13 +268,15 @@ list.map(it => `<tr>
 <td>${esc(it.bundle)}<br><span style="color:#6f7794;font-size:11px">${esc(it.blueprint)}</span></td>
 <td class="mono">${esc(it.public_ip || '-')}${it.ipv6? `<br>${esc(it.ipv6)}`: ''}</td>
 <td class="mono">${esc(it.private_ip || '-')}</td>
-<td>${esc(it.region)}${it.zone? `<br><span style="color:#6f7794;font-size:11px">${esc(it.zone)}</span>`: ''}</td>
+<td>${esc(lsRegionLabel(it.region))}${it.zone? `<br><span style="color:#6f7794;font-size:11px">${esc(it.zone)}</span>`: ''}</td>
 <td style="font-size:12px">${fmtTime(it.created)}</td>
 <td><div class="row-actions">
 ${it.state === 'running'
 ? `<button class="btn sm" onclick="lsAction('${esc(it.name)}','reboot','${esc(it.region)}')">重启</button>
+<button class="btn sm" onclick="lsChangeIp('${esc(it.name)}','${esc(it.region)}')">换 IP</button>
 <button class="btn sm danger" onclick="lsAction('${esc(it.name)}','stop','${esc(it.region)}')">停止</button>`
-: `<button class="btn sm" onclick="lsAction('${esc(it.name)}','start','${esc(it.region)}')">启动</button>`}
+: `<button class="btn sm" onclick="lsAction('${esc(it.name)}','start','${esc(it.region)}')">启动</button>
+<button class="btn sm" onclick="lsChangeIp('${esc(it.name)}','${esc(it.region)}')">换 IP</button>`}
 </div></td></tr>`).join('') + '</tbody></table>'
 : '<div class="empty">该范围下没有 Lightsail 实例</div>');
 } catch (e) {
@@ -260,6 +294,14 @@ loadLightsail();
 } catch (e) { toast(e.message, true);}
 }
 
+async function lsChangeIp(name, region) {
+if (!confirm(`确定更换 Lightsail 实例 ${name} 的公网 IP 吗？\n动态 IP 会停机重启约 1-2 分钟；静态 IP 会重新分配绑定。`)) return;
+try {
+await api('POST', `/api/accounts/${curAccount.id}/lightsail/change-ip`, {name, action: 'change_ip', region});
+toast('更换 IP 任务已提交，可在任务历史查看进度');
+} catch (e) { toast(e.message, true);}
+}
+
 async function openLightsailCreateModal() {
 if (!curAccount) { toast('请先添加账号', true); return;}
 const box = document.getElementById('modalBox');
@@ -267,7 +309,7 @@ const initRegion = lsRegion || 'ap-northeast-1';
 box.innerHTML = `<h2>创建 Lightsail 实例</h2>
 <form id="lsCreateForm">
 ${formField({key: 'name', label: '实例名', placeholder: '留空自动生成'})}
-${row({key: 'region', label: '区域', type: 'select', options: LS_REGIONS, value: initRegion},
+${row({key: 'region', label: '区域', type: 'select', options: LS_REGIONS.map(lsRegionLabel), value: lsRegionLabel(initRegion)},
 {key: 'zone', label: '可用区', type: 'select', options: []})}
 ${row({key: 'blueprint', label: '系统镜像', type: 'select', options: []},
 {key: 'bundle', label: '套餐', type: 'select', options: []})}
@@ -289,12 +331,13 @@ if (ub) sel('blueprint').value = ub.id;
 sel('bundle').innerHTML = opts.bundles.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
 } catch (e) { toast(e.message, true);}
 }
-form.querySelector('[name="region"]').onchange = e => fillOpts(e.target.value);
+form.querySelector('[name="region"]').onchange = e => fillOpts(e.target.value.split('（')[0]);
 await fillOpts(initRegion);
 form.onsubmit = async e => {
 e.preventDefault();
 const fd = new FormData(form), o = {};
 ['name', 'region', 'zone', 'blueprint', 'bundle', 'key_pair'].forEach(k => o[k] = (fd.get(k) || '').trim());
+o.region = o.region.split('（')[0]; // 去掉城市备注，取区域码
 try {
 const r = await api('POST', `/api/accounts/${curAccount.id}/lightsail/create`, o);
 closeModal(); toast('创建任务已提交'); toggleDrawer(true); trackJob(r.job_id);

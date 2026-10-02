@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, config, db, jobs, monitor, tasks, tg
+from . import auth, config, db, jobs, monitor, tasks, tg, traffic
 from .providers import get_provider, list_providers
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -29,6 +29,10 @@ async def lifespan(app: FastAPI):
         monitor.start()
     except Exception as e:
         log.warning("monitor start failed: %s", e)
+    try:
+        traffic.start()
+    except Exception as e:
+        log.warning("traffic watcher start failed: %s", e)
     yield
 
 
@@ -200,6 +204,56 @@ def set_create_defaults(request: Request, body: CreateDefaultsBody):
     return {"ok": True}
 
 
+# ---------- 流量控制规则 ----------
+
+class TrafficRuleBody(BaseModel):
+    account_id: int
+    instance_key: str
+    instance_name: str = ""
+    name: str
+    metric: str = "out"
+    window_hours: int = 24
+    limit_gb: float = 100
+    duration_hours: int = 24
+    enabled: bool = True
+    notify_trigger: bool = True
+    notify_recover: bool = True
+
+@app.get("/api/traffic-rules")
+def list_traffic_rules(request: Request, account_id: int | None = None):
+    _require_login(request)
+    return db.traffic_rule_list(account_id)
+
+@app.post("/api/traffic-rules")
+def add_traffic_rule(request: Request, body: TrafficRuleBody):
+    _require_login(request)
+    if body.metric not in ("in", "out", "both"):
+        raise HTTPException(status_code=400, detail="metric 只能是 in/out/both")
+    rid = db.traffic_rule_add(body.dict())
+    return {"ok": True, "id": rid}
+
+@app.put("/api/traffic-rules/{rule_id}")
+def update_traffic_rule(request: Request, rule_id: int, body: dict):
+    _require_login(request)
+    if not db.traffic_rule_update(rule_id, body):
+        raise HTTPException(status_code=404, detail="规则不存在")
+    return {"ok": True}
+
+@app.delete("/api/traffic-rules/{rule_id}")
+def delete_traffic_rule(request: Request, rule_id: int):
+    _require_login(request)
+    db.traffic_rule_delete(rule_id)
+    return {"ok": True}
+
+
+# ---------- 回收站 ----------
+
+@app.get("/api/recycle-bin")
+def list_recycle_bin(request: Request):
+    _require_login(request)
+    return {"items": db.recycle_list(), "stats": db.recycle_stats()}
+
+
 @app.put("/api/accounts/{account_id}")
 def update_account(request: Request, account_id: int, body: AccountUpdateBody):
     _require_login(request)
@@ -221,8 +275,21 @@ def update_account(request: Request, account_id: int, body: AccountUpdateBody):
 @app.delete("/api/accounts/{account_id}")
 def delete_account(request: Request, account_id: int):
     _require_login(request)
-    if not db.account_delete(account_id):
+    acc = db.account_get(account_id)
+    if not acc:
         raise HTTPException(status_code=404, detail="账号不存在")
+    # 记入回收站：估算费用（本月账单）+ 存活天数
+    try:
+        provider = get_provider(acc["provider"])
+        billing = provider.get_billing(acc["creds"]) if getattr(provider, "supports_billing", False) else {}
+        cost = float(billing.get("total") or 0)
+    except Exception:  # noqa: BLE001
+        cost = 0
+    days = 0
+    if acc.get("cloud_created_at"):
+        days = round((time.time() - acc["cloud_created_at"]) / 86400, 2)
+    db.recycle_add(acc["provider"], acc["name"], cost, days)
+    db.account_delete(account_id)
     return {"ok": True}
 
 

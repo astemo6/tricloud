@@ -52,6 +52,7 @@ if (curProvider.supports_cloudfront) defs.push({key: 'cloudfront', label: 'Cloud
 if (curProvider.supports_billing) defs.push({key: 'billing', label: '账单'});
 if (curProvider.supports_quotas) defs.push({key: 'quotas', label: '配额'});
 if (curProvider.supports_subscription) defs.push({key: 'subscription', label: '订阅'});
+if (curProvider.id === 'azure') defs.push({key: 'traffic', label: '流量控制'});
 if (!defs.find(d => d.key === curTab)) curTab = 'instances';
 document.getElementById('tabs').innerHTML = defs.map(d =>
 `<div class="tab${d.key === curTab? ' active': ''}" onclick="switchTab('${d.key}')">${d.label}</div>`).join('');
@@ -74,7 +75,94 @@ else if (curTab === 'lightsail') loadLightsail();
 else if (curTab === 'cloudfront') loadCloudFront();
 else if (curTab === 'quotas') loadQuotas();
 else if (curTab === 'subscription') loadSubscription();
+else if (curTab === 'traffic') loadTrafficRules();
 else loadInstances();
+}
+
+/* ---------- 流量控制 ---------- */
+async function loadTrafficRules() {
+const c = document.getElementById('content');
+c.innerHTML = '<div class="empty">加载中…</div>';
+try {
+const rules = await api('GET', `/api/traffic-rules?account_id=${curAccount.id}`);
+const metricName = {in: '入向', out: '出向', both: '双向'};
+c.innerHTML = `<div style="margin-bottom:12px"><button class="btn sm" onclick="openTrafficRuleModal()">+ 添加规则</button>
+<span style="color:#8b93ad;font-size:12px;margin-left:8px">超限自动关机（释放资源），到期自动开机，TG 推送通知</span></div>` +
+(rules.length? `<table><thead><tr><th>规则</th><th>实例</th><th>指标</th><th>阈值</th><th>超限关机时长</th><th>状态</th><th>操作</th></tr></thead><tbody>` +
+rules.map(r => `<tr>
+<td>${esc(r.name)}<br><span style="color:#6f7794;font-size:11px">${r.enabled? '启用': '停用'}</span></td>
+<td style="font-size:12px">${esc(r.instance_name || r.instance_key)}</td>
+<td>${metricName[r.metric] || r.metric} / ${r.window_hours}小时</td>
+<td>${r.limit_gb} GB</td>
+<td>${r.duration_hours} 小时</td>
+<td>${r.state === 'triggered'? '<span class="badge b-stopped">已触发关机</span>': '<span class="badge b-running">正常</span>'}</td>
+<td><div class="row-actions">
+<button class="btn sm" onclick="toggleTrafficRule(${r.id}, ${r.enabled? 0: 1})">${r.enabled? '停用': '启用'}</button>
+<button class="btn sm danger" onclick="delTrafficRule(${r.id})">删除</button>
+</div></td></tr>`).join('') + '</tbody></table>'
+: '<div class="empty">暂无流量规则</div>');
+} catch (e) {
+c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}</div>`;
+}
+}
+
+async function openTrafficRuleModal() {
+// 需要实例列表来选择
+let insts = [];
+try {
+insts = await api('GET', `/api/accounts/${curAccount.id}/instances`);
+} catch (e) { toast('获取实例列表失败: ' + e.message, true); return;}
+if (!insts.length) { toast('该账号下没有实例', true); return;}
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>添加流量规则</h2>
+<form id="trafficForm">
+${formField({key: 'name', label: '规则名称', required: true, placeholder: '如：防跑流量'})}
+${formField({key: 'instance_key', label: '实例', type: 'select',
+options: insts.map(i => i.id), value: insts[0].id})}
+${row({key: 'metric', label: '监控指标', type: 'select', options: ['out', 'in', 'both'], value: 'out'},
+{key: 'window_hours', label: '统计窗口（小时）', type: 'number', value: '24'})}
+${row({key: 'limit_gb', label: '流量阈值（GB）', type: 'number', required: true, placeholder: '如 100'},
+{key: 'duration_hours', label: '关机时长（小时）', type: 'number', value: '24'})}
+<div class="help" style="color:#8b93ad;margin-bottom:14px">超限后自动关机（deallocate，停止计费），到期自动开机并 TG 通知。</div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="submit" class="btn primary">保存</button>
+</div></form>`;
+document.getElementById('modalMask').classList.add('show');
+const instMap = Object.fromEntries(insts.map(i => [i.id, i.name || i.id]));
+document.getElementById('trafficForm').onsubmit = async e => {
+e.preventDefault();
+const fd = new FormData(e.target);
+const ik = fd.get('instance_key');
+try {
+await api('POST', '/api/traffic-rules', {
+account_id: curAccount.id,
+instance_key: ik,
+instance_name: instMap[ik] || ik,
+name: (fd.get('name') || '').trim(),
+metric: fd.get('metric'),
+window_hours: parseInt(fd.get('window_hours')) || 24,
+limit_gb: parseFloat(fd.get('limit_gb')) || 0,
+duration_hours: parseInt(fd.get('duration_hours')) || 24,
+});
+toast('规则已添加'); closeModal(); loadTrafficRules();
+} catch (err) { toast(err.message, true);}
+};
+}
+
+async function toggleTrafficRule(id, enabled) {
+try {
+await api('PUT', `/api/traffic-rules/${id}`, {enabled});
+loadTrafficRules();
+} catch (e) { toast(e.message, true);}
+}
+
+async function delTrafficRule(id) {
+if (!confirm('确定删除这条流量规则吗？')) return;
+try {
+await api('DELETE', `/api/traffic-rules/${id}`);
+loadTrafficRules();
+} catch (e) { toast(e.message, true);}
 }
 
 /* ---------- 账号存活天数（按云账号创建时间） ---------- */
@@ -602,7 +690,8 @@ function openAccountModal() {
 const p = curProvider;
 const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>账号管理 · ${esc(p.name)}</h2>
-<div style="margin-bottom:10px"><button class="btn sm" onclick="testAllAccounts()">🔍 一键测活（测试本云全部账号）</button></div>
+<div style="margin-bottom:10px"><button class="btn sm" onclick="testAllAccounts()">🔍 一键测活（测试本云全部账号）</button>
+<button class="btn sm" style="margin-left:8px" onclick="openRecycleBin()">🗑️ 回收站</button></div>
 <div id="testAllResult"></div>
 ${accounts.map(a => { const d = aliveDays(a); return `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid #232b45">
 <span style="flex:1">${esc(a.name)}<br><span style="color:#6f7794;font-size:12px">${
@@ -684,6 +773,27 @@ const b = document.getElementById('batchAddForm');
 const showBatch = s.style.display !== 'none';
 s.style.display = showBatch? 'none': '';
 b.style.display = showBatch? '': 'none';
+}
+
+async function openRecycleBin() {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>🗑️ 回收站</h2><div class="empty">加载中…</div>`;
+try {
+const r = await api('GET', '/api/recycle-bin');
+const s = r.stats;
+box.innerHTML = `<h2>🗑️ 回收站</h2>
+<div style="color:#8b93ad;font-size:13px;margin-bottom:12px">
+共 ${s.count} 个已删账号 · 最长存活 ${s.max_lifecycle_days} 天 · 最高费用 $${s.max_cost_usd}
+</div>` +
+(r.items.length? `<table><thead><tr><th>账号</th><th>云</th><th>预估费用</th><th>存活天数</th><th>删除时间</th></tr></thead><tbody>` +
+r.items.map(x => `<tr><td>${esc(x.name)}</td><td>${esc(x.provider)}</td>
+<td>$${x.est_cost_usd}</td><td>${x.lifecycle_days} 天</td>
+<td style="font-size:12px">${new Date(x.deleted_at * 1000).toLocaleString()}</td></tr>`).join('') +
+'</tbody></table>': '<div class="empty">回收站是空的</div>') +
+`<div class="modal-actions"><button type="button" class="btn" onclick="openAccountModal()">返回</button></div>`;
+} catch (e) {
+box.innerHTML = `<h2>🗑️ 回收站</h2><div class="empty">加载失败: ${esc(e.message)}</div>`;
+}
 }
 
 async function editAccount(id) {

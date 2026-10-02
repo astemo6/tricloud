@@ -93,6 +93,7 @@ class AzureProvider(Provider):
         {"key": "open_port", "label": "开放端口"},
         {"key": "extend_disk", "label": "磁盘扩容"},
         {"key": "resize", "label": "改配置"},
+        {"key": "check_ip", "label": "检测 IP 连通性"},
         {"key": "reimage", "label": "重置系统", "danger": True},
     ]
     supports_quotas = True
@@ -229,6 +230,8 @@ class AzureProvider(Provider):
             return self._extend_disk(compute, rg, name, ctx)
         if action == "resize":
             return self._resize(compute, rg, name, ctx)
+        if action == "check_ip":
+            return self._check_ip(network, rg, name, ctx)
         if action == "reimage":
             ctx.log("正在重置系统（重装镜像），虚拟机数据盘保留、系统盘还原…")
             compute.virtual_machines.begin_reimage(rg, name).result()
@@ -324,6 +327,78 @@ class AzureProvider(Provider):
         from azure.mgmt.compute.models import DiskUpdate
         compute.disks.begin_create_or_update(d_rg, d_name, DiskUpdate(disk_size_gb=size)).result()
         return f"磁盘扩容已提交: {cur}GB → {size}GB（系统内需手动扩展分区）"
+
+    def _check_ip(self, network, rg: str, vm_name: str, ctx) -> str:
+        """检测公网 IP 连通性：ping + TCP 端口探测。
+
+        注意：这是从面板服务器（境外）发起的探测，只能验证 IP 是否存活、
+        端口是否开放，不能代替从国内发起的"被墙"检测。
+        """
+        import socket
+        import subprocess
+        nic = self._find_nic(network, rg, vm_name)
+        ip = ""
+        for ipc in (nic.ip_configurations or []):
+            pip_ref = ipc.public_ip_address
+            if pip_ref:
+                p = _parse_id(pip_ref.id)
+                pip = network.public_ip_addresses.get(
+                    p.get("resourcegroups", rg), p.get("publicipaddresses", ""))
+                ip = pip.ip_address or ""
+                break
+        if not ip:
+            raise ValueError("该虚拟机没有公网 IP")
+        lines = [f"公网 IP: {ip}"]
+        # ping
+        try:
+            r = subprocess.run(["ping", "-c", "3", "-W", "2", ip],
+                               capture_output=True, timeout=15)
+            lines.append("Ping: " + ("通" if r.returncode == 0 else "不通"))
+        except Exception:  # noqa: BLE001
+            lines.append("Ping: 检测失败")
+        # TCP 端口
+        for port, label in [(22, "SSH"), (80, "HTTP"), (443, "HTTPS"), (3389, "RDP")]:
+            try:
+                s = socket.create_connection((ip, port), timeout=5)
+                s.close()
+                lines.append(f"TCP {port}({label}): 开放")
+            except Exception:  # noqa: BLE001
+                lines.append(f"TCP {port}({label}): 关闭/超时")
+        lines.append("注：此为境外探测，仅供参考；被墙检测需从国内网络发起")
+        return "\n".join(lines)
+
+    def get_traffic_gb(self, creds: dict, vm_id: str, hours: int, metric: str = "out") -> float:
+        """查虚拟机过去 N 小时的流量（GB）。metric: in/out/both。"""
+        from datetime import datetime, timedelta, timezone
+        from azure.mgmt.monitor import MonitorManagementClient
+        cred = _credential(creds)
+        sub_id = creds["subscription_id"].strip()
+        monitor = MonitorManagementClient(cred, sub_id)
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(hours=hours)
+        names = []
+        if metric in ("in", "both"):
+            names.append("Network In Total")
+        if metric in ("out", "both"):
+            names.append("Network Out Total")
+        total = 0.0
+        for mname in names:
+            try:
+                result = monitor.metrics.list(
+                    vm_id,
+                    timespan=f"{start.isoformat()}/{end.isoformat()}",
+                    interval="PT1H",
+                    metricnames=mname,
+                    aggregation="Total",
+                )
+                for m in result.value:
+                    for ts in (m.timeseries or []):
+                        for d in (ts.data or []):
+                            if d.total:
+                                total += d.total
+            except Exception as e:  # noqa: BLE001
+                log.warning("traffic metric %s failed: %s", mname, e)
+        return total / (1024 ** 3)
 
     def get_quotas(self, creds: dict) -> dict:
         """配额查询：各区域计算资源用量/上限。"""

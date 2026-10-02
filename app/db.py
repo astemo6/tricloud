@@ -49,6 +49,31 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS traffic_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    instance_key TEXT NOT NULL,
+    instance_name TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    metric TEXT NOT NULL DEFAULT 'out',
+    window_hours INTEGER NOT NULL DEFAULT 24,
+    limit_gb REAL NOT NULL,
+    duration_hours INTEGER NOT NULL DEFAULT 24,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    notify_trigger INTEGER NOT NULL DEFAULT 1,
+    notify_recover INTEGER NOT NULL DEFAULT 1,
+    state TEXT NOT NULL DEFAULT 'normal',
+    triggered_at REAL,
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS recycle_bin (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    name TEXT NOT NULL,
+    est_cost_usd REAL DEFAULT 0,
+    lifecycle_days REAL DEFAULT 0,
+    deleted_at REAL NOT NULL
+);
 """
 
 
@@ -205,6 +230,106 @@ def account_delete(account_id: int) -> bool:
     with _lock, _connect() as conn:
         cur = conn.execute("DELETE FROM accounts WHERE id=?", (account_id,))
         return cur.rowcount > 0
+
+
+# ---------- 流量控制规则 ----------
+
+def traffic_rule_list(account_id: int | None = None) -> list[dict]:
+    with _lock, _connect() as conn:
+        if account_id:
+            rows = conn.execute(
+                "SELECT * FROM traffic_rules WHERE account_id=? ORDER BY id DESC",
+                (account_id,)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM traffic_rules ORDER BY id DESC").fetchall()
+        return [dict(r) for r in rows]
+
+
+def traffic_rule_add(rule: dict) -> int:
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO traffic_rules(account_id, instance_key, instance_name, name,"
+            " metric, window_hours, limit_gb, duration_hours, enabled,"
+            " notify_trigger, notify_recover, state, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,'normal',?)",
+            (rule["account_id"], rule["instance_key"], rule.get("instance_name", ""),
+             rule["name"], rule.get("metric", "out"), rule.get("window_hours", 24),
+             rule["limit_gb"], rule.get("duration_hours", 24),
+             1 if rule.get("enabled", True) else 0,
+             1 if rule.get("notify_trigger", True) else 0,
+             1 if rule.get("notify_recover", True) else 0,
+             time.time()),
+        )
+        return cur.lastrowid
+
+
+def traffic_rule_update(rule_id: int, fields: dict) -> bool:
+    allowed = {"name", "metric", "window_hours", "limit_gb", "duration_hours",
+               "enabled", "notify_trigger", "notify_recover", "state", "triggered_at"}
+    sets, vals = [], []
+    for k, v in fields.items():
+        if k in allowed:
+            sets.append(f"{k}=?")
+            vals.append(v)
+    if not sets:
+        return False
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            f"UPDATE traffic_rules SET {', '.join(sets)} WHERE id=?",
+            (*vals, rule_id))
+        return cur.rowcount > 0
+
+
+def traffic_rule_delete(rule_id: int) -> bool:
+    with _lock, _connect() as conn:
+        cur = conn.execute("DELETE FROM traffic_rules WHERE id=?", (rule_id,))
+        return cur.rowcount > 0
+
+
+def traffic_rule_enabled() -> list[dict]:
+    """列出所有启用的规则（含账号凭证，供后台巡检）。"""
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT r.*, a.provider, a.creds_enc, a.name as account_name"
+            " FROM traffic_rules r JOIN accounts a ON r.account_id=a.id"
+            " WHERE r.enabled=1").fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            from .crypto import decrypt
+            d["creds"] = decrypt(d.pop("creds_enc"))
+            out.append(d)
+        return out
+
+
+# ---------- 回收站 ----------
+
+def recycle_add(provider: str, name: str, est_cost_usd: float = 0,
+                lifecycle_days: float = 0) -> int:
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO recycle_bin(provider, name, est_cost_usd, lifecycle_days, deleted_at)"
+            " VALUES (?,?,?,?,?)",
+            (provider, name, est_cost_usd, lifecycle_days, time.time()))
+        return cur.lastrowid
+
+
+def recycle_list() -> list[dict]:
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM recycle_bin ORDER BY deleted_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+
+def recycle_stats() -> dict:
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) c, MAX(lifecycle_days) max_days,"
+            " MAX(est_cost_usd) max_cost FROM recycle_bin").fetchone()
+        return {"count": row["c"] or 0,
+                "max_lifecycle_days": row["max_days"] or 0,
+                "max_cost_usd": row["max_cost"] or 0}
 
 
 def account_list_monitored() -> list[dict]:

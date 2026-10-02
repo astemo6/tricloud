@@ -77,10 +77,14 @@ else if (curTab === 'subscription') loadSubscription();
 else loadInstances();
 }
 
+/* ---------- 账号存活天数 ---------- */
+const aliveDays = a => a.created_at? Math.max(0, Math.floor((Date.now() / 1000 - a.created_at) / 86400)): null;
+const aliveLabel = a => { const d = aliveDays(a); return d == null? '': `（存活${d}天）`; };
+
 async function loadAccounts(selectId) {
 accounts = await api('GET', `/api/accounts?provider=${curProvider.id}`);
 const sel = document.getElementById('accountSel');
-sel.innerHTML = accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')
+sel.innerHTML = accounts.map(a => `<option value="${a.id}">${esc(a.name)}${esc(aliveLabel(a))}</option>`).join('')
 || '<option value="">（暂无账号）</option>';
 curAccount = accounts.find(a => String(a.id) === String(selectId || sel.value)) || accounts[0] || null;
 if (curAccount) sel.value = curAccount.id;
@@ -453,7 +457,7 @@ box.innerHTML = `<h2>账号管理 · ${esc(p.name)}</h2>
 <div style="margin-bottom:10px"><button class="btn sm" onclick="testAllAccounts()">🔍 一键测活（测试本云全部账号）</button></div>
 <div id="testAllResult"></div>
 ${accounts.map(a => `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid #232b45">
-<span style="flex:1">${esc(a.name)}</span>
+<span style="flex:1">${esc(a.name)}${aliveDays(a) != null? `<br><span style="color:#6f7794;font-size:12px">存活 ${aliveDays(a)} 天</span>`: ''}</span>
 <button class="btn sm" onclick="testAccount(${a.id})">测试连接</button>
 <button class="btn sm" onclick="openMonitorModal(${a.id})">🔔 监控</button>
 <button class="btn sm" onclick="editAccount(${a.id})">编辑</button>

@@ -104,6 +104,15 @@ def _ls_region_label(r: str) -> str:
     return f"{r}（{city}）" if city else r
 
 
+def _acc_label(a: dict) -> str:
+    import time as _time
+    ca = a.get("created_at")
+    if ca:
+        days = max(0, int((_time.time() - ca) / 86400))
+        return f"{a['name']}（存活{days}天）"
+    return a["name"]
+
+
 def _esc(s) -> str:
     return str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -369,7 +378,7 @@ async def _on_button(update, context):
         await query.edit_message_text(
             f"选择{_provider_name(pid)}账号：",
             reply_markup=_kb(
-                [[InlineKeyboardButton(a["name"], callback_data=f"acc:{a['id']}")]
+                [[InlineKeyboardButton(_acc_label(a), callback_data=f"acc:{a['id']}")]
                  for a in accs] + _back_main()))
         return
 
@@ -539,9 +548,11 @@ async def _on_button(update, context):
         rows = []
         if st == "running":
             rows.append([InlineKeyboardButton("🔄 重启", callback_data=f"lg:{key}:reboot"),
+                         InlineKeyboardButton("🔀 换 IP", callback_data=f"lip:{key}"),
                          InlineKeyboardButton("⏹ 停止", callback_data=f"lg:{key}:stop")])
         else:
-            rows.append([InlineKeyboardButton("▶️ 启动", callback_data=f"lg:{key}:start")])
+            rows.append([InlineKeyboardButton("▶️ 启动", callback_data=f"lg:{key}:start"),
+                         InlineKeyboardButton("🔀 换 IP", callback_data=f"lip:{key}")])
         rows.append([InlineKeyboardButton("🔙 返回",
                                          callback_data=f"am:{item['account_id']}:ls")])
         await query.edit_message_text(
@@ -571,6 +582,38 @@ async def _on_button(update, context):
             await query.edit_message_text(f"✅ {msg}")
         except Exception as e:  # noqa: BLE001
             await query.edit_message_text(f"❌ 操作失败: {e}")
+        return
+
+    if data.startswith("lip:"):
+        key = data[4:]
+        item = _ls_cache.get(key)
+        if not item:
+            await query.edit_message_text("信息已过期，请重新进入")
+            return
+        await query.edit_message_text(
+            f"确定更换 Lightsail 实例 <b>{_esc(item['name'])}</b> 的公网 IP 吗？\n"
+            "动态 IP 会停机重启约 1-2 分钟；静态 IP 会重新分配绑定。",
+            parse_mode="HTML",
+            reply_markup=_kb([
+                [InlineKeyboardButton("✅ 确认更换", callback_data=f"lix:{key}")],
+                [InlineKeyboardButton("取消", callback_data=f"ls:{key}")],
+            ]))
+        return
+
+    if data.startswith("lix:"):
+        key = data[4:]
+        item = _ls_cache.get(key)
+        if not item:
+            await query.edit_message_text("信息已过期，请重新进入")
+            return
+        from . import jobs as _jobs
+        from . import tasks as _tasks
+        _jobs.submit("lightsail_change_ip", "aws", item["account_id"],
+                     f"更换 Lightsail IP / {item['name']} (TG)",
+                     _tasks.job_lightsail_change_ip, "aws", item["account_id"],
+                     {"name": item["name"], "region": item["region"]})
+        await query.edit_message_text(
+            f"任务已提交：更换 Lightsail IP / {_esc(item['name'])}\n完成后会推送通知。")
         return
 
     if data.startswith("lx:"):

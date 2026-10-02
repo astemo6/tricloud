@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="32dp"
+    android:background="#0f1420">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="TriCloud"
+        android:textSize="32sp"
+        android:textColor="#5aa9ff"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="OCI · AWS · Azure"
+        android:textSize="14sp"
+        android:textColor="#8b93ad"
+        android:layout_marginBottom="32dp" />
+
+    <EditText
+        android:id="@+id/etServer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="服务器地址"
+        android:text="https://panel.6668800.xyz"
+        android:inputType="textUri"
+        android:textColor="#e6e9f0"
+        android:textColorHint="#5a6480"
+        android:backgroundTint="#2a3350"
+        android:layout_marginBottom="12dp" />
+
+    <EditText
+        android:id="@+id/etPassword"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="面板密码"
+        android:inputType="textPassword"
+        android:textColor="#e6e9f0"
+        android:textColorHint="#5a6480"
+        android:backgroundTint="#2a3350"
+        android:layout_marginBottom="20dp" />
+
+    <Button
+        android:id="@+id/btnLogin"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="登录"
+        android:backgroundTint="#2f6fed" />
+
+    <TextView
+        android:id="@+id/tvError"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="#ff7a7a"
+        android:textSize="13sp"
+        android:layout_marginTop="12dp" />
+
+</LinearLayout>

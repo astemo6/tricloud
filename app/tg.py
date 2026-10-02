@@ -168,9 +168,14 @@ def _fmt_billing(b: dict) -> str:
              f"总计：<b>{cur} {b.get('total', 0):.2f}</b>"]
     if b.get("credit_used"):
         lines.append(f"Credit 抵扣（本月）：<b>−{cur} {b['credit_used']:.2f}</b>")
-    if b.get("credit_total") is not None:
-        remain = max(0.0, b["credit_total"] - (b.get("credit_used") or 0))
-        lines.append(f"Credit 剩余（估算）：<b>{cur} {remain:.2f}</b>")
+    credits = b.get("credits") or []
+    if credits:
+        lines.append(f"\n🎟️ <b>Credits（{len(credits)}）</b>")
+        lines.append(f"剩余：<b>{cur} {b.get('credit_remaining', 0):.2f}</b> / "
+                     f"已用：{cur} {(b.get('credit_initial', 0) - b.get('credit_remaining', 0)):.2f}")
+        for c in credits[:8]:
+            lines.append(f"· {_esc(c['name'])}: 剩余 {cur} {c['remaining']:.2f}，"
+                         f"到期 {c['expires']}（{c['status']}）")
     for s in (b.get("services") or [])[:10]:
         lines.append(f"· {_esc(s['name'])}: {cur} {s['cost']:.2f}")
     if b.get("note"):

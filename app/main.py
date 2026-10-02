@@ -268,12 +268,9 @@ def get_billing(request: Request, account_id: int):
     if not provider.supports_billing:
         raise HTTPException(status_code=400, detail="该云厂商不支持查看账单")
     try:
-        data = provider.get_billing(acc["creds"])
+        return provider.get_billing(acc["creds"])
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"获取账单失败: {e}") from e
-    if acc["provider"] == "aws":
-        data["credit_total"] = acc.get("credit_total")
-    return data
 
 
 class CreditTotalBody(BaseModel):

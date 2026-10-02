@@ -169,17 +169,26 @@ try {
 const b = await api('GET', `/api/accounts/${curAccount.id}/billing`);
 const money = v => (b.currency? b.currency + ' ': '') + Number(v).toFixed(2);
 let creditHtml = '';
-if (b.credit_used > 0 || b.credit_total != null) {
-const remain = b.credit_total != null? Math.max(0, b.credit_total - (b.credit_used || 0)): null;
+if (b.credits && b.credits.length) {
+creditHtml = `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:#1a2138;border-radius:8px;flex-wrap:wrap">
+<div><div style="color:#8b93ad;font-size:12px">Credit 剩余</div>
+<div style="font-size:18px;color:#4ade80">${money(b.credit_remaining)}</div></div>
+<div><div style="color:#8b93ad;font-size:12px">Credit 已用</div>
+<div style="font-size:18px;color:#fbbf24">${money(b.credit_initial - b.credit_remaining)}</div></div>
+<div><div style="color:#8b93ad;font-size:12px">本月抵扣</div>
+<div style="font-size:18px">-${money(b.credit_used || 0)}</div></div></div>
+<table><thead><tr><th>Credit</th><th style="width:110px">总额</th><th style="width:110px">剩余</th>
+<th style="width:110px">已用</th><th style="width:120px">到期日</th><th style="width:90px">状态</th></tr></thead><tbody>` +
+b.credits.map(cr => `<tr><td>${esc(cr.name)}</td><td class="mono">${money(cr.initial)}</td>
+<td class="mono" style="color:#4ade80">${money(cr.remaining)}</td>
+<td class="mono">${money(cr.used)}</td>
+<td class="mono">${esc(cr.expires)}</td>
+<td>${esc(cr.status)}</td></tr>`).join('') + '</tbody></table>';
+} else if (b.credit_used > 0) {
 creditHtml = `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:#1a2138;border-radius:8px">
 <div><div style="color:#8b93ad;font-size:12px">Credit 抵扣（本月）</div>
-<div style="font-size:18px;color:#4ade80">-${money(b.credit_used || 0)}</div></div>
-${remain != null? `<div><div style="color:#8b93ad;font-size:12px">Credit 剩余（估算）</div>
-<div style="font-size:18px;color:#fbbf24">${money(remain)}</div></div>`: ''}
-<div style="margin-left:auto;align-self:center">
-<button class="btn sm" onclick="setCreditTotal(${b.credit_total != null? b.credit_total: ''})">
-${b.credit_total != null? '修改': '设置'} Credit 总额</button></div></div>
-${remain != null? '<div class="help" style="color:#6f7794;font-size:12px;margin-bottom:12px">剩余 = 总额 − 本月已用；AWS 不提供剩余 credit 的 API，总额需手动填写</div>': ''}`;
+<div style="font-size:18px;color:#4ade80">-${money(b.credit_used)}</div></div></div>
+<div class="help" style="color:#6f7794;font-size:12px;margin-bottom:12px">如需查看 credit 明细（剩余额度/到期日），请给 IAM 用户添加 billing:GetCredits 权限</div>`;
 }
 c.innerHTML = `<div class="bill-total"><div class="amount">${money(b.total)}</div>
 <div class="meta">统计周期：${esc(b.period)}${b.note? '<br>' + esc(b.note): ''}</div></div>` +
@@ -192,17 +201,6 @@ b.services.map(s => `<tr><td>${esc(s.name)}</td><td class="mono">${money(s.cost)
 } catch (e) {
 c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadBilling()">重试</button></div>`;
 }
-}
-
-async function setCreditTotal(cur) {
-const v = prompt('请输入该 AWS 账号的 Credit 总额（数字，留空则清除）：', cur === ''? '': cur);
-if (v === null) return;
-const t = v.trim() === ''? null: Number(v.trim());
-if (t !== null && (!isFinite(t) || t < 0)) { toast('请输入有效的非负数字', true); return;}
-try {
-await api('PUT', `/api/accounts/${curAccount.id}/credit-total`, {total: t});
-toast('已保存'); loadBilling();
-} catch (e) { toast(e.message, true);}
 }
 
 /* ---------- 配额 / 订阅 ---------- */

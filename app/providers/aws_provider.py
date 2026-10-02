@@ -201,11 +201,52 @@ class AwsProvider(Provider):
         except ClientError:  # noqa: BLE001
             pass
         credit_used = abs(round(credit_used, 4))
+        # Credit 明细（billing:GetCredits，需要额外 IAM 权限；无权限时跳过不阻断账单）
+        credits = []
+        credit_remaining = 0.0
+        credit_initial = 0.0
+        try:
+            ak = creds["access_key"].strip()
+            sk = creds["secret_key"].strip()
+            sts = boto3.client("sts", aws_access_key_id=ak,
+                               aws_secret_access_key=sk, region_name="us-east-1")
+            account_id = sts.get_caller_identity()["Account"]
+            billing = boto3.client("billing", aws_access_key_id=ak,
+                                   aws_secret_access_key=sk, region_name="us-east-1")
+            start_dt = datetime.datetime.now() - datetime.timedelta(days=365)
+            kwargs: dict = {"accountId": account_id, "startDate": start_dt}
+            while True:
+                cr_resp = billing.get_credits(**kwargs)
+                for c in cr_resp.get("CreditDataList", []):
+                    init = float(c["initialAmount"]["CurrencyAmount"])
+                    rem = float(c["remainingAmount"]["CurrencyAmount"])
+                    end = c.get("endDate")
+                    credits.append({
+                        "id": c.get("creditId", ""),
+                        "name": c.get("description", "") or c.get("creditId", ""),
+                        "initial": round(init, 2),
+                        "remaining": round(rem, 2),
+                        "used": round(init - rem, 2),
+                        "expires": end.strftime("%Y-%m-%d") if hasattr(end, "strftime") else str(end or ""),
+                        "status": c.get("creditStatus", ""),
+                    })
+                    credit_remaining += rem
+                    credit_initial += init
+                token = cr_resp.get("NextToken")
+                if not token:
+                    break
+                kwargs["NextToken"] = token
+        except ClientError:  # noqa: BLE001
+            pass
+        credits.sort(key=lambda x: x["expires"] or "9999")
         return {
             "currency": "",
             "period": f"{start} ~ {today.isoformat()}",
             "total": round(total, 4),
             "credit_used": credit_used,
+            "credits": credits,
+            "credit_remaining": round(credit_remaining, 2),
+            "credit_initial": round(credit_initial, 2),
             "services": services,
             "note": "金额为账户结算币种；Cost Explorer 数据约有 24 小时延迟",
         }

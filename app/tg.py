@@ -80,8 +80,16 @@ _PARAM_ACTIONS = {
 }
 _DANGER_ACTIONS = {"terminate", "change_ip", "reimage", "extend_disk"}
 _pending: dict[int, dict] = {}  # chat_id -> {"kind":..., ...} 等待用户文本输入
+
+
+class _NullCtx:
+    """TG 直调 provider 方法时的空上下文（provider 只用 ctx.log）。"""
+
+    def log(self, message: str) -> None:
+        pass
 _ls_cache: dict[str, dict] = {}
 _cf_cache: dict[str, dict] = {}
+_ls_create_cache: dict[str, dict] = {}  # 创建中转：key -> {account_id, name, region, zone, blueprint, bundle}
 
 
 def _esc(s) -> str:
@@ -205,6 +213,29 @@ async def _on_text(update, context):
             await update.message.reply_text(f"✅ {msg}")
         except Exception as e:  # noqa: BLE001
             await update.message.reply_text(f"❌ 刷新失败: {e}")
+        return
+    if kind == "cf_create":
+        acc = db.account_get(pend["account_id"])
+        try:
+            msg = get_provider("aws").create_distribution(
+                acc["creds"], text, "", "100")
+            await update.message.reply_text(f"✅ {msg}")
+        except Exception as e:  # noqa: BLE001
+            await update.message.reply_text(f"❌ 创建失败: {e}")
+        return
+    if kind == "ls_create_name":
+        name = text.strip()
+        if not name or len(name) > 30:
+            await update.message.reply_text("名称无效（1-30 个字符），已取消。")
+            return
+        key = f"n{len(_ls_create_cache) % 9000 + 1}"
+        _ls_create_cache[key] = {"account_id": pend["account_id"], "name": name}
+        regions = get_provider("aws").LIGHTSAIL_REGIONS
+        buttons = [[InlineKeyboardButton(r, callback_data=f"lsr:{key}:{r}")]
+                   for r in regions]
+        await update.message.reply_text(
+            f"实例名：<b>{_esc(name)}</b>\n请选择区域：",
+            parse_mode="HTML", reply_markup=_kb(buttons))
         return
     if kind == "daily_hour":
         if not text.isdigit() or not (0 <= int(text) <= 23):
@@ -407,7 +438,11 @@ async def _on_button(update, context):
                 await query.edit_message_text(f"获取失败: {e}", reply_markup=_kb(back))
                 return
             if not items:
-                await query.edit_message_text("没有 Lightsail 实例", reply_markup=_kb(back))
+                await query.edit_message_text(
+                    "没有 Lightsail 实例",
+                    reply_markup=_kb(
+                        [[InlineKeyboardButton("➕ 创建实例",
+                                              callback_data=f"lsc:{aid}")]] + back))
                 return
             buttons = []
             for it in items:
@@ -417,6 +452,8 @@ async def _on_button(update, context):
                 icon = "🟢" if it["state"] == "running" else "⚪"
                 buttons.append([InlineKeyboardButton(
                     f"{icon} {it['name']} ({it['region']})", callback_data=f"ls:{key}")])
+            buttons.append([InlineKeyboardButton("➕ 创建实例",
+                                                callback_data=f"lsc:{aid}")])
             buttons += back
             await query.edit_message_text(
                 f"Lightsail 实例（{len(items)} 台）：", reply_markup=_kb(buttons))
@@ -430,7 +467,11 @@ async def _on_button(update, context):
                 await query.edit_message_text(f"获取失败: {e}", reply_markup=_kb(back))
                 return
             if not items:
-                await query.edit_message_text("没有 CloudFront 分发", reply_markup=_kb(back))
+                await query.edit_message_text(
+                    "没有 CloudFront 分发",
+                    reply_markup=_kb(
+                        [[InlineKeyboardButton("➕ 创建分发",
+                                              callback_data=f"cfc:{aid}")]] + back))
                 return
             buttons = []
             for d in items:
@@ -441,6 +482,8 @@ async def _on_button(update, context):
                 label = (d["aliases"][0] if d["aliases"] else d["domain"])[:28]
                 buttons.append([InlineKeyboardButton(
                     f"{icon} {label}", callback_data=f"cf:{key}")])
+            buttons.append([InlineKeyboardButton("➕ 创建分发",
+                                                callback_data=f"cfc:{aid}")])
             buttons += back
             await query.edit_message_text(
                 f"CloudFront 分发（{len(items)} 个）：", reply_markup=_kb(buttons))
@@ -586,6 +629,74 @@ async def _on_button(update, context):
             await query.edit_message_text(f"✅ {msg}")
         except Exception as e:  # noqa: BLE001
             await query.edit_message_text(f"❌ 操作失败: {e}")
+        return
+
+    if data.startswith("cfc:"):
+        aid = data[4:]
+        _pending[chat_id] = {"kind": "cf_create", "account_id": int(aid)}
+        await query.edit_message_text(
+            "请直接回复源站域名（例如 example.com，不带 https://）：\n"
+            "将按默认配置创建：回源 HTTP、访客侧 HTTP 跳 HTTPS、价格等级 100（北美+欧洲）。")
+        return
+
+    if data.startswith("lsc:"):
+        aid = data[4:]
+        _pending[chat_id] = {"kind": "ls_create_name", "account_id": int(aid)}
+        await query.edit_message_text(
+            "请直接回复实例名称（字母、数字、横线，例如 web-1）：")
+        return
+
+    if data.startswith("lsr:"):
+        _, key, region = data.split(":", 2)
+        item = _ls_create_cache.get(key)
+        if not item:
+            await query.edit_message_text("信息已过期，请重新进入")
+            return
+        acc = db.account_get(item["account_id"])
+        await query.edit_message_text("正在获取该区域的镜像和套餐…")
+        try:
+            opts = get_provider("aws").get_lightsail_options(acc["creds"], region)
+        except Exception as e:  # noqa: BLE001
+            await query.edit_message_text(f"❌ 获取失败: {e}")
+            return
+        if not opts["zones"] or not opts["blueprints"] or not opts["bundles"]:
+            await query.edit_message_text("❌ 该区域无可用镜像/套餐，请换区域重试")
+            return
+        bp = next((b for b in opts["blueprints"] if "ubuntu" in b["id"].lower()),
+                  opts["blueprints"][0])
+        item.update({"region": region, "zone": opts["zones"][0],
+                     "blueprint": bp["id"], "bundle": opts["bundles"][0]["id"],
+                     "blueprint_name": bp["name"],
+                     "bundle_name": opts["bundles"][0]["name"]})
+        await query.edit_message_text(
+            f"🆕 <b>确认创建 Lightsail 实例</b>\n"
+            f"名称：{_esc(item['name'])}\n"
+            f"区域：{_esc(region)} / {_esc(item['zone'])}\n"
+            f"镜像：{_esc(item['blueprint_name'])}\n"
+            f"套餐：{_esc(item['bundle_name'])}\n"
+            f"（TG 端使用默认选项，更多组合请用 Web 端）",
+            parse_mode="HTML",
+            reply_markup=_kb([
+                [InlineKeyboardButton("✅ 确认创建", callback_data=f"lsx:{key}")],
+                [InlineKeyboardButton("取消",
+                                     callback_data=f"am:{item['account_id']}:ls")],
+            ]))
+        return
+
+    if data.startswith("lsx:"):
+        key = data[4:]
+        item = _ls_create_cache.get(key)
+        if not item:
+            await query.edit_message_text("信息已过期，请重新进入")
+            return
+        acc = db.account_get(item["account_id"])
+        try:
+            msg = get_provider("aws").create_lightsail_instance(
+                acc["creds"], item, _NullCtx())
+            _ls_create_cache.pop(key, None)
+            await query.edit_message_text(f"✅ {msg}")
+        except Exception as e:  # noqa: BLE001
+            await query.edit_message_text(f"❌ 创建失败: {e}")
         return
 
     if data.startswith("i:"):

@@ -377,6 +377,39 @@ def lightsail_action(request: Request, account_id: int, body: LightsailActionBod
     return {"ok": True, "message": msg}
 
 
+@app.get("/api/accounts/{account_id}/lightsail/options")
+def lightsail_options(request: Request, account_id: int, region: str = ""):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = _require_aws(acc)
+    try:
+        return provider.get_lightsail_options(
+            acc["creds"], region or acc["creds"]["region"])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"获取创建选项失败: {e}") from e
+
+
+class LightsailCreateBody(BaseModel):
+    name: str = ""
+    region: str = ""
+    zone: str = ""
+    blueprint: str = ""
+    bundle: str = ""
+    key_pair: str = ""
+
+
+@app.post("/api/accounts/{account_id}/lightsail/create")
+def lightsail_create(request: Request, account_id: int, body: LightsailCreateBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    _require_aws(acc)
+    params = body.dict()
+    job_id = jobs.submit("lightsail_create", "aws", account_id,
+                         f"创建 Lightsail / {params.get('name') or 'lightsail'}",
+                         tasks.job_lightsail_create, "aws", account_id, params)
+    return {"ok": True, "job_id": job_id}
+
+
 # ---------- AWS CloudFront ----------
 @app.get("/api/accounts/{account_id}/cloudfront")
 def list_cloudfront(request: Request, account_id: int):
@@ -420,6 +453,25 @@ def cloudfront_toggle(request: Request, account_id: int, body: CloudFrontToggleB
         msg = provider.cloudfront_toggle(acc["creds"], body.distribution_id, body.enabled)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"操作失败: {e}") from e
+    return {"ok": True, "message": msg}
+
+
+class CloudFrontCreateBody(BaseModel):
+    origin_domain: str
+    comment: str = ""
+    price_class: str = "100"
+
+
+@app.post("/api/accounts/{account_id}/cloudfront/create")
+def cloudfront_create(request: Request, account_id: int, body: CloudFrontCreateBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = _require_aws(acc)
+    try:
+        msg = provider.create_distribution(
+            acc["creds"], body.origin_domain, body.comment, body.price_class)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"创建失败: {e}") from e
     return {"ok": True, "message": msg}
 
 

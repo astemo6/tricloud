@@ -40,6 +40,14 @@ def job_snatch(ctx, provider_id: str, account_id: int, params: dict):
     return provider.snatch_instance(acc["creds"], params, ctx)
 
 
+def job_lightsail_create(ctx, provider_id: str, account_id: int, params: dict):
+    provider = get_provider(provider_id)
+    acc = db.account_get(account_id)
+    if not acc:
+        raise ValueError("账号不存在")
+    return provider.create_lightsail_instance(acc["creds"], params, ctx)
+
+
 def submit_action(provider_id: str, account_id: int, inst_dict: dict,
                   action: str, params: dict, title: str) -> str:
     return jobs.submit("action", provider_id, account_id, title,

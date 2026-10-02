@@ -258,6 +258,75 @@ class AwsProvider(Provider):
             return f"Lightsail 实例 {name} 重启请求已提交"
         raise ValueError(f"未知操作: {action}")
 
+    def get_lightsail_options(self, creds: dict, region: str) -> dict:
+        """Lightsail 创建选项：指定区域的可用区、系统镜像、套餐。"""
+        region = (region or "").strip()
+        if not region:
+            raise ValueError("请选择区域")
+        ls = self._ls_client(creds, region)
+        blueprints = []
+        for b in ls.get_blueprints().get("blueprints", []):
+            if not b.get("isActive"):
+                continue
+            blueprints.append({
+                "id": b["blueprintId"],
+                "name": f"{b.get('name', b['blueprintId'])}",
+                "platform": b.get("platform", ""),
+            })
+        bundles = []
+        for b in ls.get_bundles().get("bundles", []):
+            if not b.get("isActive"):
+                continue
+            bundles.append({
+                "id": b["bundleId"],
+                "name": (f"{b.get('name', b['bundleId'])} · "
+                         f"${b.get('price', '?')}/月 · "
+                         f"{b.get('ramSizeInGb', '?')}G 内存"),
+                "price": float(b.get("price", 9999)),
+            })
+        bundles.sort(key=lambda x: x["price"])
+        zones = []
+        for r in ls.get_regions().get("regions", []):
+            if r.get("name") == region:
+                zones = [z["zoneName"] for z in r.get("availabilityZones", [])]
+        return {
+            "regions": self.LIGHTSAIL_REGIONS,
+            "default_region": region,
+            "zones": zones,
+            "blueprints": blueprints,
+            "bundles": bundles,
+        }
+
+    def create_lightsail_instance(self, creds: dict, params: dict, ctx) -> str:
+        region = (params.get("region") or "").strip() or creds["region"].strip()
+        ls = self._ls_client(creds, region)
+        name = (params.get("name") or "").strip() or f"tricloud-{int(time.time()) % 100000}"
+        zone = (params.get("zone") or "").strip()
+        blueprint = (params.get("blueprint") or "").strip()
+        bundle = (params.get("bundle") or "").strip()
+        if not zone:
+            raise ValueError("请选择可用区")
+        if not blueprint:
+            raise ValueError("请选择系统镜像")
+        if not bundle:
+            raise ValueError("请选择套餐")
+        kwargs: dict = {
+            "instanceNames": [name],
+            "availabilityZone": zone,
+            "blueprintId": blueprint,
+            "bundleId": bundle,
+        }
+        key_pair = (params.get("key_pair") or "").strip()
+        if key_pair:
+            kwargs["keyPairName"] = key_pair
+        ctx.log(f"在 {region} / {zone} 创建 Lightsail 实例 {name}…")
+        ls.create_instances(**kwargs)
+        return (f"Lightsail 实例创建已提交: {name}\n"
+                f"区域: {region} / {zone}\n"
+                f"镜像: {blueprint}\n"
+                f"套餐: {bundle}\n"
+                f"（实例启动约需几分钟，之后在列表中查看 IP）")
+
     # ---------- CloudFront ----------
     def _cf_client(self, creds: dict):
         return boto3.client(
@@ -315,6 +384,52 @@ class AwsProvider(Provider):
         cfg["Enabled"] = enabled
         cf.update_distribution(DistributionConfig=cfg, Id=dist_id, IfMatch=etag)
         return f"分发 {dist_id} 已{'启用' if enabled else '停用'}（配置部署中，约需几分钟生效）"
+
+    # AWS 托管的缓存优化策略（CachingOptimized），免得手写 ForwardedValues
+    _CF_CACHE_POLICY_OPTIMIZED = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+
+    def create_distribution(self, creds: dict, origin_domain: str,
+                            comment: str = "", price_class: str = "100") -> str:
+        """简化创建 CloudFront 分发：给个源站域名，其他用默认配置。
+
+        默认：回源 http-only、访客侧 http 跳 https、CachingOptimized 缓存策略、
+        价格等级 100（仅北美+欧洲，最便宜）。
+        """
+        cf = self._cf_client(creds)
+        origin_domain = (origin_domain or "").strip()
+        if not origin_domain:
+            raise ValueError("请提供源站域名（如 example.com）")
+        price_map = {"100": "PriceClass_100", "200": "PriceClass_200",
+                     "all": "PriceClass_All"}
+        origin_id = f"tricloud-{origin_domain}"
+        resp = cf.create_distribution(DistributionConfig={
+            "CallerReference": f"tricloud-{int(time.time())}",
+            "Comment": (comment or "").strip() or f"tricloud {origin_domain}",
+            "Enabled": True,
+            "Origins": {"Quantity": 1, "Items": [{
+                "Id": origin_id,
+                "DomainName": origin_domain,
+                "CustomOriginConfig": {
+                    "HTTPPort": 80, "HTTPSPort": 443,
+                    "OriginProtocolPolicy": "http-only",
+                },
+            }]},
+            "DefaultCacheBehavior": {
+                "TargetOriginId": origin_id,
+                "ViewerProtocolPolicy": "redirect-to-https",
+                "AllowedMethods": {
+                    "Quantity": 2, "Items": ["GET", "HEAD"],
+                    "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]},
+                },
+                "CachePolicyId": self._CF_CACHE_POLICY_OPTIMIZED,
+                "Compress": True,
+            },
+            "PriceClass": price_map.get(price_class, "PriceClass_100"),
+        })
+        d = resp["Distribution"]
+        return (f"分发创建已提交: {d['Id']}\n"
+                f"域名: {d['DomainName']}\n"
+                f"状态: {d['Status']}（部署约需 15 分钟，之后生效）")
 
     def _extend_disk(self, ec2, iid: str, ctx) -> str:
         size = int((getattr(ctx, "params", {}) or {}).get("size_gb") or 0)
@@ -394,6 +509,7 @@ class AwsProvider(Provider):
         keys = [k["KeyName"] for k in ec2.describe_key_pairs()["KeyPairs"]]
         return {
             "regions": sorted(regions),
+            "default_region": creds["region"].strip(),
             "instance_types": INSTANCE_TYPES,
             "key_pairs": keys,
             "ami_note": "留空则自动使用最新的 Ubuntu 22.04 LTS 镜像",
@@ -437,7 +553,14 @@ class AwsProvider(Provider):
         return sg["GroupId"]
 
     def create_instance(self, creds: dict, params: dict, ctx) -> str:
-        ec2 = _client(creds)
+        region = (params.get("region") or "").strip() or creds["region"].strip()
+        ec2 = boto3.client(
+            "ec2",
+            aws_access_key_id=creds["access_key"].strip(),
+            aws_secret_access_key=creds["secret_key"].strip(),
+            region_name=region,
+        )
+        ctx.log(f"目标区域: {region}")
         ami = (params.get("ami") or "").strip() or self._latest_ubuntu_ami(ec2)
         ctx.log(f"使用镜像: {ami}")
         itype = params.get("instance_type", "t2.micro")
@@ -463,6 +586,7 @@ class AwsProvider(Provider):
         time.sleep(5)
         desc = ec2.describe_instances(InstanceIds=[iid])["Reservations"][0]["Instances"][0]
         text = (f"实例创建成功: {name}\n"
+                f"区域: {region}\n"
                 f"ID: {iid}\n"
                 f"公网 IP: {desc.get('PublicIpAddress', '（分配中）')}\n"
                 f"登录用户: ubuntu\n"

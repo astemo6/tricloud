@@ -46,7 +46,7 @@ loadAccounts();
 }
 
 function renderTabs() {
-const defs = [{key: 'instances', label: '实例'}];
+const defs = [{key: 'instances', label: curProvider.id === 'aws'? 'EC2': '实例'}];
 if (curProvider.supports_lightsail) defs.push({key: 'lightsail', label: 'Lightsail'});
 if (curProvider.supports_cloudfront) defs.push({key: 'cloudfront', label: 'CloudFront'});
 if (curProvider.supports_billing) defs.push({key: 'billing', label: '账单'});
@@ -221,11 +221,12 @@ const badge = s => {
 const cls = s === 'running'? 'b-running': (s === 'stopped'? 'b-stopped': 'b-unknown');
 return `<span class="badge ${cls}">${esc(s || 'unknown')}</span>`;
 };
-c.innerHTML = `<div style="margin-bottom:12px">
+c.innerHTML = `<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
 <select id="lsRegionSel" onchange="lsRegion=this.value;loadLightsail()" style="background:#0f1420;color:#e6e9f0;border:1px solid #2a3350;border-radius:8px;padding:8px 10px">
 <option value="">全部区域（自动扫描）</option>
 ${LS_REGIONS.map(r => `<option value="${r}"${r === lsRegion? ' selected': ''}>${r}</option>`).join('')}
-</select></div>` +
+</select>
+<button class="btn sm" onclick="openLightsailCreateModal()">创建实例</button></div>` +
 (list.length
 ? `<table><thead><tr><th>名称</th><th>状态</th><th>套餐</th><th>公网 IP</th><th>内网 IP</th>
 <th>区域</th><th>创建时间</th><th>操作</th></tr></thead><tbody>` +
@@ -259,13 +260,56 @@ loadLightsail();
 } catch (e) { toast(e.message, true);}
 }
 
+async function openLightsailCreateModal() {
+if (!curAccount) { toast('请先添加账号', true); return;}
+const box = document.getElementById('modalBox');
+const initRegion = lsRegion || 'ap-northeast-1';
+box.innerHTML = `<h2>创建 Lightsail 实例</h2>
+<form id="lsCreateForm">
+${formField({key: 'name', label: '实例名', placeholder: '留空自动生成'})}
+${row({key: 'region', label: '区域', type: 'select', options: LS_REGIONS, value: initRegion},
+{key: 'zone', label: '可用区', type: 'select', options: []})}
+${row({key: 'blueprint', label: '系统镜像', type: 'select', options: []},
+{key: 'bundle', label: '套餐', type: 'select', options: []})}
+${formField({key: 'key_pair', label: '密钥对（可选）', placeholder: '已有的 Lightsail 密钥对名，留空则不绑定'})}
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="submit" class="btn primary">提交创建（后台执行）</button>
+</div></form>`;
+document.getElementById('modalMask').classList.add('show');
+const form = document.getElementById('lsCreateForm');
+async function fillOpts(region) {
+const sel = n => form.querySelector(`[name="${n}"]`);
+try {
+const opts = await api('GET', `/api/accounts/${curAccount.id}/lightsail/options?region=${encodeURIComponent(region)}`);
+sel('zone').innerHTML = opts.zones.map(z => `<option value="${esc(z)}">${esc(z)}</option>`).join('');
+sel('blueprint').innerHTML = opts.blueprints.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+const ub = opts.blueprints.find(b => /ubuntu/i.test(b.id));
+if (ub) sel('blueprint').value = ub.id;
+sel('bundle').innerHTML = opts.bundles.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+} catch (e) { toast(e.message, true);}
+}
+form.querySelector('[name="region"]').onchange = e => fillOpts(e.target.value);
+await fillOpts(initRegion);
+form.onsubmit = async e => {
+e.preventDefault();
+const fd = new FormData(form), o = {};
+['name', 'region', 'zone', 'blueprint', 'bundle', 'key_pair'].forEach(k => o[k] = (fd.get(k) || '').trim());
+try {
+const r = await api('POST', `/api/accounts/${curAccount.id}/lightsail/create`, o);
+closeModal(); toast('创建任务已提交'); toggleDrawer(true); trackJob(r.job_id);
+} catch (err) { toast(err.message, true);}
+};
+}
+
 /* ---------- CloudFront ---------- */
 async function loadCloudFront() {
 const c = document.getElementById('content');
 c.innerHTML = '<div class="empty">加载中…</div>';
 try {
 const list = await api('GET', `/api/accounts/${curAccount.id}/cloudfront`);
-c.innerHTML = list.length
+const header = `<div style="margin-bottom:12px"><button class="btn sm" onclick="openCfCreateModal()">创建分发</button></div>`;
+c.innerHTML = header + (list.length
 ? `<table><thead><tr><th>分发</th><th>状态</th><th>域名/别名</th><th>源站</th><th>价格等级</th><th>操作</th></tr></thead><tbody>` +
 list.map(d => `<tr>
 <td><span class="mono">${esc(d.id)}</span><br><span style="color:#6f7794;font-size:11px">${esc(d.domain)}</span>
@@ -281,7 +325,7 @@ ${d.enabled
 ? `<button class="btn sm danger" onclick="cfToggle('${esc(d.id)}', false)">停用</button>`
 : `<button class="btn sm" onclick="cfToggle('${esc(d.id)}', true)">启用</button>`}
 </div></td></tr>`).join('') + '</tbody></table>'
-: '<div class="empty">该账号下没有 CloudFront 分发</div>';
+: '<div class="empty">该账号下没有 CloudFront 分发</div>');
 } catch (e) {
 c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadCloudFront()">重试</button></div>`;
 }
@@ -319,6 +363,35 @@ const r = await api('POST', `/api/accounts/${curAccount.id}/cloudfront/toggle`,
 toast(r.message);
 loadCloudFront();
 } catch (e) { toast(e.message, true);}
+}
+
+function openCfCreateModal() {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>创建 CloudFront 分发</h2>
+<form id="cfCreateForm">
+${formField({key: 'origin_domain', label: '源站域名', required: true, placeholder: '如 example.com（不带 https://）'})}
+${row({key: 'price_class', label: '价格等级', type: 'select',
+options: ['100（北美+欧洲·最便宜）', '200（+亚洲）', 'all（全部边缘节点）'], value: '100（北美+欧洲·最便宜）'},
+{key: 'comment', label: '备注（可选）', placeholder: '如 官网加速'})}
+<div class="help" style="color:#8b93ad;margin:-6px 0 14px">默认配置：回源走 HTTP、访客侧 HTTP 跳 HTTPS、缓存优化策略。分发部署约需 15 分钟。</div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="submit" class="btn primary">提交创建</button>
+</div></form>`;
+document.getElementById('modalMask').classList.add('show');
+document.getElementById('cfCreateForm').onsubmit = async e => {
+e.preventDefault();
+const fd = new FormData(e.target);
+const origin = (fd.get('origin_domain') || '').trim();
+if (!origin) { toast('请填写源站域名', true); return;}
+let pc = (fd.get('price_class') || '100');
+pc = pc.startsWith('200')? '200': pc.startsWith('all')? 'all': '100';
+try {
+const r = await api('POST', `/api/accounts/${curAccount.id}/cloudfront/create`,
+{origin_domain: origin, comment: (fd.get('comment') || '').trim(), price_class: pc});
+closeModal(); toast('分发创建已提交'); loadCloudFront();
+} catch (err) { toast(err.message, true);}
+};
 }
 
 /* ---------- 账号管理 ---------- */
@@ -481,10 +554,11 @@ ${formField({key: 'assign_public_ip', label: '分配公网 IP', type: 'checkbox'
 ${formField({key: 'startup_script', label: '开机脚本（可选）', type: 'textarea'})}`;
 if (p.id === 'aws') return `
 ${formField({key: 'name', label: '实例名（Name 标签）', placeholder: '留空自动生成'})}
-${row({key: 'instance_type', label: '实例类型', type: 'select', options: opts.instance_types, value: 't2.micro'},
-{key: 'key_name', label: '密钥对', type: 'select', options: ['（自动创建新密钥对）',...(opts.key_pairs || [])]})}
-${formField({key: 'ami', label: 'AMI（可选）', placeholder: '留空自动使用最新 Ubuntu 22.04'})}
-<div class="help" style="color:#8b93ad;margin:-6px 0 14px">将在默认 VPC 自动创建安全组（放行 SSH）。新密钥对的私钥只在任务结果中显示一次。</div>`;
+${row({key: 'region', label: '区域', type: 'select', options: opts.regions, value: opts.default_region || opts.regions[0]},
+{key: 'instance_type', label: '实例类型', type: 'select', options: opts.instance_types, value: 't2.micro'})}
+${row({key: 'key_name', label: '密钥对', type: 'select', options: ['（自动创建新密钥对）',...(opts.key_pairs || [])]},
+{key: 'ami', label: 'AMI（可选）', placeholder: '留空自动使用最新 Ubuntu 22.04'})}
+<div class="help" style="color:#8b93ad;margin:-6px 0 14px">将在目标区域的默认 VPC 自动创建安全组（放行 SSH）。密钥对列表为账号默认区域的——若选择其他区域，将自动创建新密钥对。新密钥对的私钥只在任务结果中显示一次。</div>`;
 if (p.id === 'azure') return `
 ${row({key: 'name', label: '虚拟机名（可选）', placeholder: '留空自动生成'},
 {key: 'resource_group', label: '资源组（可选）', placeholder: '留空自动创建'})}
@@ -498,18 +572,23 @@ ${formField({key: 'ssh_key', label: 'SSH 公钥（可选，Linux 有效）', typ
 return '';
 }
 
+let lastCreateOpts = null; // 最近一次创建选项，供 readForm 判断跨区
 function readForm(form, p) {
 const fd = new FormData(form), o = {};
 const fields = p.id === 'oci'
 ? ['name', 'availability_domain', 'shape', 'ocpus', 'memory_gbs', 'os', 'ssh_key', 'boot_volume_gb', 'login_user', 'password', 'startup_script']
-: p.id === 'aws'? ['name', 'instance_type', 'ami', 'key_name']
+: p.id === 'aws'? ['name', 'region', 'instance_type', 'ami', 'key_name']
 : ['name', 'resource_group', 'location', 'vm_size', 'image', 'admin_username', 'password', 'ssh_key', 'disk_gb'];
 fields.forEach(k => o[k] = (fd.get(k) || '').trim());
 if (p.id === 'oci') {
 o.assign_public_ip =!!fd.get('assign_public_ip');
 if (o.key_name === '（自动创建新密钥对）') o.key_name = '';
 }
-if (p.id === 'aws' && o.key_name === '（自动创建新密钥对）') o.key_name = '';
+if (p.id === 'aws') {
+if (o.key_name === '（自动创建新密钥对）') o.key_name = '';
+// 密钥对列表是账号默认区域的；跨区创建时强制自动创建新密钥对
+if (lastCreateOpts && o.region && o.region !== lastCreateOpts.default_region) o.key_name = '';
+}
 return o;
 }
 
@@ -517,6 +596,7 @@ async function openCreateModal() {
 if (!curAccount) { toast('请先添加账号', true); return;}
 const opts = await api('GET', `/api/accounts/${curAccount.id}/create-options`).catch(e => { toast(e.message, true); return null;});
 if (!opts) return;
+lastCreateOpts = opts;
 const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>创建实例 · ${esc(curProvider.name)}</h2>
 <form id="createForm">${createFormHTML(curProvider, opts)}

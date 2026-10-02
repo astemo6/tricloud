@@ -425,6 +425,7 @@ def get_billing(request: Request, account_id: int):
             m["remaining"] = m["initial"]  # 单笔不精确分摊，只展示总额
             m["used"] = 0.0
             exp = m.pop("expires_at")
+            m["expires_at_raw"] = exp
             m["expires"] = _fmt_ts(exp) if exp else ""
             m["status"] = "手动"
         data["manual_credits"] = manual
@@ -514,6 +515,39 @@ def del_manual_credit(request: Request, account_id: int, credit_id: int):
     _get_account(account_id)
     if not db.credit_delete(credit_id, account_id):
         raise HTTPException(status_code=404, detail="记录不存在")
+    return {"ok": True}
+
+
+@app.put("/api/accounts/{account_id}/credits-manual/{credit_id}")
+def edit_manual_credit(request: Request, account_id: int, credit_id: int,
+                       body: ManualCreditBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    if acc["provider"] != "aws":
+        raise HTTPException(status_code=400, detail="只有 AWS 账号支持维护 Credit")
+    old = db.credit_get(credit_id, account_id)
+    if not old:
+        raise HTTPException(status_code=404, detail="记录不存在")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="请填写 Credit 名称")
+    if body.amount <= 0:
+        raise HTTPException(status_code=400, detail="金额必须大于 0")
+    import time as _t
+    import datetime as _dt2
+    fields = {"name": name, "amount": body.amount, "expires_at": body.expires_at}
+    # 生效日期变了 → 重算基线
+    new_start = body.start_at or old.get("start_at") or _t.time()
+    if abs(new_start - (old.get("start_at") or 0)) > 1:
+        fields["start_at"] = new_start
+        try:
+            provider = get_provider(acc["provider"])
+            start_d = _dt2.datetime.fromtimestamp(new_start).strftime("%Y-%m-%d")
+            fields["ce_baseline"] = provider.get_credit_applied(
+                acc["creds"], start_d, _dt2.date.today().isoformat())
+        except Exception:  # noqa: BLE001
+            fields["ce_baseline"] = old.get("ce_baseline") or 0.0
+    db.credit_update(credit_id, account_id, fields)
     return {"ok": True}
 
 

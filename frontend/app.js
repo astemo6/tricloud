@@ -261,6 +261,7 @@ c.innerHTML = '<div class="empty">加载中…</div>';
 try {
 const b = await api('GET', `/api/accounts/${curAccount.id}/billing`);
 const money = v => (b.currency? b.currency + ' ': '') + Number(v).toFixed(2);
+window._manualCredits = b.manual_credits || [];
 let creditHtml = '';
 const apiCredits = b.credits || [];
 const manualCredits = b.manual_credits || [];
@@ -288,7 +289,8 @@ allCredits.map(cr => `<tr><td>${esc(cr.name)}</td><td class="mono">${money(cr.in
 <td class="mono" style="color:#4ade80">${money(cr.remaining)}</td>
 <td class="mono">${esc(cr.expires)}</td>
 <td>${esc(cr.status)}${cr.source === 'manual'? '（手动）': ''}</td>
-<td>${cr.source === 'manual'? `<button class="btn sm danger" onclick="delManualCredit(${cr.id})">删除</button>`: ''}</td></tr>`).join('') + '</tbody></table>';
+<td>${cr.source === 'manual'? `<button class="btn sm" onclick="editManualCredit(${cr.id})">编辑</button>
+<button class="btn sm danger" onclick="delManualCredit(${cr.id})">删除</button>`: ''}</td></tr>`).join('') + '</tbody></table>';
 } else {
 creditHtml = `<div style="margin:12px 0"><button class="btn sm" onclick="addManualCredit()">+ 添加 Credit</button>
 <span style="color:#6f7794;font-size:12px;margin-left:8px">API 未返回 credit 明细（如教程奖励类），可手动添加</span></div>`;
@@ -344,6 +346,51 @@ try {
 await api('DELETE', `/api/accounts/${curAccount.id}/credits-manual/${id}`);
 toast('已删除'); loadBilling();
 } catch (e) { toast(e.message, true);}
+}
+
+function _fmtDateInput(ts) {
+if (!ts) return '';
+const d = new Date(ts * 1000);
+return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function _parseDateInput(s) {
+if (!s || !s.trim()) return null;
+const m = s.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+if (!m) return undefined;
+return new Date(`${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}T00:00:00`).getTime() / 1000;
+}
+
+async function editManualCredit(id) {
+const cr = (window._manualCredits || []).find(c => c.id === id);
+if (!cr) { toast('找不到该记录', true); return;}
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>编辑 Credit</h2>
+<form id="creditEditForm">
+${formField({key: 'name', label: 'Credit 名称', required: true, value: cr.name})}
+${formField({key: 'amount', label: '金额（美元）', type: 'number', required: true, value: cr.initial})}
+${row({key: 'start_at', label: '生效日期', placeholder: 'YYYY-MM-DD', value: _fmtDateInput(cr.start_at)},
+{key: 'expires_at', label: '到期日', placeholder: 'YYYY-MM-DD，可空', value: _fmtDateInput(cr.expires_at_raw)})}
+<div class="help" style="color:#8b93ad;margin-bottom:14px">修改生效日期会重新计算抵扣基线。</div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="submit" class="btn primary">保存</button>
+</div></form>`;
+document.getElementById('modalMask').classList.add('show');
+document.getElementById('creditEditForm').onsubmit = async e => {
+e.preventDefault();
+const fd = new FormData(e.target);
+const amount = Number((fd.get('amount') || '').trim());
+if (!isFinite(amount) || amount <= 0) { toast('金额无效', true); return;}
+const start_at = _parseDateInput(fd.get('start_at'));
+const expires_at = _parseDateInput(fd.get('expires_at'));
+if (start_at === undefined || expires_at === undefined) { toast('日期格式不正确（YYYY-MM-DD）', true); return;}
+try {
+await api('PUT', `/api/accounts/${curAccount.id}/credits-manual/${id}`,
+{name: (fd.get('name') || '').trim(), amount, start_at, expires_at});
+toast('已保存'); closeModal(); loadBilling();
+} catch (err) { toast(err.message, true);}
+};
 }
 
 /* ---------- 配额 / 订阅 ---------- */

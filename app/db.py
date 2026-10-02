@@ -226,6 +226,30 @@ def credit_delete(credit_id: int, account_id: int) -> bool:
         return cur.rowcount > 0
 
 
+def credit_update(credit_id: int, account_id: int, fields: dict) -> bool:
+    allowed = {"name", "amount", "expires_at", "start_at", "ce_baseline"}
+    sets, vals = [], []
+    for k, v in fields.items():
+        if k in allowed:
+            sets.append(f"{k}=?")
+            vals.append(v)
+    if not sets:
+        return False
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            f"UPDATE account_credits SET {', '.join(sets)} WHERE id=? AND account_id=?",
+            (*vals, credit_id, account_id))
+        return cur.rowcount > 0
+
+
+def credit_get(credit_id: int, account_id: int) -> dict | None:
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM account_credits WHERE id=? AND account_id=?",
+            (credit_id, account_id)).fetchone()
+        return dict(row) if row else None
+
+
 def account_delete(account_id: int) -> bool:
     with _lock, _connect() as conn:
         cur = conn.execute("DELETE FROM accounts WHERE id=?", (account_id,))

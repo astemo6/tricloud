@@ -144,6 +144,11 @@ openParamModal('磁盘扩容', inst, 'extend_disk',
 [{key: 'size_gb', label: '目标大小（GB）', type: 'number', required: true, placeholder: '如 100'}],
 '只能调大不能调小，扩容后需在系统内手动扩展分区。');
 return;}
+if (action === 'resize') {
+openParamModal('改配置', inst, 'resize',
+[{key: 'size', label: '目标规格', required: true, placeholder: '如 Standard_B2s'}],
+'会先释放资源（deallocate，停止计费）再变更规格，完成后自动重启。部分规格变更可能不支持，请确认该规格在当前区域可用。');
+return;}
 if (action === 'open_port') {
 openParamModal('开放端口', inst, 'open_port',
 [{key: 'port', label: '端口', type: 'number', required: true, placeholder: '如 8080'}],
@@ -878,6 +883,7 @@ if (f.required && !v) { toast(`请填写「${f.label}」`, true); return; }
 params[f.key] = v;
 }
 if (action === 'extend_disk' && !confirm(`确定把磁盘扩容到 ${params.size_gb}GB 吗？（不可逆，且可能产生费用）`)) return;
+if (action === 'resize' && !confirm(`确定把规格改为 ${params.size} 吗？会先释放资源再重启，可能产生费用差异。`)) return;
 try {
 const r = await api('POST', `/api/accounts/${curAccount.id}/action`,
 {instance: inst, action, params});

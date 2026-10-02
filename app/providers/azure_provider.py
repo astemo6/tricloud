@@ -92,6 +92,7 @@ class AzureProvider(Provider):
         {"key": "change_ip", "label": "更换公网 IP"},
         {"key": "open_port", "label": "开放端口"},
         {"key": "extend_disk", "label": "磁盘扩容"},
+        {"key": "resize", "label": "改配置"},
         {"key": "reimage", "label": "重置系统", "danger": True},
     ]
     supports_quotas = True
@@ -226,6 +227,8 @@ class AzureProvider(Provider):
             return self._open_port(compute, network, rg, name, ctx)
         if action == "extend_disk":
             return self._extend_disk(compute, rg, name, ctx)
+        if action == "resize":
+            return self._resize(compute, rg, name, ctx)
         if action == "reimage":
             ctx.log("正在重置系统（重装镜像），虚拟机数据盘保留、系统盘还原…")
             compute.virtual_machines.begin_reimage(rg, name).result()
@@ -281,6 +284,26 @@ class AzureProvider(Provider):
                          access="Allow", priority=prio, direction="Inbound"))
         poller.result()
         return f"已在 NSG {nsg_name} 放行 TCP 端口 {port}（来源 *）"
+
+    def _resize(self, compute, rg: str, vm_name: str, ctx) -> str:
+        size = ((getattr(ctx, "params", {}) or {}).get("size") or "").strip()
+        if not size:
+            raise ValueError("请提供目标规格（如 Standard_B2s）")
+        vm = compute.virtual_machines.get(rg, vm_name)
+        cur = ""
+        if vm.hardware_profile:
+            cur = vm.hardware_profile.vm_size or ""
+        if cur.lower() == size.lower():
+            raise ValueError(f"已是该规格 {cur}，无需变更")
+        ctx.log(f"规格 {cur or '未知'} → {size}，正在释放资源（deallocate）…")
+        compute.virtual_machines.begin_deallocate(rg, name=vm_name).result()
+        ctx.log("正在变更规格…")
+        from azure.mgmt.compute.models import HardwareProfile
+        compute.virtual_machines.begin_update(
+            rg, vm_name, {"hardware_profile": HardwareProfile(vm_size=size)}).result()
+        ctx.log("正在重新启动…")
+        compute.virtual_machines.begin_start(rg, name=vm_name).result()
+        return f"虚拟机规格已从 {cur or '未知'} 变更为 {size} 并重新启动"
 
     def _extend_disk(self, compute, rg: str, vm_name: str, ctx) -> str:
         size = int((getattr(ctx, "params", {}) or {}).get("size_gb") or 0)

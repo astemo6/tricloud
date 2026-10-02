@@ -69,16 +69,17 @@ _ACTION_LABELS = {
     "terminate": "终止/删除", "change_ip": "更换公网 IP", "assign_ipv6": "分配 IPv6",
     "delete_ipv6": "删除 IPv6",
     "rename": "改名", "extend_disk": "磁盘扩容", "open_port": "开放端口",
-    "reimage": "重置系统",
+    "reimage": "重置系统", "resize": "改配置",
 }
 # 需要用户输入参数的操作：action -> (提示语, params key)
 _PARAM_ACTIONS = {
     "rename": ("请直接回复新的实例名称：", "new_name"),
     "extend_disk": ("请直接回复目标磁盘大小（GB，只能调大，例如 100）：", "size_gb"),
     "open_port": ("请直接回复要放行的端口（1-65535，例如 8080）：", "port"),
+    "resize": ("请直接回复目标规格（例如 Standard_B2s）：", "size"),
     "invalidate": ("请直接回复要刷新的路径（每行一个，回复“全部”则刷新 /*）：", "paths"),
 }
-_DANGER_ACTIONS = {"terminate", "change_ip", "reimage", "extend_disk"}
+_DANGER_ACTIONS = {"terminate", "change_ip", "reimage", "extend_disk", "resize"}
 _pending: dict[int, dict] = {}  # chat_id -> {"kind":..., ...} 等待用户文本输入
 
 

@@ -181,8 +181,10 @@ class OciProvider(Provider):
             raise ValueError(f"查询配额定义失败（需要 limits 读取权限）: {e}") from e
         interesting = [d for d in defs
                        if "count" in d.name.lower()
+                       and "gpu" not in d.name.lower()
+                       and "dvh" not in d.name.lower()
                        and any(k in d.name.lower() for k in
-                               ("micro", "small", "a1", "e2", "e3", "e4", "standard"))]
+                               ("micro", "small", "-a1-", "-a1.", "e2", "e3", "e4", "standard"))]
         interesting.sort(key=lambda d: (0 if "micro" in d.name.lower() else
                                         1 if "a1" in d.name.lower() else 2, d.name))
         items = []

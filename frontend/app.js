@@ -585,7 +585,11 @@ document.getElementById('modalMask').classList.add('show');
 document.getElementById('paramForm').onsubmit = async e => {
 e.preventDefault();
 const fd = new FormData(e.target), params = {};
-fields.forEach(f => params[f.key] = (fd.get(f.key) || '').trim());
+for (const f of fields) {
+const v = (fd.get(f.key) || '').trim();
+if (f.required && !v) { toast(`请填写「${f.label}」`, true); return; }
+params[f.key] = v;
+}
 if (action === 'extend_disk' && !confirm(`确定把磁盘扩容到 ${params.size_gb}GB 吗？（不可逆，且可能产生费用）`)) return;
 try {
 const r = await api('POST', `/api/accounts/${curAccount.id}/action`,

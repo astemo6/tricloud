@@ -176,15 +176,19 @@ if (allCredits.length) {
 const apiRemain = b.credit_remaining || 0;
 const apiInit = b.credit_initial || 0;
 const manTotal = manualCredits.reduce((s, c) => s + c.initial, 0);
+const manRemain = b.manual_remaining != null? b.manual_remaining: manTotal;
 creditHtml = `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:#1a2138;border-radius:8px;flex-wrap:wrap">
-<div><div style="color:#8b93ad;font-size:12px">Credit 剩余（合计）</div>
-<div style="font-size:18px;color:#4ade80">${money(apiRemain + manTotal)}</div></div>
+<div><div style="color:#8b93ad;font-size:12px">Credit 剩余（合计·自动更新）</div>
+<div style="font-size:18px;color:#4ade80">${money(apiRemain + manRemain)}</div></div>
 ${apiCredits.length? `<div><div style="color:#8b93ad;font-size:12px">API 已用</div>
 <div style="font-size:18px;color:#fbbf24">${money(apiInit - apiRemain)}</div></div>`: ''}
+${manualCredits.length? `<div><div style="color:#8b93ad;font-size:12px">手动已用（累计抵扣）</div>
+<div style="font-size:18px;color:#fbbf24">${money(b.manual_applied || 0)}</div></div>`: ''}
 <div><div style="color:#8b93ad;font-size:12px">本月抵扣</div>
 <div style="font-size:18px">-${money(b.credit_used || 0)}</div></div>
 <div style="margin-left:auto;align-self:center">
 <button class="btn sm" onclick="addManualCredit()">+ 添加 Credit</button></div></div>
+<div class="help" style="color:#6f7794;font-size:12px;margin-bottom:12px">手动 credit 的剩余 = 总额 − Cost Explorer 累计抵扣（从最早生效日算起，约 24 小时延迟），每天自动更新</div>
 <table><thead><tr><th>Credit</th><th style="width:110px">总额</th><th style="width:110px">剩余</th>
 <th style="width:120px">到期日</th><th style="width:90px">状态</th><th style="width:70px"></th></tr></thead><tbody>` +
 allCredits.map(cr => `<tr><td>${esc(cr.name)}</td><td class="mono">${money(cr.initial)}</td>
@@ -228,8 +232,15 @@ const m = exp.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
 if (!m) { toast('日期格式不正确', true); return;}
 expires_at = new Date(`${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}T00:00:00`).getTime() / 1000;
 }
+const st = prompt('生效日期（格式 YYYY-MM-DD，留空则为今天）：');
+let start_at = null;
+if (st !== null && st.trim()) {
+const m2 = st.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+if (!m2) { toast('日期格式不正确', true); return;}
+start_at = new Date(`${m2[1]}-${m2[2].padStart(2, '0')}-${m2[3].padStart(2, '0')}T00:00:00`).getTime() / 1000;
+}
 try {
-await api('POST', `/api/accounts/${curAccount.id}/credits-manual`, {name: name.trim(), amount, expires_at});
+await api('POST', `/api/accounts/${curAccount.id}/credits-manual`, {name: name.trim(), amount, expires_at, start_at});
 toast('已添加'); loadBilling();
 } catch (e) { toast(e.message, true);}
 }

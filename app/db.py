@@ -28,8 +28,7 @@ CREATE TABLE IF NOT EXISTS account_credits (
     amount REAL NOT NULL,
     expires_at REAL,
     created_at REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS jobs (
+);CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
     provider TEXT NOT NULL,
@@ -73,6 +72,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE accounts ADD COLUMN credit_total REAL")
         if "cloud_created_at" not in cols:
             conn.execute("ALTER TABLE accounts ADD COLUMN cloud_created_at REAL")
+        # account_credits 表老库升级：加 start_at（credit 生效日期）
+        ccols = {r["name"] for r in conn.execute("PRAGMA table_info(account_credits)")}
+        if "start_at" not in ccols:
+            conn.execute("ALTER TABLE account_credits ADD COLUMN start_at REAL")
     # 启动时把上次异常中断的任务标记出来
     with _lock, _connect() as conn:
         conn.execute(
@@ -168,19 +171,20 @@ def account_set_cloud_created_at(account_id: int, ts: float | None) -> bool:
 def credit_list(account_id: int) -> list[dict]:
     with _lock, _connect() as conn:
         rows = conn.execute(
-            "SELECT id, name, amount, expires_at FROM account_credits"
+            "SELECT id, name, amount, expires_at, start_at FROM account_credits"
             " WHERE account_id=? ORDER BY expires_at IS NULL, expires_at",
             (account_id,),
         ).fetchall()
         return [dict(r) for r in rows]
 
 
-def credit_add(account_id: int, name: str, amount: float, expires_at: float | None) -> int:
+def credit_add(account_id: int, name: str, amount: float,
+               expires_at: float | None, start_at: float | None = None) -> int:
     with _lock, _connect() as conn:
         cur = conn.execute(
-            "INSERT INTO account_credits(account_id, name, amount, expires_at, created_at)"
-            " VALUES (?,?,?,?,?)",
-            (account_id, name, amount, expires_at, time.time()),
+            "INSERT INTO account_credits(account_id, name, amount, expires_at, start_at, created_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (account_id, name, amount, expires_at, start_at, time.time()),
         )
         return cur.lastrowid
 

@@ -251,6 +251,25 @@ class AwsProvider(Provider):
             "note": "金额为账户结算币种；Cost Explorer 数据约有 24 小时延迟",
         }
 
+    def get_credit_applied(self, creds: dict, start: str, end: str) -> float:
+        """指定周期 [start, end) 内 credit 抵扣总额（正数）。start/end 为 YYYY-MM-DD。"""
+        ce = boto3.client(
+            "ce",
+            aws_access_key_id=creds["access_key"].strip(),
+            aws_secret_access_key=creds["secret_key"].strip(),
+            region_name="us-east-1",
+        )
+        resp = ce.get_cost_and_usage(
+            TimePeriod={"Start": start, "End": end},
+            Granularity="MONTHLY",
+            Metrics=["UnblendedCost"],
+            Filter={"Dimensions": {"Key": "RECORD_TYPE", "Values": ["Credit"]}},
+        )
+        total = 0.0
+        for r in resp.get("ResultsByTime", []):
+            total += float(r.get("Total", {}).get("UnblendedCost", {}).get("Amount", 0))
+        return abs(round(total, 4))
+
     # ---------- Lightsail ----------
     LIGHTSAIL_REGIONS = [
         "us-east-1", "us-east-2", "us-west-2",

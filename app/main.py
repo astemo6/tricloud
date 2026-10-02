@@ -280,16 +280,36 @@ def get_billing(request: Request, account_id: int):
         raise HTTPException(status_code=502, detail=f"获取账单失败: {e}") from e
     if acc["provider"] == "aws":
         # 手动维护的 credit（API 查不到的类型，如 Explore AWS 教程奖励）
+        # 剩余额度自动更新：总额 − CE 查到的累计抵扣（从最早生效日算起）
+        import datetime as _dt
         manual = db.credit_list(account_id)
+        man_total = sum(m["amount"] for m in manual)
+        man_applied = 0.0
+        if manual:
+            starts = [m["start_at"] for m in manual if m.get("start_at")]
+            start_ts = min(starts) if starts else None
+            if start_ts:
+                start_d = _dt.datetime.fromtimestamp(start_ts).strftime("%Y-%m-%d")
+            else:
+                start_d = (_dt.date.today() - _dt.timedelta(days=365)).isoformat()
+            end_d = _dt.date.today().isoformat()
+            try:
+                man_applied = provider.get_credit_applied(acc["creds"], start_d, end_d)
+            except Exception:  # noqa: BLE001
+                man_applied = 0.0
+        man_remaining = max(0.0, round(man_total - man_applied, 2))
         for m in manual:
             m["source"] = "manual"
             m["initial"] = m.pop("amount")
-            m["remaining"] = m["initial"]  # 手动的不追踪已用，按总额算
+            m["remaining"] = m["initial"]  # 单笔不精确分摊，只展示总额
             m["used"] = 0.0
             exp = m.pop("expires_at")
             m["expires"] = _fmt_ts(exp) if exp else ""
             m["status"] = "手动"
         data["manual_credits"] = manual
+        data["manual_total"] = round(man_total, 2)
+        data["manual_applied"] = man_applied
+        data["manual_remaining"] = man_remaining
     return data
 
 
@@ -329,6 +349,7 @@ class ManualCreditBody(BaseModel):
     name: str
     amount: float
     expires_at: float | None = None  # unix 时间戳，可空
+    start_at: float | None = None  # 生效日期 unix 时间戳，可空（默认今天）
 
 
 @app.get("/api/accounts/{account_id}/credits-manual")
@@ -351,7 +372,9 @@ def add_manual_credit(request: Request, account_id: int, body: ManualCreditBody)
         raise HTTPException(status_code=400, detail="请填写 Credit 名称")
     if body.amount <= 0:
         raise HTTPException(status_code=400, detail="金额必须大于 0")
-    cid = db.credit_add(account_id, name, body.amount, body.expires_at)
+    import time as _t
+    cid = db.credit_add(account_id, name, body.amount, body.expires_at,
+                        body.start_at or _t.time())
     return {"ok": True, "id": cid}
 
 

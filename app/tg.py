@@ -179,9 +179,15 @@ def _fmt_billing(b: dict) -> str:
     manual = b.get("manual_credits") or []
     if credits or manual:
         lines.append(f"\n🎟️ <b>Credits（{len(credits) + len(manual)}）</b>")
+        api_remain = b.get("credit_remaining", 0) or 0
+        man_remain = b.get("manual_remaining")
+        if man_remain is None:
+            man_remain = sum(c.get("initial", 0) for c in manual)
+        lines.append(f"剩余合计（自动更新）：<b>{cur} {api_remain + man_remain:.2f}</b>")
         if credits:
-            lines.append(f"API 剩余：<b>{cur} {b.get('credit_remaining', 0):.2f}</b> / "
-                         f"已用：{cur} {(b.get('credit_initial', 0) - b.get('credit_remaining', 0)):.2f}")
+            lines.append(f"API 已用：{cur} {(b.get('credit_initial', 0) - api_remain):.2f}")
+        if manual and b.get("manual_applied"):
+            lines.append(f"手动累计抵扣：{cur} {b['manual_applied']:.2f}")
         for c in credits[:8]:
             lines.append(f"· {_esc(c['name'])}: 剩余 {cur} {c['remaining']:.2f}，"
                          f"到期 {c['expires']}（{c['status']}）")

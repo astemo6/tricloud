@@ -39,9 +39,11 @@ SESSION_COOKIE = "tricloud_session"
 
 @app.middleware("http")
 async def no_cache_api(request: Request, call_next):
-    """API 接口不允许浏览器缓存，避免发版后前端拿到旧数据。"""
+    """API 接口和前端静态文件不允许浏览器缓存，避免发版后拿到旧页面/旧 JS。"""
     resp = await call_next(request)
-    if request.url.path.startswith("/api/"):
+    path = request.url.path
+    if (path.startswith("/api/") or path.startswith("/static/")
+            or path in ("/", "/login.html", "/index.html")):
         resp.headers["Cache-Control"] = "no-store"
     return resp
 

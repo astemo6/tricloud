@@ -466,6 +466,21 @@ class AwsProvider(Provider):
             region_name="us-east-1",  # CloudFront 是全局服务
         )
 
+    def delete_distribution(self, creds: dict, dist_id: str) -> str:
+        """删除分发：必须先停用且部署完成（Deployed）才能删。"""
+        cf = self._cf_client(creds)
+        cfg_resp = cf.get_distribution_config(Id=dist_id)
+        cfg = cfg_resp["DistributionConfig"]
+        if cfg.get("Enabled"):
+            raise ValueError(f"分发 {dist_id} 仍在启用中，请先停用并等待部署完成后再删除")
+        # 检查部署状态
+        dist = cf.get_distribution(Id=dist_id)["Distribution"]
+        status = dist.get("Status", "")
+        if status != "Deployed":
+            raise ValueError(f"分发 {dist_id} 当前状态为 {status}，需等待部署完成（Deployed）后再删除")
+        cf.delete_distribution(Id=dist_id, IfMatch=cfg_resp["ETag"])
+        return f"分发 {dist_id} 已删除"
+
     def _ppm_client(self, creds: dict):
         return boto3.client(
             "pricing-plan-manager",

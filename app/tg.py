@@ -693,9 +693,41 @@ async def _on_button(update, context):
                 [InlineKeyboardButton("✏️ 编辑备注", callback_data=f"cfe:{key}")],
                 [InlineKeyboardButton("⏸️ 停用" if item.get("enabled", True) else "▶️ 启用",
                                      callback_data=f"cft:{key}")],
+                [InlineKeyboardButton("🗑️ 删除分发", callback_data=f"cfd:{key}")],
                 [InlineKeyboardButton("🔙 返回",
                                      callback_data=f"am:{item['account_id']}:cf")],
             ]))
+        return
+
+    if data.startswith("cfd:"):
+        key = data[4:]
+        item = _cf_cache.get(key)
+        if not item:
+            await query.edit_message_text("信息已过期，请重新进入")
+            return
+        await query.edit_message_text(
+            f"⚠️ 确定删除分发 <b>{_esc(item['dist_id'])}</b> 吗？此操作不可恢复！\n"
+            f"（分发必须先停用且部署完成后才能删除）",
+            parse_mode="HTML",
+            reply_markup=_kb([
+                [InlineKeyboardButton("✅ 确认删除", callback_data=f"cfdd:{key}")],
+                [InlineKeyboardButton("❌ 取消", callback_data=f"cf:{key}")],
+            ]))
+        return
+
+    if data.startswith("cfdd:"):
+        key = data[5:]
+        item = _cf_cache.get(key)
+        if not item:
+            await query.edit_message_text("信息已过期，请重新进入")
+            return
+        from .providers import get_provider as _gp
+        acc = db.account_get(item["account_id"])
+        try:
+            msg = _gp("aws").delete_distribution(acc["creds"], item["dist_id"])
+            await query.edit_message_text(f"✅ {msg}")
+        except Exception as e:  # noqa: BLE001
+            await query.edit_message_text(f"❌ 删除失败: {e}")
         return
 
     if data.startswith("cfi:"):

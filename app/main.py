@@ -655,6 +655,18 @@ def cloudfront_update(request: Request, account_id: int, dist_id: str, body: Clo
     return {"ok": True, "message": msg}
 
 
+@app.delete("/api/accounts/{account_id}/cloudfront/{dist_id}")
+def cloudfront_delete(request: Request, account_id: int, dist_id: str):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = _require_aws(acc)
+    try:
+        msg = provider.delete_distribution(acc["creds"], dist_id)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"删除失败: {e}") from e
+    return {"ok": True, "message": msg}
+
+
 class CloudFrontCreateBody(BaseModel):
     origin_domain: str
     comment: str = ""

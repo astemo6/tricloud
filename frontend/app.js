@@ -425,7 +425,8 @@ ${d.comment? `<br><span style="font-size:12px">${esc(d.comment)}</span>`: ''}</t
 <button class="btn sm" onclick="openCfPlanModal('${esc(d.id)}','${esc(d.plan || 'paygo')}')">套餐</button>
 ${d.enabled
 ? `<button class="btn sm danger" onclick="cfToggle('${esc(d.id)}', false)">停用</button>`
-: `<button class="btn sm" onclick="cfToggle('${esc(d.id)}', true)">启用</button>`}
+: `<button class="btn sm" onclick="cfToggle('${esc(d.id)}', true)">启用</button>
+<button class="btn sm danger" onclick="cfDelete('${esc(d.id)}')">删除</button>`}
 </div></td></tr>`).join('') + '</tbody></table>'
 : '<div class="empty">该账号下没有 CloudFront 分发</div>');
 } catch (e) {
@@ -462,6 +463,16 @@ if (!confirm(`确定${enabled? '启用': '停用'}分发 ${distId} 吗？配置�
 try {
 const r = await api('POST', `/api/accounts/${curAccount.id}/cloudfront/toggle`,
 {distribution_id: distId, enabled});
+toast(r.message);
+loadCloudFront();
+} catch (e) { toast(e.message, true);}
+}
+
+async function cfDelete(distId) {
+if (!confirm(`确定删除分发 ${distId} 吗？此操作不可恢复！`)) return;
+if (!confirm(`再次确认：真的要删除 ${distId} 吗？`)) return;
+try {
+const r = await api('DELETE', `/api/accounts/${curAccount.id}/cloudfront/${distId}`);
 toast(r.message);
 loadCloudFront();
 } catch (e) { toast(e.message, true);}

@@ -1,7 +1,7 @@
 #!/bin/bash
 # TriCloud APK 手动构建脚本（aapt2 + javac + d8 + apksigner，不依赖 Gradle）
 set -e
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+export JAVA_HOME=$HOME/jdk17
 A="$(dirname "$0")/app/src/main"
 SDK="${ANDROID_HOME:-$HOME/android-sdk}"
 BT="$SDK/build-tools/34.0.0"

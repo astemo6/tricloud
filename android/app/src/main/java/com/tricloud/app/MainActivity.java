@@ -83,7 +83,13 @@ public class MainActivity extends Activity {
                 }
             }
         });
-        webView.setOnLongClickListener(v -> true);
+        // 长按菜单：输入框内允许（可粘贴），其他区域禁用
+        webView.setOnLongClickListener(v -> {
+            android.webkit.WebView.HitTestResult hit =
+                ((android.webkit.WebView) v).getHitTestResult();
+            return hit.getType() !=
+                android.webkit.WebView.HitTestResult.EDIT_TEXT_TYPE;
+        });
 
         String saved = prefs.getString(KEY_URL, null);
         if (saved == null || saved.isEmpty()) {

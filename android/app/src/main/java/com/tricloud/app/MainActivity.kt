@@ -85,7 +85,12 @@ class MainActivity : Activity() {
                 }
             }
         }
-        webView.setOnLongClickListener { true } // 禁用长按菜单
+        // 长按菜单：输入框内允许（可粘贴），其他区域禁用
+        webView.setOnLongClickListener { v ->
+            val hit = (v as WebView).hitTestResult
+            // EDIT_TEXT_TYPE = 可编辑文本，允许系统默认长按菜单（粘贴等）
+            hit.type != android.webkit.WebView.HitTestResult.EDIT_TEXT_TYPE
+        }
 
         val saved = prefs.getString(KEY_URL, null)
         if (saved.isNullOrBlank()) {

@@ -340,6 +340,37 @@ class ActionBody(BaseModel):
     params: dict = {}
 
 
+# 操作参数定义：key -> [(param_name, label, type)]
+_ACTION_PARAMS: dict[str, list[tuple[str, str, str]]] = {
+    "rename": [("new_name", "新名称", "text")],
+    "extend_disk": [("size_gb", "新磁盘大小 (GB)", "number")],
+    "open_port": [("port", "端口号", "number")],
+    "resize": [("size", "新规格 (如 Standard_B2s)", "text")],
+    "update_shape": [("shape", "新形状", "text"),
+                     ("ocpus", "OCPU 数 (Flex 可填)", "number"),
+                     ("memory_gbs", "内存 GB (Flex 可填)", "number")],
+}
+
+
+@app.get("/api/accounts/{account_id}/actions")
+def list_actions(request: Request, account_id: int):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = get_provider(acc["provider"])
+    out = []
+    for a in provider.actions:
+        out.append({
+            "key": a["key"],
+            "label": a.get("label", a["key"]),
+            "danger": bool(a.get("danger", False)),
+            "params": [
+                {"name": n, "label": lb, "type": t}
+                for n, lb, t in _ACTION_PARAMS.get(a["key"], [])
+            ],
+        })
+    return out
+
+
 @app.post("/api/accounts/{account_id}/action")
 def instance_action(request: Request, account_id: int, body: ActionBody):
     _require_login(request)

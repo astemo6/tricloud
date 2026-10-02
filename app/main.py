@@ -33,6 +33,15 @@ app = FastAPI(title="TriCloud", docs_url=None, redoc_url=None, lifespan=lifespan
 SESSION_COOKIE = "tricloud_session"
 
 
+@app.middleware("http")
+async def no_cache_api(request: Request, call_next):
+    """API 接口不允许浏览器缓存，避免发版后前端拿到旧数据。"""
+    resp = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 def _require_login(request: Request) -> None:
     if not db.session_valid(request.cookies.get(SESSION_COOKIE)):
         raise HTTPException(status_code=401, detail="未登录")

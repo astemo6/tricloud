@@ -783,7 +783,7 @@ class AwsProvider(Provider):
                     if "On-Demand" in name and "instances" in name.lower():
                         items.append({
                             "name": name,
-                            "detail": f"配额 {q.get('Value')} {q.get('Unit', '')}"
+                            "detail": f"配额 {q.get('Value')}{' ' + q['Unit'] if q.get('Unit') else ''}"
                                       f"{'（可申请提高）' if q.get('Adjustable') else ''}",
                         })
                 if len(items) >= 12 or pages >= 5:
@@ -811,7 +811,7 @@ class AwsProvider(Provider):
                 ServiceCode="cloudfront", QuotaCode="L-24B04930")["Quota"]
             groups.append({"title": "CloudFront 分发配额", "items": [{
                 "name": q.get("QuotaName", "Web distributions per AWS account"),
-                "detail": f"配额 {q.get('Value')} {q.get('Unit', '')}"
+                "detail": f"配额 {q.get('Value')}{' ' + q['Unit'] if q.get('Unit') else ''}"
                           f"{'（可申请提高）' if q.get('Adjustable') else ''}",
             }]})
         except ClientError:

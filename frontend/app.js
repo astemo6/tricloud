@@ -256,6 +256,7 @@ toggleDrawer(true); trackJob(r.job_id);
 
 /* ---------- 账单 ---------- */
 function eduHtml(b) {
+if (curProvider.id !== 'azure') return '';
 if (!b.edu_expires_at) {
 return `<div style="margin:12px 0"><button class="btn sm" onclick="setEduExpires()">设置教育优惠到期日</button>
 <span style="color:#6f7794;font-size:12px;margin-left:8px">Azure 学生订阅 $100 额度，到期日可在 Sponsorships 门户查看</span></div>`;

@@ -757,7 +757,7 @@ class AwsProvider(Provider):
         return f"已在安全组放行 TCP 端口 {port}（来源 0.0.0.0/0）: {', '.join(done)}"
 
     def get_quotas(self, creds: dict) -> dict:
-        """配额查询：Service Quotas API 看 EC2 主要配额。"""
+        """配额查询：Service Quotas API 看 EC2 主要配额 + CloudFront 分发配额。"""
         sq = boto3.client(
             "service-quotas",
             aws_access_key_id=creds["access_key"].strip(),
@@ -765,7 +765,10 @@ class AwsProvider(Provider):
             region_name=creds["region"].strip(),
         )
         try:
-            quotas = sq.list_service_quotas(ServiceCode="ec2")["Quotas"]
+            quotas = []
+            paginator = sq.get_paginator("list_service_quotas")
+            for page in paginator.paginate(ServiceCode="ec2"):
+                quotas.extend(page["Quotas"])
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
             if "AccessDenied" in code:
@@ -783,9 +786,18 @@ class AwsProvider(Provider):
                 })
         items.sort(key=lambda x: x["name"])
         groups = [{"title": "EC2 按需实例配额", "items": items[:12]}] if items else []
-        # CloudFront 分发配额
+        # CloudFront 分发配额（Service Quotas 里 CloudFront 只能在 us-east-1 查）
         try:
-            cf_quotas = sq.list_service_quotas(ServiceCode="cloudfront")["Quotas"]
+            sq_cf = boto3.client(
+                "service-quotas",
+                aws_access_key_id=creds["access_key"].strip(),
+                aws_secret_access_key=creds["secret_key"].strip(),
+                region_name="us-east-1",
+            )
+            cf_quotas = []
+            for page in sq_cf.get_paginator("list_service_quotas").paginate(
+                    ServiceCode="cloudfront"):
+                cf_quotas.extend(page["Quotas"])
         except ClientError:
             cf_quotas = []
         for q in cf_quotas:

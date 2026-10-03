@@ -777,36 +777,42 @@ class AwsProvider(Provider):
         )
         items, groups = [], []
         warn = ""
+        # EC2 按需实例配额：按 QuotaCode 单点查询（共 10 个实例族，翻页找太慢且易限流）
+        ec2_quota_codes = [
+            "L-1216C47A",  # Standard (A, C, D, H, I, M, R, T, Z)
+            "L-6E869C2A",  # DL
+            "L-DB2E81BA",  # G and VT
+            "L-1945791B",  # Inf
+            "L-2C3B7624",  # Trn
+            "L-417A185B",  # P
+            "L-43DA4232",  # High Memory
+            "L-7295265B",  # X
+            "L-74FC7D96",  # F
+            "L-F7808C92",  # HPC
+        ]
         try:
-            paginator = sq.get_paginator("list_service_quotas")
-            pages = 0
-            for page in paginator.paginate(
-                    ServiceCode="ec2",
-                    PaginationConfig={"PageSize": 100}):
-                pages += 1
-                for q in page["Quotas"]:
-                    name = q.get("QuotaName", "")
-                    if "On-Demand" in name and "instances" in name.lower():
-                        val = q.get("Value")
-                        # EC2 按需配额按 vCPU 计数，直接显示为 Xv
-                        vcpu = int(val) if val is not None else 0
-                        items.append({
-                            "name": name,
-                            "detail": f"{vcpu}v"
-                                      f"{'（可申请提高）' if q.get('Adjustable') else ''}",
-                        })
-                if len(items) >= 12 or pages >= 5:
-                    break
-                _time.sleep(0.5)
+            for code in ec2_quota_codes:
+                try:
+                    q = sq.get_service_quota(
+                        ServiceCode="ec2", QuotaCode=code)["Quota"]
+                except ClientError as e:
+                    if "TooManyRequests" in e.response.get("Error", {}).get("Code", ""):
+                        warn = "（部分配额被 AWS 限流，稍后刷新可看全）"
+                        break
+                    continue
+                vcpu = int(q.get("Value") or 0)
+                items.append({
+                    "name": q.get("QuotaName", code),
+                    "detail": f"{vcpu}v"
+                              f"{'（可申请提高）' if q.get('Adjustable') else ''}",
+                })
+                _time.sleep(0.3)
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
             if "AccessDenied" in code:
                 raise ValueError(
                     "无 Service Quotas 权限：请给 IAM 用户添加 servicequotas:ListServiceQuotas") from e
-            if "TooManyRequests" in code:
-                warn = "（EC2 配额查询被 AWS 限流，稍后重试可看全）"
-            else:
-                raise
+            raise
         items.sort(key=lambda x: x["name"])
         if items:
             groups.append({"title": "EC2 按需实例配额", "items": items[:12]})

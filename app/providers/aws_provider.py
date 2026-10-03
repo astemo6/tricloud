@@ -777,79 +777,45 @@ class AwsProvider(Provider):
         )
         items, groups = [], []
         warn = ""
-        # EC2 按需实例配额：按 QuotaCode 单点查询。
-        # Standard 取全区域最大值（配额按区域独立），其余实例族查默认区域。
-        ec2_quota_codes = [
-            ("L-1216C47A", True),   # Standard (A, C, D, H, I, M, R, T, Z)：全区域取最大
-            ("L-6E869C2A", False),  # DL
-            ("L-DB2E81BA", False),  # G and VT
-            ("L-1945791B", False),  # Inf
-            ("L-2C3B7624", False),  # Trn
-            ("L-417A185B", False),  # P
-            ("L-43DA4232", False),  # High Memory
-            ("L-7295265B", False),  # X
-            ("L-74FC7D96", False),  # F
-            ("L-F7808C92", False),  # HPC
-        ]
+        # 配额页只保留两项：Standard vCPU（全区域取最大）+ CloudFront 分发配额
         def _mk_client(rg):
             return boto3.client(
                 "service-quotas", aws_access_key_id=ak,
                 aws_secret_access_key=sk, region_name=rg)
         try:
-            for code, check_all_regions in ec2_quota_codes:
-                if check_all_regions:
-                    # 全区域掃 Standard，取最大值
-                    try:
-                        regions = [r["RegionName"] for r in _client(
-                            creds).describe_regions()["Regions"]]
-                    except ClientError:
-                        regions = [creds["region"].strip()]
-                    best_v, best_rg, best_name = 0, "", code
-                    for rg in regions:
-                        try:
-                            q = _mk_client(rg).get_service_quota(
-                                ServiceCode="ec2", QuotaCode=code)["Quota"]
-                        except ClientError as e:
-                            if "TooManyRequests" in e.response.get(
-                                    "Error", {}).get("Code", ""):
-                                warn = "（部分配额被 AWS 限流，稍后刷新可看全）"
-                                break
-                            continue
-                        v = int(q.get("Value") or 0)
-                        if v > best_v:
-                            best_v, best_rg = v, rg
-                            best_name = q.get("QuotaName", code)
-                        _time.sleep(0.2)
-                    items.append({
-                        "name": best_name,
-                        "detail": f"{best_v}v（最高：{best_rg}，可申请提高）"
-                                  if best_rg else f"{best_v}v",
-                    })
-                else:
-                    try:
-                        q = sq.get_service_quota(
-                            ServiceCode="ec2", QuotaCode=code)["Quota"]
-                    except ClientError as e:
-                        if "TooManyRequests" in e.response.get(
-                                "Error", {}).get("Code", ""):
-                            warn = "（部分配额被 AWS 限流，稍后刷新可看全）"
-                            break
-                        continue
-                    vcpu = int(q.get("Value") or 0)
-                    items.append({
-                        "name": q.get("QuotaName", code),
-                        "detail": f"{vcpu}v"
-                                  f"{'（可申请提高）' if q.get('Adjustable') else ''}",
-                    })
-                    _time.sleep(0.3)
+            # Standard 全区域掃，取最大值
+            try:
+                regions = [r["RegionName"] for r in _client(
+                    creds).describe_regions()["Regions"]]
+            except ClientError:
+                regions = [creds["region"].strip()]
+            best_v, best_rg, best_name = 0, "", "L-1216C47A"
+            for rg in regions:
+                try:
+                    q = _mk_client(rg).get_service_quota(
+                        ServiceCode="ec2", QuotaCode="L-1216C47A")["Quota"]
+                except ClientError as e:
+                    if "TooManyRequests" in e.response.get(
+                            "Error", {}).get("Code", ""):
+                        warn = "（部分配额被 AWS 限流，稍后刷新可看全）"
+                        break
+                    continue
+                v = int(q.get("Value") or 0)
+                if v > best_v:
+                    best_v, best_rg = v, rg
+                    best_name = q.get("QuotaName", "L-1216C47A")
+                _time.sleep(0.2)
+            items.append({
+                "name": best_name,
+                "detail": f"{best_v}v（最高：{best_rg}，可申请提高）"
+                          if best_rg else f"{best_v}v",
+            })
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
             if "AccessDenied" in code:
                 raise ValueError(
                     "无 Service Quotas 权限：请给 IAM 用户添加 servicequotas:ListServiceQuotas") from e
             raise
-        # Standard 置顶，其余按名称排序
-        items.sort(key=lambda x: (0 if "Standard" in x["name"] else 1, x["name"]))
         if items:
             groups.append({"title": "EC2 按需实例配额", "items": items})
         # CloudFront 分发配额：单点查询（Service Quotas 里 CloudFront 只能在 us-east-1 查）

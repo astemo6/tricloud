@@ -782,8 +782,23 @@ class AwsProvider(Provider):
                               f"{'（可申请提高）' if q.get('Adjustable') else ''}",
                 })
         items.sort(key=lambda x: x["name"])
+        groups = [{"title": "EC2 按需实例配额", "items": items[:12]}] if items else []
+        # CloudFront 分发配额
+        try:
+            cf_quotas = sq.list_service_quotas(ServiceCode="cloudfront")["Quotas"]
+        except ClientError:
+            cf_quotas = []
+        for q in cf_quotas:
+            name = q.get("QuotaName", "")
+            if "distribution" in name.lower() and "per account" in name.lower():
+                groups.append({"title": "CloudFront 分发配额", "items": [{
+                    "name": name,
+                    "detail": f"配额 {q.get('Value')} {q.get('Unit', '')}"
+                              f"{'（可申请提高）' if q.get('Adjustable') else ''}",
+                }]})
+                break
         return {
-            "groups": [{"title": "EC2 按需实例配额", "items": items[:12]}] if items else [],
+            "groups": groups,
             "note": "数据来自 Service Quotas；vCPU 配额等可在 AWS 控制台 Service Quotas 页查看",
         }
 

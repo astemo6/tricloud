@@ -802,7 +802,7 @@ class AwsProvider(Provider):
             cf_quotas = []
         for q in cf_quotas:
             name = q.get("QuotaName", "")
-            if "distribution" in name.lower() and "per account" in name.lower():
+            if "distribution" in name.lower() and "account" in name.lower():
                 groups.append({"title": "CloudFront 分发配额", "items": [{
                     "name": name,
                     "detail": f"配额 {q.get('Value')} {q.get('Unit', '')}"

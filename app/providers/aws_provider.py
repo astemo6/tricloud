@@ -655,11 +655,15 @@ class AwsProvider(Provider):
     _CF_CACHE_POLICY_OPTIMIZED = "658327ea-f89d-4fab-a63d-7e88639e58f6"
 
     def create_distribution(self, creds: dict, origin_domain: str,
-                            comment: str = "", price_class: str = "100") -> str:
-        """简化创建 CloudFront 分发：给个源站域名，其他用默认配置。
+                            comment: str = "", price_class: str = "100",
+                            origin_protocol: str = "match-viewer",
+                            compress: bool = False,
+                            cache_mode: str = "legacy") -> str:
+        """简化创建 CloudFront 分发。
 
-        默认：回源 http-only、访客侧 http 跳 https、CachingOptimized 缓存策略、
-        价格等级 100（仅北美+欧洲，最便宜）。
+        origin_protocol: http-only | https-only | match-viewer
+        compress: 是否自动压缩
+        cache_mode: optimized (CachingOptimized 策略) | legacy (传统转发设置)
         """
         cf = self._cf_client(creds)
         origin_domain = (origin_domain or "").strip()
@@ -667,7 +671,29 @@ class AwsProvider(Provider):
             raise ValueError("请提供源站域名（如 example.com）")
         price_map = {"100": "PriceClass_100", "200": "PriceClass_200",
                      "all": "PriceClass_All"}
+        proto_map = {"http-only": "http-only", "https-only": "https-only",
+                     "match-viewer": "match-viewer"}
         origin_id = f"tricloud-{origin_domain}"
+        behavior = {
+            "TargetOriginId": origin_id,
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": {
+                "Quantity": 2, "Items": ["GET", "HEAD"],
+                "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]},
+            },
+            "Compress": bool(compress),
+        }
+        if cache_mode == "legacy":
+            behavior["ForwardedValues"] = {
+                "QueryString": True,
+                "Cookies": {"Forward": "none"},
+                "Headers": {"Quantity": 0},
+            }
+            behavior["MinTTL"] = 0
+            behavior["DefaultTTL"] = 86400
+            behavior["MaxTTL"] = 31536000
+        else:
+            behavior["CachePolicyId"] = self._CF_CACHE_POLICY_OPTIMIZED
         resp = cf.create_distribution(DistributionConfig={
             "CallerReference": f"tricloud-{int(time.time())}",
             "Comment": (comment or "").strip() or f"tricloud {origin_domain}",
@@ -677,19 +703,11 @@ class AwsProvider(Provider):
                 "DomainName": origin_domain,
                 "CustomOriginConfig": {
                     "HTTPPort": 80, "HTTPSPort": 443,
-                    "OriginProtocolPolicy": "http-only",
+                    "OriginProtocolPolicy": proto_map.get(origin_protocol,
+                                                          "match-viewer"),
                 },
             }]},
-            "DefaultCacheBehavior": {
-                "TargetOriginId": origin_id,
-                "ViewerProtocolPolicy": "redirect-to-https",
-                "AllowedMethods": {
-                    "Quantity": 2, "Items": ["GET", "HEAD"],
-                    "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]},
-                },
-                "CachePolicyId": self._CF_CACHE_POLICY_OPTIMIZED,
-                "Compress": True,
-            },
+            "DefaultCacheBehavior": behavior,
             "PriceClass": price_map.get(price_class, "PriceClass_100"),
         })
         d = resp["Distribution"]

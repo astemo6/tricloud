@@ -857,6 +857,9 @@ class CloudFrontCreateBody(BaseModel):
     origin_domain: str
     comment: str = ""
     price_class: str = "100"
+    origin_protocol: str = "match-viewer"  # http-only|https-only|match-viewer
+    compress: bool = False
+    cache_mode: str = "legacy"  # legacy|optimized
 
 
 @app.post("/api/accounts/{account_id}/cloudfront/create")
@@ -866,7 +869,8 @@ def cloudfront_create(request: Request, account_id: int, body: CloudFrontCreateB
     provider = _require_aws(acc)
     try:
         msg = provider.create_distribution(
-            acc["creds"], body.origin_domain, body.comment, body.price_class)
+            acc["creds"], body.origin_domain, body.comment, body.price_class,
+            body.origin_protocol, body.compress, body.cache_mode)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"创建失败: {e}") from e
     return {"ok": True, "message": msg}

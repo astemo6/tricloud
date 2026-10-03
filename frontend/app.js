@@ -259,12 +259,13 @@ function eduHtml(b) {
 if (curProvider.id !== 'azure') return '';
 if (!b.edu_expires_at) {
 return `<div style="margin:12px 0"><button class="btn sm" onclick="setEduExpires()">设置教育优惠到期日</button>
-<span style="color:#6f7794;font-size:12px;margin-left:8px">Azure 学生订阅 $100 额度，到期日可在 Sponsorships 门户查看</span></div>`;
+<span style="color:#6f7794;font-size:12px;margin-left:8px">Azure 学生订阅 $100 额度，到期日可在 Sponsorships 门户查看；如已设置云账号创建时间，会自动按 +12 个月预估</span></div>`;
 }
 const color = b.edu_expired ? '#f87171' : (b.edu_expiring_soon ? '#fbbf24' : '#4ade80');
 const status = b.edu_expired ? '已过期' : `剩余 ${b.edu_days_left} 天`;
+const estTag = b.edu_estimated ? '（预估：按账号创建时间+12个月算）' : '';
 return `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:#1a2138;border-radius:8px;flex-wrap:wrap;align-items:center">
-<div><div style="color:#8b93ad;font-size:12px">🎓 教育优惠到期日</div>
+<div><div style="color:#8b93ad;font-size:12px">🎓 教育优惠到期日${estTag}</div>
 <div style="font-size:18px;color:${color}">${esc(b.edu_expires)}（${status}）</div></div>
 <div style="margin-left:auto;display:flex;gap:8px">
 <button class="btn sm" onclick="setEduExpires()">修改</button>

@@ -178,7 +178,8 @@ def _fmt_billing(b: dict) -> str:
         days = b.get("edu_days_left", 0)
         icon = "🔴" if b.get("edu_expired") else ("🟡" if b.get("edu_expiring_soon") else "🟢")
         status = "已过期" if b.get("edu_expired") else f"剩余 {days} 天"
-        lines.append(f"\n{icon} <b>🎓 教育优惠</b>：{_esc(b['edu_expires'])}（{status}）")
+        est = "（预估）" if b.get("edu_estimated") else ""
+        lines.append(f"\n{icon} <b>🎓 教育优惠</b>：{_esc(b['edu_expires'])}{est}（{status}）")
     if b.get("credit_used"):
         lines.append(f"Credit 抵扣（本月）：<b>−{cur} {b['credit_used']:.2f}</b>")
     credits = b.get("credits") or []
@@ -494,12 +495,17 @@ async def _on_button(update, context):
                         # 教育优惠到期日（与 Web 账单接口保持一致）
                         import time as _time
                         edu_ts = acc.get("edu_expires_at")
+                        edu_estimated = False
+                        if not edu_ts and acc.get("cloud_created_at"):
+                            edu_ts = acc["cloud_created_at"] + 365 * 86400
+                            edu_estimated = True
                         if edu_ts:
                             days = int((edu_ts - _time.time()) / 86400)
                             bdata["edu_expires"] = _fmt_ts(edu_ts)
                             bdata["edu_days_left"] = days
                             bdata["edu_expired"] = days < 0
                             bdata["edu_expiring_soon"] = 0 <= days <= 30
+                            bdata["edu_estimated"] = edu_estimated
                     text = _fmt_billing(bdata)
                 else:
                     s = provider.get_subscription(acc["creds"])

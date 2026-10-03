@@ -91,11 +91,16 @@ def _edu_expiry_maybe() -> None:
     sent = False
     for acc in db.account_list("azure"):
         ts = acc.get("edu_expires_at")
+        estimated = False
+        if not ts and acc.get("cloud_created_at"):
+            ts = acc["cloud_created_at"] + 365 * 86400
+            estimated = True
         if not ts:
             continue
+        est_tag = "（预估）" if estimated else ""
         days = int((ts - now) / 86400)
         if days < 0:
-            msg = (f"🎓 <b>Azure 教育优惠已过期</b>\n"
+            msg = (f"🎓 <b>Azure 教育优惠已过期</b>{est_tag}\n"
                    f"账号：{acc['name']}\n"
                    f"到期日：{_fmt_date(ts)}（已过期 {-days} 天）\n"
                    f"请及时续期或升级为即用即付，避免服务被禁用。")
@@ -103,7 +108,7 @@ def _edu_expiry_maybe() -> None:
             # 只在 30/7/1 天这几个节点提醒，避免每天骚扰
             if days not in (30, 29, 7, 6, 1, 0):
                 continue
-            msg = (f"🎓 <b>Azure 教育优惠即将到期</b>\n"
+            msg = (f"🎓 <b>Azure 教育优惠即将到期</b>{est_tag}\n"
                    f"账号：{acc['name']}\n"
                    f"到期日：{_fmt_date(ts)}（剩余 {days} 天）\n"
                    f"如仍是学生身份，请及时续期。")

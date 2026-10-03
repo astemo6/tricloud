@@ -464,9 +464,15 @@ def get_billing(request: Request, account_id: int):
         data["manual_applied"] = man_applied
         data["manual_remaining"] = man_remaining
     if acc["provider"] == "azure":
-        # Azure 教育优惠到期日（手动设置，Sponsorships 门户无公开 API）
+        # Azure 教育优惠到期日：
+        # 1) 手动设置的 edu_expires_at 最准（Sponsorships 门户无公开 API）
+        # 2) 没手动设但有云账号创建时间 → 按学生优惠 12 个月规则预估
         import time as _time
         edu_ts = acc.get("edu_expires_at")
+        edu_estimated = False
+        if not edu_ts and acc.get("cloud_created_at"):
+            edu_ts = acc["cloud_created_at"] + 365 * 86400
+            edu_estimated = True
         if edu_ts:
             days_left = int((edu_ts - _time.time()) / 86400)
             data["edu_expires_at"] = edu_ts
@@ -474,6 +480,7 @@ def get_billing(request: Request, account_id: int):
             data["edu_days_left"] = days_left
             data["edu_expired"] = days_left < 0
             data["edu_expiring_soon"] = 0 <= days_left <= 30
+            data["edu_estimated"] = edu_estimated
     return data
 
 

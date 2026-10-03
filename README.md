@@ -93,6 +93,8 @@ APK 只是多个桌面图标。
 登录后顶部有 OCI / AWS / Azure 三个 Tab，每个 Tab 下点「管理账号」→ 填入对应凭证。
 添加时会自动校验连通性，不通会直接告诉你哪一步失败。
 
+📖 三平台 API 凭证获取步骤见 [docs/api-credentials.md](docs/api-credentials.md)。
+
 ### 2. 实例管理
 
 - **列表**：状态、公网 IP、规格、地域一目了然

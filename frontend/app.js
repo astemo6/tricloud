@@ -530,7 +530,7 @@ ${LS_REGIONS.map(r => `<option value="${r}"${r === lsRegion? ' selected': ''}>${
 list.map(it => `<tr>
 <td>${esc(it.name)}</td>
 <td>${badge(it.state)}</td>
-<td>${esc(it.bundle)}<br><span style="color:#6f7794;font-size:11px">${esc(it.blueprint)}</span></td>
+<td>${esc(it.bundle)}<br><span style="color:#6f7794;font-size:11px">${esc(it.blueprint)}${it.cpu? `<br>${esc(it.cpu)}C${it.memory? ' / ' + esc(it.memory) + 'G': ''}`: ''}</span></td>
 <td class="mono">${esc(it.public_ip || '-')}${it.ipv6? `<br>${esc(it.ipv6)}`: ''}</td>
 <td class="mono">${esc(it.private_ip || '-')}</td>
 <td>${esc(lsRegionLabel(it.region))}${it.zone? `<br><span style="color:#6f7794;font-size:11px">${esc(it.zone)}</span>`: ''}</td>

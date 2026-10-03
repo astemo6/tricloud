@@ -82,12 +82,15 @@ class AwsProvider(Provider):
                     for ni in i.get("NetworkInterfaces", []):
                         for v6 in ni.get("Ipv6Addresses", []):
                             ipv6 = v6.get("Ipv6Address", "")
+                    cpu_opt = i.get("CpuOptions") or {}
+                    vcpus = (cpu_opt.get("CoreCount") or 0) * (cpu_opt.get("ThreadsPerCore") or 0)
                     result.append(InstanceInfo(
                         id=i["InstanceId"],
                         name=_name_of(i.get("Tags")) or i["InstanceId"],
                         status=_STATE_MAP.get(state, "unknown"),
                         status_text=state,
                         shape=i.get("InstanceType", ""),
+                        cpu=str(vcpus) if vcpus else "",
                         public_ip=i.get("PublicIpAddress", "") or "",
                         private_ip=i.get("PrivateIpAddress", "") or "",
                         ipv6=ipv6,
@@ -297,11 +300,14 @@ class AwsProvider(Provider):
                 out = []
                 for inst in ls.get_instances().get("instances", []):
                     st = (inst.get("state") or {}).get("name", "")
+                    hw = inst.get("hardware") or {}
                     out.append({
                         "name": inst.get("name", ""),
                         "state": st,
                         "blueprint": (inst.get("blueprintName") or ""),
                         "bundle": (inst.get("bundleId") or ""),
+                        "cpu": str(hw.get("cpuCount") or ""),
+                        "memory": str(hw.get("ramSizeInGb") or ""),
                         "public_ip": inst.get("publicIpAddress") or "",
                         "private_ip": inst.get("privateIpAddress") or "",
                         "ipv6": ", ".join(inst.get("ipv6Addresses") or []),

@@ -463,6 +463,17 @@ def get_billing(request: Request, account_id: int):
         data["manual_total"] = round(man_total, 2)
         data["manual_applied"] = man_applied
         data["manual_remaining"] = man_remaining
+    if acc["provider"] == "azure":
+        # Azure 教育优惠到期日（手动设置，Sponsorships 门户无公开 API）
+        import time as _time
+        edu_ts = acc.get("edu_expires_at")
+        if edu_ts:
+            days_left = int((edu_ts - _time.time()) / 86400)
+            data["edu_expires_at"] = edu_ts
+            data["edu_expires"] = _fmt_ts(edu_ts)
+            data["edu_days_left"] = days_left
+            data["edu_expired"] = days_left < 0
+            data["edu_expiring_soon"] = 0 <= days_left <= 30
     return data
 
 
@@ -495,6 +506,22 @@ def set_cloud_created_at(request: Request, account_id: int, body: CloudCreatedAt
     if ts is not None and ts <= 0:
         raise HTTPException(status_code=400, detail="时间戳无效")
     db.account_set_cloud_created_at(account_id, ts)
+    return {"ok": True}
+
+
+class EduExpiresAtBody(BaseModel):
+    timestamp: float | None = None  # unix 时间戳，传 null 清除
+
+
+@app.put("/api/accounts/{account_id}/edu-expires-at")
+def set_edu_expires_at(request: Request, account_id: int, body: EduExpiresAtBody):
+    """设置 Azure 教育优惠到期日。"""
+    _require_login(request)
+    _get_account(account_id)
+    ts = body.timestamp
+    if ts is not None and ts <= 0:
+        raise HTTPException(status_code=400, detail="时间戳无效")
+    db.account_set_edu_expires_at(account_id, ts)
     return {"ok": True}
 
 

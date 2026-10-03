@@ -255,6 +255,40 @@ toggleDrawer(true); trackJob(r.job_id);
 }
 
 /* ---------- 账单 ---------- */
+function eduHtml(b) {
+if (!b.edu_expires_at) {
+return `<div style="margin:12px 0"><button class="btn sm" onclick="setEduExpires()">设置教育优惠到期日</button>
+<span style="color:#6f7794;font-size:12px;margin-left:8px">Azure 学生订阅 $100 额度，到期日可在 Sponsorships 门户查看</span></div>`;
+}
+const color = b.edu_expired ? '#f87171' : (b.edu_expiring_soon ? '#fbbf24' : '#4ade80');
+const status = b.edu_expired ? '已过期' : `剩余 ${b.edu_days_left} 天`;
+return `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:#1a2138;border-radius:8px;flex-wrap:wrap;align-items:center">
+<div><div style="color:#8b93ad;font-size:12px">🎓 教育优惠到期日</div>
+<div style="font-size:18px;color:${color}">${esc(b.edu_expires)}（${status}）</div></div>
+<div style="margin-left:auto;display:flex;gap:8px">
+<button class="btn sm" onclick="setEduExpires()">修改</button>
+<a class="btn sm" href="https://azure.microsoft.com/free/students/" target="_blank" style="text-decoration:none">去续期</a>
+</div></div>
+${b.edu_expiring_soon && !b.edu_expired ? '<div class="help" style="color:#fbbf24;font-size:12px;margin-bottom:12px">⚠ 教育优惠 30 天内到期，到期后订阅会被禁用。如仍是学生身份请及时续期。</div>' : ''}
+${b.edu_expired ? '<div class="help" style="color:#f87171;font-size:12px;margin-bottom:12px">⚠ 教育优惠已过期，请续期或升级为即用即付。</div>' : ''}`;
+}
+
+async function setEduExpires() {
+const cur = prompt('教育优惠到期日（格式 YYYY-MM-DD，留空清除）：');
+if (cur === null) return;
+let ts = null;
+if (cur.trim()) {
+const m = cur.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+if (!m) { toast('日期格式不正确', true); return; }
+ts = new Date(`${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}T00:00:00`).getTime() / 1000;
+}
+try {
+await api('PUT', `/api/accounts/${curAccount.id}/edu-expires-at`, {timestamp: ts});
+toast('已保存');
+loadBilling();
+} catch (e) { toast(e.message, true); }
+}
+
 async function loadBilling() {
 const c = document.getElementById('content');
 c.innerHTML = '<div class="empty">加载中…</div>';
@@ -302,6 +336,7 @@ creditHtml += `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px
 }
 c.innerHTML = `<div class="bill-total"><div class="amount">${money(b.total)}</div>
 <div class="meta">统计周期：${esc(b.period)}${b.note? '<br>' + esc(b.note): ''}</div></div>` +
+eduHtml(b) +
 creditHtml +
 (b.services && b.services.length
 ? `<table><thead><tr><th>服务</th><th style="width:160px">费用</th></tr></thead><tbody>` +

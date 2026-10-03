@@ -78,6 +78,45 @@ def _daily_report_maybe() -> None:
             log.warning("daily report %s failed: %s", acc["name"], e)
     if len(lines) > 1 and tg.send_message("\n".join(lines)):
         db.meta_set("daily_report_date", today)
+    _edu_expiry_maybe()
+
+
+def _edu_expiry_maybe() -> None:
+    """Azure 教育优惠到期提醒：30/7/1 天前各提醒一次（每天最多一次）。"""
+    import time as _time
+    today = datetime.date.today().isoformat()
+    if db.meta_get("edu_remind_date") == today:
+        return
+    now = _time.time()
+    sent = False
+    for acc in db.account_list("azure"):
+        ts = acc.get("edu_expires_at")
+        if not ts:
+            continue
+        days = int((ts - now) / 86400)
+        if days < 0:
+            msg = (f"🎓 <b>Azure 教育优惠已过期</b>\n"
+                   f"账号：{acc['name']}\n"
+                   f"到期日：{_fmt_date(ts)}（已过期 {-days} 天）\n"
+                   f"请及时续期或升级为即用即付，避免服务被禁用。")
+        elif days <= 30:
+            # 只在 30/7/1 天这几个节点提醒，避免每天骚扰
+            if days not in (30, 29, 7, 6, 1, 0):
+                continue
+            msg = (f"🎓 <b>Azure 教育优惠即将到期</b>\n"
+                   f"账号：{acc['name']}\n"
+                   f"到期日：{_fmt_date(ts)}（剩余 {days} 天）\n"
+                   f"如仍是学生身份，请及时续期。")
+        else:
+            continue
+        if tg.send_message(msg):
+            sent = True
+    if sent:
+        db.meta_set("edu_remind_date", today)
+
+
+def _fmt_date(ts: float) -> str:
+    return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
 
 
 def _loop() -> None:

@@ -97,6 +97,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE accounts ADD COLUMN credit_total REAL")
         if "cloud_created_at" not in cols:
             conn.execute("ALTER TABLE accounts ADD COLUMN cloud_created_at REAL")
+        if "edu_expires_at" not in cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN edu_expires_at REAL")
         # account_credits 表老库升级：加 start_at（credit 生效日期）
         ccols = {r["name"] for r in conn.execute("PRAGMA table_info(account_credits)")}
         if "start_at" not in ccols:
@@ -128,7 +130,7 @@ def meta_set(key: str, value: str) -> None:
 def account_list(provider: str | None = None) -> list[dict]:
     with _lock, _connect() as conn:
         rows = conn.execute(
-            "SELECT id, provider, name, created_at, credit_total, cloud_created_at FROM accounts"
+            "SELECT id, provider, name, created_at, credit_total, cloud_created_at, edu_expires_at FROM accounts"
             + (" WHERE provider=?" if provider else "")
             + " ORDER BY id",
             (provider,) if provider else (),
@@ -188,6 +190,16 @@ def account_set_cloud_created_at(account_id: int, ts: float | None) -> bool:
     with _lock, _connect() as conn:
         cur = conn.execute(
             "UPDATE accounts SET cloud_created_at=?, updated_at=? WHERE id=?",
+            (ts, time.time(), account_id),
+        )
+        return cur.rowcount > 0
+
+
+def account_set_edu_expires_at(account_id: int, ts: float | None) -> bool:
+    """设置 Azure 教育优惠到期日（unix 时间戳，传 None 清除）。"""
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "UPDATE accounts SET edu_expires_at=?, updated_at=? WHERE id=?",
             (ts, time.time(), account_id),
         )
         return cur.rowcount > 0

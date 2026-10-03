@@ -34,15 +34,47 @@ nav.innerHTML = providers.map(p =>
 `<div class="nav-item" data-p="${p.id}" onclick="selectProvider('${p.id}')">
 <span class="dot" style="background:${colors[p.id] || '#8b93ad'}"></span>${esc(p.name)}
 </div>`).join('');
+const s = parseHash();
+if (s && providers.find(p => p.id === s.provider)) {
+selectProvider(s.provider, s.accountId, s.tab);
+} else {
 selectProvider(providers[0].id);
 }
+window.addEventListener('hashchange', onHashChange);
+}
 
-function selectProvider(id) {
-curProvider = providers.find(p => p.id === id);
+function selectProvider(id, accountId, tab) {
+curProvider = providers.find(p => p.id === id) || providers[0];
 document.querySelectorAll('#providerNav.nav-item').forEach(el =>
-el.classList.toggle('active', el.dataset.p === id));
-curTab = 'instances';
-loadAccounts();
+el.classList.toggle('active', el.dataset.p === curProvider.id));
+curTab = tab || 'instances';
+loadAccounts(accountId);
+}
+
+/* ---------- hash 路由：刷新/前进后退保持当前页面 ---------- */
+let _hashSyncing = false;
+function syncHash() {
+if (!curProvider) return;
+const h = `#/${curProvider.id}/${curAccount? curAccount.id: 0}/${curTab}`;
+if (location.hash !== h) { _hashSyncing = true; location.hash = h;}
+}
+function parseHash() {
+const m = (location.hash || '').match(/^#\/([a-z]+)\/(\d+)\/([a-z]+)$/);
+return m? {provider: m[1], accountId: m[2], tab: m[3]}: null;
+}
+function onHashChange() {
+if (_hashSyncing) { _hashSyncing = false; return;}
+const s = parseHash();
+if (!s || !providers.find(p => p.id === s.provider)) return;
+if (s.provider !== curProvider.id) {
+selectProvider(s.provider, s.accountId, s.tab);
+} else if (!curAccount || String(curAccount.id) !== String(s.accountId)) {
+const sel = document.getElementById('accountSel');
+if (sel) sel.value = s.accountId;
+onAccountChange(s.tab);
+} else if (s.tab !== curTab) {
+switchTab(s.tab);
+}
 }
 
 function renderTabs() {
@@ -66,6 +98,7 @@ function switchTab(key) {
 curTab = key;
 renderTabs();
 refreshCurTab();
+syncHash();
 }
 
 function refreshCurTab() {
@@ -179,14 +212,16 @@ curAccount = accounts.find(a => String(a.id) === String(selectId || sel.value)) 
 if (curAccount) sel.value = curAccount.id;
 renderTabs();
 refreshCurTab();
+syncHash();
 }
 
-function onAccountChange() {
+function onAccountChange(tab) {
 const id = document.getElementById('accountSel').value;
 curAccount = accounts.find(a => String(a.id) === id) || null;
-curTab = 'instances';
+curTab = tab || 'instances';
 renderTabs();
 refreshCurTab();
+syncHash();
 }
 
 function renderEmpty() {

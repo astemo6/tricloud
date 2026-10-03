@@ -757,62 +757,69 @@ class AwsProvider(Provider):
         return f"已在安全组放行 TCP 端口 {port}（来源 0.0.0.0/0）: {', '.join(done)}"
 
     def get_quotas(self, creds: dict) -> dict:
-        """配额查询：Service Quotas API 看 EC2 主要配额 + CloudFront 分发配额。"""
+        """配额查询：EC2 按需实例配额 + CloudFront 分发配额。
+
+        注意 Service Quotas API 限流较严：EC2 用翻页+间隔+提前收尾，
+        CloudFront 用单点 get_service_quota（QuotaCode L-24B04930）。
+        """
+        import time as _time
+        ak = creds["access_key"].strip()
+        sk = creds["secret_key"].strip()
         sq = boto3.client(
-            "service-quotas",
-            aws_access_key_id=creds["access_key"].strip(),
-            aws_secret_access_key=creds["secret_key"].strip(),
+            "service-quotas", aws_access_key_id=ak, aws_secret_access_key=sk,
             region_name=creds["region"].strip(),
         )
+        items, groups = [], []
+        warn = ""
         try:
-            quotas = []
             paginator = sq.get_paginator("list_service_quotas")
-            for page in paginator.paginate(ServiceCode="ec2"):
-                quotas.extend(page["Quotas"])
+            pages = 0
+            for page in paginator.paginate(
+                    ServiceCode="ec2",
+                    PaginationConfig={"PageSize": 100}):
+                pages += 1
+                for q in page["Quotas"]:
+                    name = q.get("QuotaName", "")
+                    if "On-Demand" in name and "instances" in name.lower():
+                        items.append({
+                            "name": name,
+                            "detail": f"配额 {q.get('Value')} {q.get('Unit', '')}"
+                                      f"{'（可申请提高）' if q.get('Adjustable') else ''}",
+                        })
+                if len(items) >= 12 or pages >= 5:
+                    break
+                _time.sleep(0.5)
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
             if "AccessDenied" in code:
                 raise ValueError(
                     "无 Service Quotas 权限：请给 IAM 用户添加 servicequotas:ListServiceQuotas") from e
-            raise
-        items = []
-        for q in quotas:
-            name = q.get("QuotaName", "")
-            if "On-Demand" in name and "instances" in name.lower():
-                items.append({
-                    "name": name,
-                    "detail": f"配额 {q.get('Value')} {q.get('Unit', '')}"
-                              f"{'（可申请提高）' if q.get('Adjustable') else ''}",
-                })
+            if "TooManyRequests" in code:
+                warn = "（EC2 配额查询被 AWS 限流，稍后重试可看全）"
+            else:
+                raise
         items.sort(key=lambda x: x["name"])
-        groups = [{"title": "EC2 按需实例配额", "items": items[:12]}] if items else []
-        # CloudFront 分发配额（Service Quotas 里 CloudFront 只能在 us-east-1 查）
+        if items:
+            groups.append({"title": "EC2 按需实例配额", "items": items[:12]})
+        # CloudFront 分发配额：单点查询（Service Quotas 里 CloudFront 只能在 us-east-1 查）
         try:
             sq_cf = boto3.client(
-                "service-quotas",
-                aws_access_key_id=creds["access_key"].strip(),
-                aws_secret_access_key=creds["secret_key"].strip(),
+                "service-quotas", aws_access_key_id=ak, aws_secret_access_key=sk,
                 region_name="us-east-1",
             )
-            cf_quotas = []
-            for page in sq_cf.get_paginator("list_service_quotas").paginate(
-                    ServiceCode="cloudfront"):
-                cf_quotas.extend(page["Quotas"])
+            q = sq_cf.get_service_quota(
+                ServiceCode="cloudfront", QuotaCode="L-24B04930")["Quota"]
+            groups.append({"title": "CloudFront 分发配额", "items": [{
+                "name": q.get("QuotaName", "Web distributions per AWS account"),
+                "detail": f"配额 {q.get('Value')} {q.get('Unit', '')}"
+                          f"{'（可申请提高）' if q.get('Adjustable') else ''}",
+            }]})
         except ClientError:
-            cf_quotas = []
-        for q in cf_quotas:
-            name = q.get("QuotaName", "")
-            if "distribution" in name.lower() and "account" in name.lower():
-                groups.append({"title": "CloudFront 分发配额", "items": [{
-                    "name": name,
-                    "detail": f"配额 {q.get('Value')} {q.get('Unit', '')}"
-                              f"{'（可申请提高）' if q.get('Adjustable') else ''}",
-                }]})
-                break
-        return {
-            "groups": groups,
-            "note": "数据来自 Service Quotas；vCPU 配额等可在 AWS 控制台 Service Quotas 页查看",
-        }
+            pass  # noqa: BLE001 - 查不到就不显示，不影响 EC2 配额
+        note = "数据来自 Service Quotas；vCPU 配额等可在 AWS 控制台 Service Quotas 页查看"
+        if warn:
+            note += warn
+        return {"groups": groups, "note": note}
 
     def create_options(self, creds: dict) -> dict:
         ec2 = _client(creds)

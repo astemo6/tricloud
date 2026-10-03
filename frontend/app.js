@@ -663,8 +663,8 @@ try {
 const cfg = await api('GET', `/api/accounts/${curAccount.id}/cloudfront/${distId}/config`);
 box.innerHTML = `<h2>编辑分发 <span class="mono" style="font-size:13px">${esc(distId)}</span></h2>
 <form id="cfEditForm">
-${formField({key: 'comment', label: '备注', placeholder: '分发说明，可空'}, cfg.comment)}
-${formField({key: 'origin_domain', label: '源站域名', required: true, placeholder: '如 example.com（不带 https://）'}, cfg.origin_domain)}
+${formField({key: 'comment', label: '备注', placeholder: '分发说明，可空', value: cfg.comment || ''})}
+${formField({key: 'origin_domain', label: '源站域名', required: true, placeholder: '如 example.com（不带 https://）', value: cfg.origin_domain || ''})}
 ${row({key: 'price_class', label: '价格等级', type: 'select',
 options: ['100', '200', 'All'], value: cfg.price_class || '100'},
 {key: 'default_root_object', label: '默认根对象', placeholder: '如 index.html，可空', value: cfg.default_root_object || ''})}

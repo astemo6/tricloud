@@ -787,9 +787,12 @@ class AwsProvider(Provider):
                 for q in page["Quotas"]:
                     name = q.get("QuotaName", "")
                     if "On-Demand" in name and "instances" in name.lower():
+                        val = q.get("Value")
+                        # EC2 按需配额按 vCPU 计数，直接显示为 Xv
+                        vcpu = int(val) if val is not None else 0
                         items.append({
                             "name": name,
-                            "detail": f"配额 {q.get('Value')}{' ' + q['Unit'] if q.get('Unit') else ''}"
+                            "detail": f"{vcpu}v"
                                       f"{'（可申请提高）' if q.get('Adjustable') else ''}",
                         })
                 if len(items) >= 12 or pages >= 5:

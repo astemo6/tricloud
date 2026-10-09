@@ -174,6 +174,8 @@ def _fmt_billing(b: dict) -> str:
     cur = b.get("currency") or ""
     lines = [f"💰 <b>账单</b>（{ _esc(b.get('period', '')) }）",
              f"总计：<b>{cur} {b.get('total', 0):.2f}</b>"]
+    if b.get("_cache_date"):
+        lines.append(f"<i>AWS 账单每月 15 号/月末更新，数据更新于 {b['_cache_date']}</i>")
     if b.get("edu_expires"):
         days = b.get("edu_days_left", 0)
         icon = "🔴" if b.get("edu_expired") else ("🟡" if b.get("edu_expiring_soon") else "🟢")
@@ -485,7 +487,13 @@ async def _on_button(update, context):
                 if tab == "quota":
                     text = _fmt_quotas(provider.get_quotas(acc["creds"]))
                 elif tab == "billing":
-                    bdata = provider.get_billing(acc["creds"])
+                    if acc["provider"] == "aws":
+                        # AWS 走账单缓存，避免 Cost Explorer 按次收费
+                        from . import billing as _billing
+                        bdata = _billing.get_cached(
+                            acc["id"], lambda: provider.get_billing(acc["creds"]))
+                    else:
+                        bdata = provider.get_billing(acc["creds"])
                     if acc["provider"] == "aws":
                         bdata["manual_credits"] = [{
                             "name": m["name"], "initial": m["amount"],

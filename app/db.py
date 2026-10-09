@@ -73,6 +73,10 @@ CREATE TABLE IF NOT EXISTS recycle_bin (
     est_cost_usd REAL DEFAULT 0,
     lifecycle_days REAL DEFAULT 0,
     deleted_at REAL NOT NULL
+);CREATE TABLE IF NOT EXISTS billing_cache (
+    account_id INTEGER PRIMARY KEY,
+    data TEXT NOT NULL,
+    fetched_at REAL NOT NULL
 );
 """
 
@@ -475,3 +479,27 @@ def job_delete(job_id: str) -> bool:
             "DELETE FROM jobs WHERE id=? AND status NOT IN ('queued','running')", (job_id,)
         )
         return cur.rowcount > 0
+
+
+def billing_cache_get(account_id: int):
+    """取 AWS 账单缓存，返回 (data_dict|None, fetched_at_timestamp)。"""
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "SELECT data, fetched_at FROM billing_cache WHERE account_id=?",
+            (account_id,))
+        row = cur.fetchone()
+    if not row:
+        return None, 0
+    try:
+        return json.loads(row[0]), row[1]
+    except Exception:  # noqa: BLE001
+        return None, 0
+
+
+def billing_cache_set(account_id: int, data: dict) -> None:
+    """写入 AWS 账单缓存。"""
+    with _lock, _connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO billing_cache(account_id, data, fetched_at)"
+            " VALUES (?,?,?)",
+            (account_id, json.dumps(data), time.time()))

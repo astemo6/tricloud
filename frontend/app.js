@@ -372,7 +372,7 @@ creditHtml += `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px
 }
 }
 c.innerHTML = `<div class="bill-total"><div class="amount">${money(b.total)}</div>
-<div class="meta">统计周期：${esc(b.period)}${b.note? '<br>' + esc(b.note): ''}</div></div>` +
+<div class="meta">统计周期：${esc(b.period)}${b.note? '<br>' + esc(b.note): ''}${b._cache_date? `<br><span style="color:#6f7794">AWS 账单每月 15 号/月末更新，当前数据更新于 ${esc(b._cache_date)}</span>`: ''}</div></div>` +
 eduHtml(b) +
 creditHtml +
 (b.services && b.services.length

@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, config, db, jobs, monitor, tasks, tg, traffic
+from . import auth, billing, config, db, jobs, monitor, tasks, tg, traffic
 from .providers import get_provider, list_providers
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -281,7 +281,14 @@ def delete_account(request: Request, account_id: int):
     # 记入回收站：估算费用（本月账单）+ 存活天数
     try:
         provider = get_provider(acc["provider"])
-        billing = provider.get_billing(acc["creds"]) if getattr(provider, "supports_billing", False) else {}
+        if not getattr(provider, "supports_billing", False):
+            billing = {}
+        elif acc["provider"] == "aws":
+            # AWS 走账单缓存，避免 Cost Explorer 按次收费
+            billing = billing.get_cached(
+                acc["id"], lambda: provider.get_billing(acc["creds"]))
+        else:
+            billing = provider.get_billing(acc["creds"])
         cost = float(billing.get("total") or 0)
     except Exception:  # noqa: BLE001
         cost = 0
@@ -426,43 +433,57 @@ def get_billing(request: Request, account_id: int):
     provider = get_provider(acc["provider"])
     if not provider.supports_billing:
         raise HTTPException(status_code=400, detail="该云厂商不支持查看账单")
+    if acc["provider"] == "aws":
+        # AWS Cost Explorer 按次收费：每月 15 号和月末查两次，其余时间被动展示缓存
+        def _fetch_aws():
+            try:
+                data = provider.get_billing(acc["creds"])
+            except Exception as e:  # noqa: BLE001
+                raise HTTPException(status_code=502, detail=f"获取账单失败: {e}") from e
+            # 手动维护的 credit（API 查不到的类型，如 Explore AWS 教程奖励）
+            # 剩余额度自动更新：总额 − CE 查到的累计抵扣（从最早生效日算起）
+            import datetime as _dt
+            manual = db.credit_list(account_id)
+            man_total = sum(m["amount"] for m in manual)
+            man_applied = 0.0
+            if manual:
+                end_d = _dt.date.today().isoformat()
+                for m in manual:
+                    start_ts = m.get("start_at")
+                    start_d = _dt.datetime.fromtimestamp(start_ts).strftime("%Y-%m-%d") if start_ts \
+                        else (_dt.date.today() - _dt.timedelta(days=365)).isoformat()
+                    try:
+                        cur_applied = provider.get_credit_applied(acc["creds"], start_d, end_d)
+                    except Exception:  # noqa: BLE001
+                        cur_applied = 0.0
+                    # 只算添加之后的新增抵扣
+                    man_applied += max(0.0, cur_applied - (m.get("ce_baseline") or 0.0))
+            man_remaining = max(0.0, round(man_total - man_applied, 2))
+            for m in manual:
+                m["source"] = "manual"
+                m["initial"] = m.pop("amount")
+                m["remaining"] = m["initial"]  # 单笔不精确分摊，只展示总额
+                m["used"] = 0.0
+                exp = m.pop("expires_at")
+                m["expires_at_raw"] = exp
+                m["expires"] = _fmt_ts(exp) if exp else ""
+                m["status"] = "手动"
+            data["manual_credits"] = manual
+            data["manual_total"] = round(man_total, 2)
+            data["manual_applied"] = man_applied
+            data["manual_remaining"] = man_remaining
+            return data
+        try:
+            data = billing.get_cached(account_id, _fetch_aws)
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"获取账单失败: {e}") from e
+        return data
     try:
         data = provider.get_billing(acc["creds"])
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"获取账单失败: {e}") from e
-    if acc["provider"] == "aws":
-        # 手动维护的 credit（API 查不到的类型，如 Explore AWS 教程奖励）
-        # 剩余额度自动更新：总额 − CE 查到的累计抵扣（从最早生效日算起）
-        import datetime as _dt
-        manual = db.credit_list(account_id)
-        man_total = sum(m["amount"] for m in manual)
-        man_applied = 0.0
-        if manual:
-            end_d = _dt.date.today().isoformat()
-            for m in manual:
-                start_ts = m.get("start_at")
-                start_d = _dt.datetime.fromtimestamp(start_ts).strftime("%Y-%m-%d") if start_ts \
-                    else (_dt.date.today() - _dt.timedelta(days=365)).isoformat()
-                try:
-                    cur_applied = provider.get_credit_applied(acc["creds"], start_d, end_d)
-                except Exception:  # noqa: BLE001
-                    cur_applied = 0.0
-                # 只算添加之后的新增抵扣
-                man_applied += max(0.0, cur_applied - (m.get("ce_baseline") or 0.0))
-        man_remaining = max(0.0, round(man_total - man_applied, 2))
-        for m in manual:
-            m["source"] = "manual"
-            m["initial"] = m.pop("amount")
-            m["remaining"] = m["initial"]  # 单笔不精确分摊，只展示总额
-            m["used"] = 0.0
-            exp = m.pop("expires_at")
-            m["expires_at_raw"] = exp
-            m["expires"] = _fmt_ts(exp) if exp else ""
-            m["status"] = "手动"
-        data["manual_credits"] = manual
-        data["manual_total"] = round(man_total, 2)
-        data["manual_applied"] = man_applied
-        data["manual_remaining"] = man_remaining
     if acc["provider"] == "azure":
         # Azure 教育优惠到期日：
         # 1) 手动设置的 edu_expires_at 最准（Sponsorships 门户无公开 API）

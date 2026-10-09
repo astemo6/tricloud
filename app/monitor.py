@@ -69,7 +69,13 @@ def _daily_report_maybe() -> None:
             p = get_provider(acc["provider"])
             if not p.supports_billing:
                 continue
-            b = p.get_billing(full["creds"])
+            if acc["provider"] == "aws":
+                # AWS 走账单缓存，避免 Cost Explorer 按次收费
+                from . import billing as _billing
+                b = _billing.get_cached(
+                    acc["id"], lambda: p.get_billing(full["creds"]))
+            else:
+                b = p.get_billing(full["creds"])
             cur = b.get("currency") or ""
             lines.append(f"{acc['provider'].upper()} · {acc['name']}: "
                          f"{cur} {b.get('total', 0):.2f}")

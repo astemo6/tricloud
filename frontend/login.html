@@ -3,29 +3,54 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>
+(function(){try{var t=localStorage.getItem('tricloud-theme')||'auto';
+document.documentElement.setAttribute('data-theme',t);}catch(e){
+document.documentElement.setAttribute('data-theme','auto');}})();
+</script>
 <title>TriCloud 登录</title>
 <style>
+  :root, :root[data-theme="dark"] {
+    --bg: #0f1420; --panel2: #171d2e; --border2: #2a3350;
+    --text: #e6e9f0; --muted: #8b93ad; --accent: #5aa9ff;
+    --primary: #2f6fed; --primary-h: #3d7df5; --red: #ff7a7a;
+    --shadow: 0 12px 40px rgba(0,0,0,.45);
+  }
+  :root[data-theme="light"] {
+    --bg: #f2f4f9; --panel2: #ffffff; --border2: #c9d0e6;
+    --text: #1c2338; --muted: #6d7694; --accent: #2f6fed;
+    --primary: #2f6fed; --primary-h: #1e5fe0; --red: #dc2626;
+    --shadow: 0 12px 40px rgba(30,40,70,.12);
+  }
+  @media (prefers-color-scheme: light) {
+    :root[data-theme="auto"] {
+      --bg: #f2f4f9; --panel2: #ffffff; --border2: #c9d0e6;
+      --text: #1c2338; --muted: #6d7694; --accent: #2f6fed;
+      --primary: #2f6fed; --primary-h: #1e5fe0; --red: #dc2626;
+      --shadow: 0 12px 40px rgba(30,40,70,.12);
+    }
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-         background: #0f1420; color: #e6e9f0; min-height: 100vh;
+         background: var(--bg); color: var(--text); min-height: 100vh;
          display: flex; align-items: center; justify-content: center; }
-  .card { background: #171d2e; border: 1px solid #2a3350; border-radius: 12px;
-          padding: 40px 36px; width: 340px; box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+  .card { background: var(--panel2); border: 1px solid var(--border2); border-radius: 12px;
+          padding: 40px 36px; width: 340px; box-shadow: var(--shadow); }
   h1 { font-size: 22px; text-align: center; margin-bottom: 6px; }
-  h1 span { color: #5aa9ff; }
-  p.sub { text-align: center; color: #8b93ad; font-size: 13px; margin-bottom: 26px; }
-  input { width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #2a3350;
-          background: #0f1420; color: #e6e9f0; font-size: 15px; outline: none;
+  h1 span { color: var(--accent); }
+  p.sub { text-align: center; color: var(--muted); font-size: 13px; margin-bottom: 26px; }
+  input { width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid var(--border2);
+          background: var(--bg); color: var(--text); font-size: 15px; outline: none;
           -webkit-user-select: text; user-select: text; }
-  input:focus { border-color: #5aa9ff; }
+  input:focus { border-color: var(--accent); }
   .pwd-wrap { position: relative; }
   .pwd-toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
-               background: none; border: none; color: #8b93ad; font-size: 18px;
+               background: none; border: none; color: var(--muted); font-size: 18px;
                width: auto; margin: 0; padding: 4px; cursor: pointer; }
   button { width: 100%; margin-top: 14px; padding: 11px; border: none; border-radius: 8px;
-           background: #2f6fed; color: #fff; font-size: 15px; cursor: pointer; }
-  button:hover { background: #3d7df5; }
-  .err { color: #ff7a7a; font-size: 13px; margin-top: 10px; min-height: 18px; text-align: center; }
+           background: var(--primary); color: #fff; font-size: 15px; cursor: pointer; }
+  button:hover { background: var(--primary-h); }
+  .err { color: var(--red); font-size: 13px; margin-top: 10px; min-height: 18px; text-align: center; }
 </style>
 </head>
 <body>

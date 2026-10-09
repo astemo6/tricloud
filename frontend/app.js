@@ -24,15 +24,28 @@ clearTimeout(t._h); t._h = setTimeout(() => t.className = 'toast', 3200);
 const esc = s => String(s == null? '': s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmtTime = s => { if (!s) return '-'; const d = new Date(s); return isNaN(d)? s: d.toLocaleString('zh-CN', {hour12: false});};
 
+function setTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  try { localStorage.setItem('tricloud-theme', t); } catch (e) {}
+  const sel = document.getElementById('themeSel');
+  if (sel) sel.value = t;
+}
+
 async function init() {
 const me = await api('GET', '/api/me');
 if (!me.logged_in) { location.href = '/login.html'; return;}
+// 同步主题选择器
+try {
+  const t = localStorage.getItem('tricloud-theme') || 'auto';
+  const sel = document.getElementById('themeSel');
+  if (sel) sel.value = t;
+} catch (e) {}
 providers = await api('GET', '/api/providers');
 const nav = document.getElementById('providerNav');
-const colors = {oci: '#4ade80', aws: '#fbbf24', azure: '#5aa9ff'};
+const colors = {oci: 'var(--green)', aws: 'var(--yellow)', azure: 'var(--accent)'};
 nav.innerHTML = providers.map(p =>
 `<div class="nav-item" data-p="${p.id}" onclick="selectProvider('${p.id}')">
-<span class="dot" style="background:${colors[p.id] || '#8b93ad'}"></span>${esc(p.name)}
+<span class="dot" style="background:${colors[p.id] || 'var(--muted)'}"></span>${esc(p.name)}
 </div>`).join('');
 const s = parseHash();
 if (s && providers.find(p => p.id === s.provider)) {
@@ -120,10 +133,10 @@ try {
 const rules = await api('GET', `/api/traffic-rules?account_id=${curAccount.id}`);
 const metricName = {in: '入向', out: '出向', both: '双向'};
 c.innerHTML = `<div style="margin-bottom:12px"><button class="btn sm" onclick="openTrafficRuleModal()">+ 添加规则</button>
-<span style="color:#8b93ad;font-size:12px;margin-left:8px">超限自动关机（释放资源），到期自动开机，TG 推送通知</span></div>` +
+<span style="color:var(--muted);font-size:12px;margin-left:8px">超限自动关机（释放资源），到期自动开机，TG 推送通知</span></div>` +
 (rules.length? `<table><thead><tr><th>规则</th><th>实例</th><th>指标</th><th>阈值</th><th>超限关机时长</th><th>状态</th><th>操作</th></tr></thead><tbody>` +
 rules.map(r => `<tr>
-<td>${esc(r.name)}<br><span style="color:#6f7794;font-size:11px">${r.enabled? '启用': '停用'}</span></td>
+<td>${esc(r.name)}<br><span style="color:var(--faint);font-size:11px">${r.enabled? '启用': '停用'}</span></td>
 <td style="font-size:12px">${esc(r.instance_name || r.instance_key)}</td>
 <td>${metricName[r.metric] || r.metric} / ${r.window_hours}小时</td>
 <td>${r.limit_gb} GB</td>
@@ -156,7 +169,7 @@ ${row({key: 'metric', label: '监控指标', type: 'select', options: ['out', 'i
 {key: 'window_hours', label: '统计窗口（小时）', type: 'number', value: '24'})}
 ${row({key: 'limit_gb', label: '流量阈值（GB）', type: 'number', required: true, placeholder: '如 100'},
 {key: 'duration_hours', label: '关机时长（小时）', type: 'number', value: '24'})}
-<div class="help" style="color:#8b93ad;margin-bottom:14px">超限后自动关机（deallocate，停止计费），到期自动开机并 TG 通知。</div>
+<div class="help" style="color:var(--muted);margin-bottom:14px">超限后自动关机（deallocate，停止计费），到期自动开机并 TG 通知。</div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
 <button type="submit" class="btn primary">保存</button>
@@ -243,11 +256,11 @@ c.innerHTML = `<table><thead><tr>
 <th>地域</th><th>创建时间</th><th>操作</th></tr></thead><tbody>` +
 instances.map((it, i) => `<tr>
 <td>${esc(it.name)}<br><span class="mono">${esc(it.id.slice(-12))}</span></td>
-<td>${badge(it.status)}<br><span style="color:#6f7794;font-size:11px">${esc(it.status_text || '')}</span></td>
-<td>${esc(it.shape)}${it.cpu? `<br><span style="color:#8b93ad">${esc(it.cpu)}C / ${esc(it.memory)}G</span>`: ''}</td>
+<td>${badge(it.status)}<br><span style="color:var(--faint);font-size:11px">${esc(it.status_text || '')}</span></td>
+<td>${esc(it.shape)}${it.cpu? `<br><span style="color:var(--muted)">${esc(it.cpu)}C / ${esc(it.memory)}G</span>`: ''}</td>
 <td class="mono">${esc(it.public_ip || '-')}</td>
 <td class="mono">${esc(it.private_ip || '-')}${it.ipv6? `<br>${esc(it.ipv6)}`: ''}</td>
-<td>${esc(it.region || '')}${it.zone? `<br><span style="color:#6f7794;font-size:11px">${esc(it.zone)}</span>`: ''}</td>
+<td>${esc(it.region || '')}${it.zone? `<br><span style="color:var(--faint);font-size:11px">${esc(it.zone)}</span>`: ''}</td>
 <td style="font-size:12px">${fmtTime(it.created)}</td>
 <td><div class="row-actions">${curProvider.actions.map(a =>
 `<button class="btn sm${a.danger? ' danger': ''}" onclick="doAction(${i}, '${a.key}')">${a.label}</button>`
@@ -294,20 +307,20 @@ function eduHtml(b) {
 if (curProvider.id !== 'azure') return '';
 if (!b.edu_expires_at) {
 return `<div style="margin:12px 0"><button class="btn sm" onclick="setEduExpires()">设置教育优惠到期日</button>
-<span style="color:#6f7794;font-size:12px;margin-left:8px">Azure 学生订阅 $100 额度，到期日可在 Sponsorships 门户查看；如已设置云账号创建时间，会自动按 +12 个月预估</span></div>`;
+<span style="color:var(--faint);font-size:12px;margin-left:8px">Azure 学生订阅 $100 额度，到期日可在 Sponsorships 门户查看；如已设置云账号创建时间，会自动按 +12 个月预估</span></div>`;
 }
-const color = b.edu_expired ? '#f87171' : (b.edu_expiring_soon ? '#fbbf24' : '#4ade80');
+const color = b.edu_expired ? 'var(--red2)' : (b.edu_expiring_soon ? 'var(--yellow)' : 'var(--green)');
 const status = b.edu_expired ? '已过期' : `剩余 ${b.edu_days_left} 天`;
 const estTag = b.edu_estimated ? '（预估：按账号创建时间+12个月算）' : '';
-return `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:#1a2138;border-radius:8px;flex-wrap:wrap;align-items:center">
-<div><div style="color:#8b93ad;font-size:12px">🎓 教育优惠到期日${estTag}</div>
+return `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:var(--card);border-radius:8px;flex-wrap:wrap;align-items:center">
+<div><div style="color:var(--muted);font-size:12px">🎓 教育优惠到期日${estTag}</div>
 <div style="font-size:18px;color:${color}">${esc(b.edu_expires)}（${status}）</div></div>
 <div style="margin-left:auto;display:flex;gap:8px">
 <button class="btn sm" onclick="setEduExpires()">修改</button>
 <a class="btn sm" href="https://azure.microsoft.com/free/students/" target="_blank" style="text-decoration:none">去续期</a>
 </div></div>
-${b.edu_expiring_soon && !b.edu_expired ? '<div class="help" style="color:#fbbf24;font-size:12px;margin-bottom:12px">⚠ 教育优惠 30 天内到期，到期后订阅会被禁用。如仍是学生身份请及时续期。</div>' : ''}
-${b.edu_expired ? '<div class="help" style="color:#f87171;font-size:12px;margin-bottom:12px">⚠ 教育优惠已过期，请续期或升级为即用即付。</div>' : ''}`;
+${b.edu_expiring_soon && !b.edu_expired ? '<div class="help" style="color:var(--yellow);font-size:12px;margin-bottom:12px">⚠ 教育优惠 30 天内到期，到期后订阅会被禁用。如仍是学生身份请及时续期。</div>' : ''}
+${b.edu_expired ? '<div class="help" style="color:var(--red2);font-size:12px;margin-bottom:12px">⚠ 教育优惠已过期，请续期或升级为即用即付。</div>' : ''}`;
 }
 
 async function setEduExpires() {
@@ -342,37 +355,37 @@ const apiRemain = b.credit_remaining || 0;
 const apiInit = b.credit_initial || 0;
 const manTotal = manualCredits.reduce((s, c) => s + c.initial, 0);
 const manRemain = b.manual_remaining != null? b.manual_remaining: manTotal;
-creditHtml = `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:#1a2138;border-radius:8px;flex-wrap:wrap">
-<div><div style="color:#8b93ad;font-size:12px">Credit 剩余（合计·自动更新）</div>
-<div style="font-size:18px;color:#4ade80">${money(apiRemain + manRemain)}</div></div>
-${apiCredits.length? `<div><div style="color:#8b93ad;font-size:12px">API 已用</div>
-<div style="font-size:18px;color:#fbbf24">${money(apiInit - apiRemain)}</div></div>`: ''}
-${manualCredits.length? `<div><div style="color:#8b93ad;font-size:12px">手动已用（累计抵扣）</div>
-<div style="font-size:18px;color:#fbbf24">${money(b.manual_applied || 0)}</div></div>`: ''}
-<div><div style="color:#8b93ad;font-size:12px">本月抵扣</div>
+creditHtml = `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:var(--card);border-radius:8px;flex-wrap:wrap">
+<div><div style="color:var(--muted);font-size:12px">Credit 剩余（合计·自动更新）</div>
+<div style="font-size:18px;color:var(--green)">${money(apiRemain + manRemain)}</div></div>
+${apiCredits.length? `<div><div style="color:var(--muted);font-size:12px">API 已用</div>
+<div style="font-size:18px;color:var(--yellow)">${money(apiInit - apiRemain)}</div></div>`: ''}
+${manualCredits.length? `<div><div style="color:var(--muted);font-size:12px">手动已用（累计抵扣）</div>
+<div style="font-size:18px;color:var(--yellow)">${money(b.manual_applied || 0)}</div></div>`: ''}
+<div><div style="color:var(--muted);font-size:12px">本月抵扣</div>
 <div style="font-size:18px">-${money(b.credit_used || 0)}</div></div>
 <div style="margin-left:auto;align-self:center">
 <button class="btn sm" onclick="addManualCredit()">+ 添加 Credit</button></div></div>
-<div class="help" style="color:#6f7794;font-size:12px;margin-bottom:12px">手动 credit 的剩余 = 总额 − Cost Explorer 累计抵扣（从最早生效日算起，约 24 小时延迟），每天自动更新</div>
+<div class="help" style="color:var(--faint);font-size:12px;margin-bottom:12px">手动 credit 的剩余 = 总额 − Cost Explorer 累计抵扣（从最早生效日算起，约 24 小时延迟），每天自动更新</div>
 <table><thead><tr><th>Credit</th><th style="width:110px">总额</th><th style="width:110px">剩余</th>
 <th style="width:120px">到期日</th><th style="width:90px">状态</th><th style="width:70px"></th></tr></thead><tbody>` +
 allCredits.map(cr => `<tr><td>${esc(cr.name)}</td><td class="mono">${money(cr.initial)}</td>
-<td class="mono" style="color:#4ade80">${money(cr.remaining)}</td>
+<td class="mono" style="color:var(--green)">${money(cr.remaining)}</td>
 <td class="mono">${esc(cr.expires)}</td>
 <td>${esc(cr.status)}${cr.source === 'manual'? '（手动）': ''}</td>
 <td>${cr.source === 'manual'? `<button class="btn sm" onclick="editManualCredit(${cr.id})">编辑</button>
 <button class="btn sm danger" onclick="delManualCredit(${cr.id})">删除</button>`: ''}</td></tr>`).join('') + '</tbody></table>';
 } else {
 creditHtml = `<div style="margin:12px 0"><button class="btn sm" onclick="addManualCredit()">+ 添加 Credit</button>
-<span style="color:#6f7794;font-size:12px;margin-left:8px">API 未返回 credit 明细（如教程奖励类），可手动添加</span></div>`;
+<span style="color:var(--faint);font-size:12px;margin-left:8px">API 未返回 credit 明细（如教程奖励类），可手动添加</span></div>`;
 if (b.credit_used > 0) {
-creditHtml += `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:#1a2138;border-radius:8px">
-<div><div style="color:#8b93ad;font-size:12px">Credit 抵扣（本月）</div>
-<div style="font-size:18px;color:#4ade80">-${money(b.credit_used)}</div></div></div>`;
+creditHtml += `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:var(--card);border-radius:8px">
+<div><div style="color:var(--muted);font-size:12px">Credit 抵扣（本月）</div>
+<div style="font-size:18px;color:var(--green)">-${money(b.credit_used)}</div></div></div>`;
 }
 }
 c.innerHTML = `<div class="bill-total"><div class="amount">${money(b.total)}</div>
-<div class="meta">统计周期：${esc(b.period)}${b.note? '<br>' + esc(b.note): ''}${b._cache_date? `<br><span style="color:#6f7794">AWS 账单每月 15 号/月末更新，当前数据更新于 ${esc(b._cache_date)}</span>`: ''}</div></div>` +
+<div class="meta">统计周期：${esc(b.period)}${b.note? '<br>' + esc(b.note): ''}${b._cache_date? `<br><span style="color:var(--faint)">AWS 账单每月 15 号/月末更新，当前数据更新于 ${esc(b._cache_date)}</span>`: ''}</div></div>` +
 eduHtml(b) +
 creditHtml +
 (b.services && b.services.length
@@ -443,7 +456,7 @@ ${formField({key: 'name', label: 'Credit 名称', required: true, value: cr.name
 ${formField({key: 'amount', label: '金额（美元）', type: 'number', required: true, value: cr.initial})}
 ${row({key: 'start_at', label: '生效日期', placeholder: 'YYYY-MM-DD', value: _fmtDateInput(cr.start_at)},
 {key: 'expires_at', label: '到期日', placeholder: 'YYYY-MM-DD，可空', value: _fmtDateInput(cr.expires_at_raw)})}
-<div class="help" style="color:#8b93ad;margin-bottom:14px">修改生效日期会重新计算抵扣基线。</div>
+<div class="help" style="color:var(--muted);margin-bottom:14px">修改生效日期会重新计算抵扣基线。</div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
 <button type="submit" class="btn primary">保存</button>
@@ -472,11 +485,11 @@ c.innerHTML = '<div class="empty">加载中…</div>';
 try {
 const q = await api('GET', `/api/accounts/${curAccount.id}/quotas`);
 c.innerHTML = (q.groups || []).map(g =>
-`<h3 style="margin:18px 0 10px;font-size:14px;color:#aab2cc">${esc(g.title)}</h3>
+`<h3 style="margin:18px 0 10px;font-size:14px;color:var(--text2)">${esc(g.title)}</h3>
 <table><thead><tr><th>项目</th><th>详情</th></tr></thead><tbody>` +
 (g.items || []).map(it => `<tr><td class="mono">${esc(it.name)}</td><td>${esc(it.detail)}</td></tr>`).join('') +
 '</tbody></table>').join('') +
-(q.note? `<div class="help" style="color:#6f7794;margin-top:12px;font-size:12px">${esc(q.note)}</div>`: '') ||
+(q.note? `<div class="help" style="color:var(--faint);margin-top:12px;font-size:12px">${esc(q.note)}</div>`: '') ||
 '<div class="empty">暂无配额数据</div>';
 } catch (e) {
 c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadQuotas()">重试</button></div>`;
@@ -491,7 +504,7 @@ const s = await api('GET', `/api/accounts/${curAccount.id}/subscription`);
 c.innerHTML = `<table><thead><tr><th>项目</th><th>详情</th></tr></thead><tbody>` +
 (s.items || []).map(it => `<tr><td>${esc(it.name)}</td><td class="mono">${esc(it.detail)}</td></tr>`).join('') +
 '</tbody></table>' +
-(s.note? `<div class="help" style="color:#6f7794;margin-top:12px;font-size:12px">${esc(s.note)}</div>`: '');
+(s.note? `<div class="help" style="color:var(--faint);margin-top:12px;font-size:12px">${esc(s.note)}</div>`: '');
 } catch (e) {
 c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadSubscription()">重试</button></div>`;
 }
@@ -519,7 +532,7 @@ const cls = s === 'running'? 'b-running': (s === 'stopped'? 'b-stopped': 'b-unkn
 return `<span class="badge ${cls}">${esc(s || 'unknown')}</span>`;
 };
 c.innerHTML = `<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-<select id="lsRegionSel" onchange="lsRegion=this.value;loadLightsail()" style="background:#0f1420;color:#e6e9f0;border:1px solid #2a3350;border-radius:8px;padding:8px 10px">
+<select id="lsRegionSel" onchange="lsRegion=this.value;loadLightsail()" style="background:var(--bg);color:var(--text);border:1px solid var(--border2);border-radius:8px;padding:8px 10px">
 <option value="">全部区域（自动扫描）</option>
 ${LS_REGIONS.map(r => `<option value="${r}"${r === lsRegion? ' selected': ''}>${esc(lsRegionLabel(r))}</option>`).join('')}
 </select>
@@ -530,10 +543,10 @@ ${LS_REGIONS.map(r => `<option value="${r}"${r === lsRegion? ' selected': ''}>${
 list.map(it => `<tr>
 <td>${esc(it.name)}</td>
 <td>${badge(it.state)}</td>
-<td>${esc(it.bundle)}<br><span style="color:#6f7794;font-size:11px">${esc(it.blueprint)}${it.cpu? `<br>${esc(it.cpu)}C${it.memory? ' / ' + esc(it.memory) + 'G': ''}`: ''}</span></td>
+<td>${esc(it.bundle)}<br><span style="color:var(--faint);font-size:11px">${esc(it.blueprint)}${it.cpu? `<br>${esc(it.cpu)}C${it.memory? ' / ' + esc(it.memory) + 'G': ''}`: ''}</span></td>
 <td class="mono">${esc(it.public_ip || '-')}${it.ipv6? `<br>${esc(it.ipv6)}`: ''}</td>
 <td class="mono">${esc(it.private_ip || '-')}</td>
-<td>${esc(lsRegionLabel(it.region))}${it.zone? `<br><span style="color:#6f7794;font-size:11px">${esc(it.zone)}</span>`: ''}</td>
+<td>${esc(lsRegionLabel(it.region))}${it.zone? `<br><span style="color:var(--faint);font-size:11px">${esc(it.zone)}</span>`: ''}</td>
 <td style="font-size:12px">${fmtTime(it.created)}</td>
 <td><div class="row-actions">
 ${it.state === 'running'
@@ -618,15 +631,15 @@ try {
 const list = await api('GET', `/api/accounts/${curAccount.id}/cloudfront`);
 const header = `<div style="margin-bottom:12px"><button class="btn sm" onclick="openCfCreateModal()">创建分发</button></div>`;
 const planBadge = p => p === 'paygo'
-? '<span style="color:#8b93ad;font-size:12px">按量付费</span>'
+? '<span style="color:var(--muted);font-size:12px">按量付费</span>'
 : `<span class="badge b-running">${esc(p)}</span>`;
 c.innerHTML = header + (list.length
 ? `<table><thead><tr><th>分发</th><th>状态</th><th>域名/别名</th><th>源站</th><th>价格等级</th><th>套餐</th><th>操作</th></tr></thead><tbody>` +
 list.map(d => `<tr>
-<td><span class="mono">${esc(d.id)}</span><br><span style="color:#6f7794;font-size:11px">${esc(d.domain)}</span>
+<td><span class="mono">${esc(d.id)}</span><br><span style="color:var(--faint);font-size:11px">${esc(d.domain)}</span>
 ${d.comment? `<br><span style="font-size:12px">${esc(d.comment)}</span>`: ''}</td>
 <td>${d.enabled? '<span class="badge b-running">已启用</span>': '<span class="badge b-stopped">已停用</span>'}
-<br><span style="color:#6f7794;font-size:11px">${esc(d.status)}</span></td>
+<br><span style="color:var(--faint);font-size:11px">${esc(d.status)}</span></td>
 <td style="font-size:12px">${d.aliases.map(esc).join('<br>') || '-'}</td>
 <td style="font-size:12px" class="mono">${d.origins.map(esc).join('<br>') || '-'}</td>
 <td>${esc(d.price_class || '-')}</td>
@@ -652,7 +665,7 @@ box.innerHTML = `<h2>刷新缓存 · <span class="mono">${esc(distId)}</span></h
 <form id="invForm">
 <div class="field"><label>路径（每行一个，留空 = 刷新全部 /*）</label>
 <textarea name="paths" placeholder="/*&#10;/images/*"></textarea></div>
-<div class="help" style="color:#8b93ad;margin-bottom:14px">CloudFront 每月前 1000 条刷新路径免费，超出后按量收费。</div>
+<div class="help" style="color:var(--muted);margin-bottom:14px">CloudFront 每月前 1000 条刷新路径免费，超出后按量收费。</div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
 <button type="submit" class="btn primary">提交刷新</button>
@@ -703,7 +716,7 @@ ${formField({key: 'origin_domain', label: '源站域名', required: true, placeh
 ${row({key: 'price_class', label: '价格等级', type: 'select',
 options: ['100', '200', 'All'], value: cfg.price_class || '100'},
 {key: 'default_root_object', label: '默认根对象', placeholder: '如 index.html，可空', value: cfg.default_root_object || ''})}
-<div class="help" style="color:#8b93ad;margin-bottom:14px">修改后配置部署约需几分钟生效；源站只改第一个源站的域名。</div>
+<div class="help" style="color:var(--muted);margin-bottom:14px">修改后配置部署约需几分钟生效；源站只改第一个源站的域名。</div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
 <button type="submit" class="btn primary">保存</button>
@@ -740,14 +753,14 @@ function openCfPlanModal(distId, curPlan) {
 const box = document.getElementById('modalBox');
 const cur = (curPlan || 'paygo').toUpperCase();
 box.innerHTML = `<h2>切换套餐 <span class="mono" style="font-size:13px">${esc(distId)}</span></h2>
-<div class="help" style="color:#8b93ad;margin-bottom:12px">当前：${cur === 'PAYGO' ? '按量付费' : esc(curPlan)}。包月套餐每个分发单独计费，切换立即生效并开始计费。</div>
+<div class="help" style="color:var(--muted);margin-bottom:12px">当前：${cur === 'PAYGO' ? '按量付费' : esc(curPlan)}。包月套餐每个分发单独计费，切换立即生效并开始计费。</div>
 <form id="cfPlanForm">
 ${CF_PLANS.map(p => `
-<label style="display:block;border:1px solid #2a3350;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer">
+<label style="display:block;border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer">
 <input type="radio" name="plan_tier" value="${p.key}" ${p.key.toUpperCase() === cur ? 'checked' : ''}
 style="margin-right:8px">
 <b>${esc(p.label)}</b><br>
-<span style="color:#8b93ad;font-size:12px;margin-left:24px">${esc(p.desc)}</span>
+<span style="color:var(--muted);font-size:12px;margin-left:24px">${esc(p.desc)}</span>
 </label>`).join('')}
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
@@ -775,7 +788,7 @@ ${formField({key: 'origin_domain', label: '源站域名', required: true, placeh
 ${row({key: 'price_class', label: '价格等级', type: 'select',
 options: ['100（北美+欧洲·最便宜）', '200（+亚洲）', 'all（全部边缘节点）'], value: '100（北美+欧洲·最便宜）'},
 {key: 'comment', label: '备注（可选）', placeholder: '如 官网加速'})}
-<div class="help" style="color:#8b93ad;margin:-6px 0 14px">默认配置：回源走 HTTP、访客侧 HTTP 跳 HTTPS、缓存优化策略。分发部署约需 15 分钟。</div>
+<div class="help" style="color:var(--muted);margin:-6px 0 14px">默认配置：回源走 HTTP、访客侧 HTTP 跳 HTTPS、缓存优化策略。分发部署约需 15 分钟。</div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
 <button type="submit" class="btn primary">提交创建</button>
@@ -812,15 +825,15 @@ box.innerHTML = `<h2>账号管理 · ${esc(p.name)}</h2>
 <div style="margin-bottom:10px"><button class="btn sm" onclick="testAllAccounts()">🔍 一键测活（测试本云全部账号）</button>
 <button class="btn sm" style="margin-left:8px" onclick="openRecycleBin()">🗑️ 回收站</button></div>
 <div id="testAllResult"></div>
-${accounts.map(a => { const d = aliveDays(a); return `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid #232b45">
-<span style="flex:1">${esc(a.name)}<br><span style="color:#6f7794;font-size:12px">${
-d != null? `存活 ${d} 天（${fmtDate(a.cloud_created_at)}创建） <a href="javascript:void(0)" onclick="setCloudCreatedAt(${a.id},'${p.id}')" style="color:#5aa9ff">修改</a>`
-: `云账号创建时间未设置 <a href="javascript:void(0)" onclick="setCloudCreatedAt(${a.id},'${p.id}')" style="color:#5aa9ff">设置</a>`}</span></span>
+${accounts.map(a => { const d = aliveDays(a); return `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)">
+<span style="flex:1">${esc(a.name)}<br><span style="color:var(--faint);font-size:12px">${
+d != null? `存活 ${d} 天（${fmtDate(a.cloud_created_at)}创建） <a href="javascript:void(0)" onclick="setCloudCreatedAt(${a.id},'${p.id}')" style="color:var(--accent)">修改</a>`
+: `云账号创建时间未设置 <a href="javascript:void(0)" onclick="setCloudCreatedAt(${a.id},'${p.id}')" style="color:var(--accent)">设置</a>`}</span></span>
 <button class="btn sm" onclick="testAccount(${a.id})">测试连接</button>
 <button class="btn sm" onclick="openMonitorModal(${a.id})">🔔 监控</button>
 <button class="btn sm" onclick="editAccount(${a.id})">编辑</button>
 <button class="btn sm danger" onclick="delAccount(${a.id})">删除</button></div>`; }).join('')
-|| '<div style="color:#8b93ad;padding:8px 0">暂无账号</div>'}
+|| '<div style="color:var(--muted);padding:8px 0">暂无账号</div>'}
 <h2 style="margin-top:20px">添加账号
 <button class="btn sm" style="margin-left:8px" onclick="toggleBatchAdd()">批量添加</button></h2>
 <div id="singleAddForm">
@@ -839,7 +852,7 @@ ${fieldInput(f, '')}${f.help? `<div class="help">${esc(f.help)}</div>`: ''}</div
 <form id="accBatchForm">
 <div class="field"><label>批量添加（每行一个账号，字段用 | 分隔）</label>
 <textarea name="batch" rows="6" style="width:100%" placeholder="别名 | 字段1 | 字段2 | ..."></textarea>
-<div class="help" id="batchHelp" style="color:#8b93ad"></div></div>
+<div class="help" id="batchHelp" style="color:var(--muted)"></div></div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="toggleBatchAdd()">返回单个添加</button>
 <button type="submit" class="btn primary">批量保存（逐个校验）</button>
@@ -880,7 +893,7 @@ try {
 const r = await api('POST', '/api/accounts/batch', {provider: p.id, accounts});
 const box = document.getElementById('batchResult');
 box.innerHTML = `<div style="margin-top:10px"><b>${esc(r.summary)}</b><br>` +
-r.results.map(x => `<div style="font-size:12px;color:${x.ok? '#4ade80': '#f87171'}">${x.ok? '✅': '❌'} ${esc(x.name)}${x.ok? '': ': ' + esc(x.error)}</div>`).join('') + '</div>';
+r.results.map(x => `<div style="font-size:12px;color:${x.ok? 'var(--green)': 'var(--red2)'}">${x.ok? '✅': '❌'} ${esc(x.name)}${x.ok? '': ': ' + esc(x.error)}</div>`).join('') + '</div>';
 loadAccounts();
 } catch (err) { toast(err.message, true);}
 };
@@ -901,7 +914,7 @@ try {
 const r = await api('GET', '/api/recycle-bin');
 const s = r.stats;
 box.innerHTML = `<h2>🗑️ 回收站</h2>
-<div style="color:#8b93ad;font-size:13px;margin-bottom:12px">
+<div style="color:var(--muted);font-size:13px;margin-bottom:12px">
 共 ${s.count} 个已删账号 · 最长存活 ${s.max_lifecycle_days} 天 · 最高费用 $${s.max_cost_usd}
 </div>` +
 (r.items.length? `<table><thead><tr><th>账号</th><th>云</th><th>预估费用</th><th>存活天数</th><th>删除时间</th></tr></thead><tbody>` +
@@ -923,7 +936,7 @@ box.innerHTML = `<h2>编辑账号</h2>
 <form id="accEditForm">
 <div class="field"><label>账号别名 <span class="req">*</span></label>
 <input name="name" required value="${esc(accounts.find(a => a.id === id).name)}"></div>
-<div class="help" style="color:#8b93ad;margin-bottom:14px">如需更换凭证请删除后重新添加；这里只修改别名。</div>
+<div class="help" style="color:var(--muted);margin-bottom:14px">如需更换凭证请删除后重新添加；这里只修改别名。</div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="openAccountModal()">返回</button>
 <button type="submit" class="btn primary">保存</button>
@@ -965,14 +978,14 @@ catch (e) { toast(e.message, true);}
 
 async function testAllAccounts() {
 const box = document.getElementById('testAllResult');
-box.innerHTML = '<div style="color:#8b93ad;padding:6px 0">测活中…</div>';
+box.innerHTML = '<div style="color:var(--muted);padding:6px 0">测活中…</div>';
 try {
 const list = await api('POST', `/api/accounts/test-all?provider=${curProvider.id}`);
 box.innerHTML = list.map(r =>
-`<div style="padding:6px 0;border-bottom:1px solid #232b45;font-size:13px">
-${r.ok? '✅': '❌'} ${esc(r.name)} <span style="color:#6f7794">${esc(r.message)}</span></div>`).join('')
-|| '<div style="color:#8b93ad">暂无账号</div>';
-} catch (e) { box.innerHTML = `<div style="color:#ff7a7a">测活失败: ${esc(e.message)}</div>`;}
+`<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+${r.ok? '✅': '❌'} ${esc(r.name)} <span style="color:var(--faint)">${esc(r.message)}</span></div>`).join('')
+|| '<div style="color:var(--muted)">暂无账号</div>';
+} catch (e) { box.innerHTML = `<div style="color:var(--red)">测活失败: ${esc(e.message)}</div>`;}
 }
 
 async function openMonitorModal(id) {
@@ -986,7 +999,7 @@ box.innerHTML = `<h2>监控设置 · ${esc(acc.name)}</h2>
 <span>状态告警：实例异常停止/恢复时 Telegram 推送通知</span></div>
 <div class="check-row"><input type="checkbox" name="monitor_restart"${m.monitor_restart? ' checked': ''}>
 <span>异常自启：实例异常停止后自动提交启动任务</span></div>
-<div class="help" style="color:#8b93ad;margin-bottom:14px">后台每 N 分钟巡检一次（N 在"设置"里配置，默认 5 分钟）。需要先在设置里配置 Telegram 才能收到通知。</div>
+<div class="help" style="color:var(--muted);margin-bottom:14px">后台每 N 分钟巡检一次（N 在"设置"里配置，默认 5 分钟）。需要先在设置里配置 Telegram 才能收到通知。</div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="openAccountModal()">返回</button>
 <button type="submit" class="btn primary">保存</button>
@@ -1048,7 +1061,7 @@ ${row({key: 'region', label: '区域', type: 'select', options: opts.regions, va
 {key: 'instance_type', label: '实例类型', type: 'select', options: opts.instance_types, value: 't2.micro'})}
 ${row({key: 'key_name', label: '密钥对', type: 'select', options: ['（自动创建新密钥对）',...(opts.key_pairs || [])]},
 {key: 'ami', label: 'AMI（可选）', placeholder: '留空自动使用最新 Ubuntu 22.04'})}
-<div class="help" style="color:#8b93ad;margin:-6px 0 14px">将在目标区域的默认 VPC 自动创建安全组（放行 SSH）。密钥对列表为账号默认区域的——若选择其他区域，将自动创建新密钥对。新密钥对的私钥只在任务结果中显示一次。</div>`;
+<div class="help" style="color:var(--muted);margin:-6px 0 14px">将在目标区域的默认 VPC 自动创建安全组（放行 SSH）。密钥对列表为账号默认区域的——若选择其他区域，将自动创建新密钥对。新密钥对的私钥只在任务结果中显示一次。</div>`;
 if (p.id === 'azure') return `
 ${row({key: 'name', label: '虚拟机名（可选）', placeholder: '留空自动生成'},
 {key: 'resource_group', label: '资源组（可选）', placeholder: '留空自动创建'})}
@@ -1131,7 +1144,7 @@ const opts = await api('GET', `/api/accounts/${curAccount.id}/create-options`).c
 if (!opts) return;
 const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>自动抢机 · ${esc(curProvider.name)}</h2>
-<div class="help" style="color:#fbbf24;margin-bottom:14px">后台循环尝试创建，遇到资源不足自动按间隔重试，手动停止前不会停。请合理设置间隔，避免被限流。</div>
+<div class="help" style="color:var(--yellow);margin-bottom:14px">后台循环尝试创建，遇到资源不足自动按间隔重试，手动停止前不会停。请合理设置间隔，避免被限流。</div>
 <form id="snatchForm">
 ${row({key: 'shape', label: '规格', type: 'select', options: opts.shapes, value: opts.shapes.find(s => s.includes('A1.Flex')) || opts.shapes[0]},
 {key: 'retry_interval', label: '重试间隔（秒）', type: 'number', value: '30'})}
@@ -1166,7 +1179,7 @@ const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>${esc(title)} · ${esc(inst.name)}</h2>
 <form id="paramForm">
 ${fields.map(formField).join('')}
-${tip? `<div class="help" style="color:#fbbf24;margin-bottom:6px">${esc(tip)}</div>`: ''}
+${tip? `<div class="help" style="color:var(--yellow);margin-bottom:6px">${esc(tip)}</div>`: ''}
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
 <button type="submit" class="btn primary">提交</button>
@@ -1196,7 +1209,7 @@ box.innerHTML = `<h2>更改实例配置 · ${esc(inst.name)}</h2>
 ${formField({key: 'shape', label: '目标规格', required: true, placeholder: '如 VM.Standard.A1.Flex'})}
 ${row({key: 'ocpus', label: 'OCPU（Flex）', type: 'number', value: inst.cpu || '1'},
 {key: 'memory_gbs', label: '内存 GB（Flex）', type: 'number', value: inst.memory || '6'})}
-<div class="help" style="color:#fbbf24;margin-bottom:6px">注意：OCI 要求实例先关机再改配置，面板会自动处理等待。请确认规格在该可用域可用。</div>
+<div class="help" style="color:var(--yellow);margin-bottom:6px">注意：OCI 要求实例先关机再改配置，面板会自动处理等待。请确认规格在该可用域可用。</div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
 <button type="submit" class="btn primary">提交</button>
@@ -1291,7 +1304,7 @@ function openSettingsModal() {
 api('GET', '/api/settings').then(s => {
 const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>设置 · Telegram 联动</h2>
-<div class="help" style="color:#8b93ad;margin-bottom:14px">
+<div class="help" style="color:var(--muted);margin-bottom:14px">
 1. 在 Telegram 里找 @BotFather 创建 Bot，拿到 Token<br>
 2. 给你的 Bot 发任意消息，然后访问 <span class="mono">https://api.telegram.org/bot&lt;Token&gt;/getUpdates</span> 查出 chat.id<br>
 3. 填到下面保存。之后任务完成/失败会自动推送，Bot 里点 /start 可用按钮操作实例。<br>

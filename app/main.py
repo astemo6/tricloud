@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, billing, config, db, jobs, monitor, tasks, tg, traffic
+from . import auth, billing, cf, config, db, jobs, monitor, tasks, tg, traffic
 from .providers import get_provider, list_providers
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -125,11 +125,43 @@ class AccountBody(BaseModel):
     provider: str
     name: str
     creds: dict
+    # 账号级代理出口（可选；proxy_pass 后端 Fernet 加密存储）
+    proxy_url: str = ""
+    proxy_user: str = ""
+    proxy_pass: str = ""
 
 
 class AccountUpdateBody(BaseModel):
     name: str
     creds: dict | None = None
+    # None = 未提交（保持原代理配置不变）；"" = 清除代理
+    proxy_url: str | None = None
+    proxy_user: str | None = None
+    proxy_pass: str | None = None
+
+
+def _proxy_of(body) -> dict | None:
+    """从请求体提取代理配置；未配置 URL 时返回 None（直连）。"""
+    url = (getattr(body, "proxy_url", None) or "").strip()
+    if not url:
+        return None
+    return {
+        "proxy_url": url,
+        "proxy_user": (getattr(body, "proxy_user", None) or "").strip(),
+        "proxy_pass": getattr(body, "proxy_pass", None) or "",
+    }
+
+
+def _proxy_update_of(body: AccountUpdateBody) -> dict | None:
+    """编辑账号时的代理配置：未提交返回 None（不变），空 URL 返回 {}（清除）。"""
+    if (body.proxy_url is None and body.proxy_user is None
+            and body.proxy_pass is None):
+        return None
+    return {
+        "proxy_url": (body.proxy_url or "").strip(),
+        "proxy_user": (body.proxy_user or "").strip(),
+        "proxy_pass": body.proxy_pass or "",
+    }
 
 
 @app.get("/api/accounts")
@@ -142,11 +174,15 @@ def list_accounts(request: Request, provider: str = ""):
 def create_account(request: Request, body: AccountBody):
     _require_login(request)
     provider = get_provider(body.provider)
+    proxy = _proxy_of(body)
+    # 连通性校验走代理（若有配置）
+    test_creds = {**body.creds, **(proxy or {})}
     try:
-        provider.test(body.creds)
+        provider.test(test_creds)
     except Exception as e:  # noqa: BLE001 - 凭证错误要原样返回给前端
         raise HTTPException(status_code=400, detail=f"凭证校验失败: {e}") from e
-    account_id = db.account_create(body.provider, body.name.strip(), body.creds)
+    account_id = db.account_create(
+        body.provider, body.name.strip(), body.creds, proxy=proxy)
     return {"ok": True, "id": account_id}
 
 
@@ -246,6 +282,62 @@ def delete_traffic_rule(request: Request, rule_id: int):
     return {"ok": True}
 
 
+# ---------- Cloudflare DNS 映射 ----------
+class DnsMappingBody(BaseModel):
+    account_id: int
+    instance_id: str
+    zone_name: str
+    record_name: str
+
+
+class DnsMappingUpdateBody(BaseModel):
+    instance_id: str | None = None
+    zone_name: str | None = None
+    record_name: str | None = None
+
+
+@app.get("/api/dns-mappings")
+def list_dns_mappings(request: Request, account_id: int | None = None):
+    _require_login(request)
+    if account_id:
+        _get_account(account_id)
+    return db.dns_mapping_list(account_id)
+
+
+@app.post("/api/dns-mappings")
+def add_dns_mapping(request: Request, body: DnsMappingBody):
+    _require_login(request)
+    _get_account(body.account_id)
+    instance_id = body.instance_id.strip()
+    zone_name = body.zone_name.strip()
+    record_name = body.record_name.strip()
+    if not instance_id or not zone_name or not record_name:
+        raise HTTPException(status_code=400, detail="实例、Zone 域名、记录名均不能为空")
+    mid = db.dns_mapping_add(body.account_id, instance_id, zone_name, record_name)
+    return {"ok": True, "id": mid}
+
+
+@app.put("/api/dns-mappings/{mapping_id}")
+def update_dns_mapping(request: Request, mapping_id: int,
+                       body: DnsMappingUpdateBody):
+    _require_login(request)
+    fields = {k: v.strip() for k, v in body.dict().items()
+              if v is not None and v.strip()}
+    if not fields:
+        raise HTTPException(status_code=400, detail="没有要更新的字段")
+    if not db.dns_mapping_update(mapping_id, None, fields):
+        raise HTTPException(status_code=404, detail="映射不存在")
+    return {"ok": True}
+
+
+@app.delete("/api/dns-mappings/{mapping_id}")
+def delete_dns_mapping(request: Request, mapping_id: int):
+    _require_login(request)
+    if not db.dns_mapping_delete(mapping_id):
+        raise HTTPException(status_code=404, detail="映射不存在")
+    return {"ok": True}
+
+
 # ---------- 回收站 ----------
 
 @app.get("/api/recycle-bin")
@@ -260,15 +352,16 @@ def update_account(request: Request, account_id: int, body: AccountUpdateBody):
     acc = db.account_get(account_id)
     if not acc:
         raise HTTPException(status_code=404, detail="账号不存在")
+    proxy = _proxy_update_of(body)
     creds = body.creds if body.creds is not None else acc["creds"]
-    # 只有提交了新凭证才做连通性测试
+    # 只有提交了新凭证才做连通性测试（走新代理配置，若有）
     if body.creds is not None:
         provider = get_provider(acc["provider"])
         try:
-            provider.test(body.creds)
+            provider.test({**body.creds, **(proxy or {})})
         except Exception as e:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=f"凭证校验失败: {e}") from e
-    db.account_update(account_id, body.name.strip(), body.creds)
+    db.account_update(account_id, body.name.strip(), body.creds, proxy=proxy)
     return {"ok": True}
 
 
@@ -297,6 +390,8 @@ def delete_account(request: Request, account_id: int):
         days = round((time.time() - acc["cloud_created_at"]) / 86400, 2)
     db.recycle_add(acc["provider"], acc["name"], cost, days)
     db.account_delete(account_id)
+    # 级联删除该账号的 DNS 映射
+    db.dns_mapping_delete_by_account(account_id)
     return {"ok": True}
 
 
@@ -353,6 +448,7 @@ _ACTION_PARAMS: dict[str, list[tuple[str, str, str]]] = {
     "extend_disk": [("size_gb", "新磁盘大小 (GB)", "number")],
     "open_port": [("port", "端口号", "number")],
     "resize": [("size", "新规格 (如 Standard_B2s)", "text")],
+    "change_ip": [("cidr", "目标网段 (如 192.0.2.0/24，! 前缀为排除，可空)", "text")],
     "update_shape": [("shape", "新形状", "text"),
                      ("ocpus", "OCPU 数 (Flex 可填)", "number"),
                      ("memory_gbs", "内存 GB (Flex 可填)", "number")],
@@ -822,14 +918,23 @@ def test_all_accounts(request: Request, provider: str = ""):
 class MonitorBody(BaseModel):
     monitor_alert: bool = False
     monitor_restart: bool = False
+    monitor_ip_check: bool | None = None   # IP 连通性定时检测
+    auto_change_ip: bool | None = None     # IP 不通时自动换 IP
 
 
 @app.get("/api/accounts/{account_id}/monitor")
 def get_monitor(request: Request, account_id: int):
     _require_login(request)
     acc = _get_account(account_id)
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
     return {"monitor_alert": bool(acc.get("monitor_alert")),
-            "monitor_restart": bool(acc.get("monitor_restart"))}
+            "monitor_restart": bool(acc.get("monitor_restart")),
+            "monitor_ip_check": bool(acc.get("monitor_ip_check")),
+            "auto_change_ip": bool(acc.get("auto_change_ip")),
+            "auto_change_ip_used": db.ip_change_daily_count(
+                account_id, today),
+            "auto_change_ip_limit": db.AUTO_CHANGE_IP_DAILY_LIMIT}
 
 
 @app.put("/api/accounts/{account_id}/monitor")
@@ -837,7 +942,23 @@ def set_monitor(request: Request, account_id: int, body: MonitorBody):
     _require_login(request)
     _get_account(account_id)
     db.account_set_monitor(account_id, body.monitor_alert, body.monitor_restart)
+    if body.monitor_ip_check is not None or body.auto_change_ip is not None:
+        db.account_set_ip_check(account_id,
+                                 bool(body.monitor_ip_check),
+                                 bool(body.auto_change_ip))
     return {"ok": True}
+
+
+@app.get("/api/accounts/{account_id}/ip-change-usage")
+def get_ip_change_usage(request: Request, account_id: int):
+    """当日自动换 IP 次数（前端监控页展示用）。"""
+    _require_login(request)
+    _get_account(account_id)
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+    return {"used": db.ip_change_daily_count(account_id, today),
+            "limit": db.AUTO_CHANGE_IP_DAILY_LIMIT,
+            "date": today}
 
 
 # ---------- AWS Lightsail ----------
@@ -1002,13 +1123,18 @@ def cloudfront_set_plan(request: Request, account_id: int, body: CloudFrontPlanB
     provider = _require_aws(acc)
     # 分发 ARN 需要账号 ID，用 STS 获取
     import boto3 as _boto3
+    from botocore.config import Config as _BotocoreConfig
+    from .providers.base import proxy_settings as _proxy_settings
     try:
-        sts = _boto3.client(
-            "sts",
+        sts_kwargs = dict(
             aws_access_key_id=acc["creds"]["access_key"].strip(),
             aws_secret_access_key=acc["creds"]["secret_key"].strip(),
             region_name="us-east-1",
         )
+        _proxies = _proxy_settings(acc["creds"])
+        if _proxies:
+            sts_kwargs["config"] = _BotocoreConfig(proxies=_proxies)
+        sts = _boto3.client("sts", **sts_kwargs)
         aws_account_id = sts.get_caller_identity()["Account"]
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"获取账号 ID 失败: {e}") from e
@@ -1071,6 +1197,7 @@ def cloudfront_create(request: Request, account_id: int, body: CloudFrontCreateB
 class SettingsBody(BaseModel):
     tg_bot_token: str = ""
     tg_chat_id: str = ""
+    cf_api_token: str = ""
     daily_report: bool | None = None
     daily_report_hour: int | None = None
     monitor_interval_min: int | None = None
@@ -1084,6 +1211,7 @@ def get_settings(request: Request):
         "tg_bot_token_set": bool(token),
         "tg_chat_id": chat_id,
         "tg_bot_running": bool(tg._state["thread"] and tg._state["thread"].is_alive()),
+        "cf_token_set": cf.token_configured(),
         "daily_report": db.meta_get("daily_report") == "1",
         "daily_report_hour": int(db.meta_get("daily_report_hour") or 9),
         "monitor_interval_min": int(db.meta_get("monitor_interval_min") or 5),
@@ -1099,6 +1227,9 @@ def update_settings(request: Request, body: SettingsBody):
         db.meta_set("tg_bot_token", token)
     if chat_id:
         db.meta_set("tg_chat_id", chat_id)
+    cf_token = body.cf_api_token.strip()
+    if cf_token:
+        cf.set_token(cf_token)
     if body.daily_report is not None:
         db.meta_set("daily_report", "1" if body.daily_report else "0")
     if body.daily_report_hour is not None:

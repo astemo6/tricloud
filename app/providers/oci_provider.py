@@ -33,7 +33,10 @@ from oci.core.models import (
 )
 from oci.exceptions import ServiceError
 
-from .base import AccountField, InstanceInfo, Provider
+from .. import cf
+from .base import (AccountField, InstanceInfo, IP_CHANGE_MAX_ATTEMPTS,
+                    Provider, ip_in_spec, parse_cidr_spec, proxy_settings,
+                    spec_desc)
 
 log = logging.getLogger(__name__)
 
@@ -65,12 +68,24 @@ def _sdk_config(creds: dict) -> dict:
     }
 
 
+def _apply_proxy(client, creds: dict):
+    """为 OCI 客户端设置代理。
+
+    OCI SDK 底层用 requests.Session，原生支持 session.proxies；
+    未配置代理时不做任何改动（直连）。
+    """
+    proxies = proxy_settings(creds)
+    if proxies:
+        client.base_client.session.proxies = proxies
+    return client
+
+
 def _clients(creds: dict):
     cfg = _sdk_config(creds)
     return (
-        oci.core.ComputeClient(cfg),
-        oci.core.VirtualNetworkClient(cfg),
-        oci.identity.IdentityClient(cfg),
+        _apply_proxy(oci.core.ComputeClient(cfg), creds),
+        _apply_proxy(oci.core.VirtualNetworkClient(cfg), creds),
+        _apply_proxy(oci.identity.IdentityClient(cfg), creds),
     )
 
 
@@ -129,7 +144,7 @@ class OciProvider(Provider):
         now = datetime.datetime.now(datetime.timezone.utc).replace(
             hour=0, minute=0, second=0, microsecond=0)  # Usage API 要求精确到天
         start = now.replace(day=1)
-        usage = oci.usage_api.UsageapiClient(cfg)
+        usage = _apply_proxy(oci.usage_api.UsageapiClient(cfg), creds)
         details = oci.usage_api.models.RequestSummarizedUsagesDetails(
             tenant_id=tenancy,
             time_usage_started=start,
@@ -159,8 +174,8 @@ class OciProvider(Provider):
         """配额查询：计算实例各规格按可用域的可用余量 + 块存储额度。"""
         cfg = _sdk_config(creds)
         tenancy = cfg["tenancy"]
-        identity = oci.identity.IdentityClient(cfg)
-        limits = oci.limits.LimitsClient(cfg)
+        identity = _apply_proxy(oci.identity.IdentityClient(cfg), creds)
+        limits = _apply_proxy(oci.limits.LimitsClient(cfg), creds)
         ads = [ad.name for ad in
                identity.list_availability_domains(compartment_id=tenancy).data]
         groups = []
@@ -229,7 +244,9 @@ class OciProvider(Provider):
     def get_subscription(self, creds: dict) -> dict:
         """订阅信息：租户基本信息（OCI 无公开的付费订阅 API）。"""
         cfg = _sdk_config(creds)
-        tenancy = oci.identity.IdentityClient(cfg).get_tenancy(cfg["tenancy"]).data
+        tenancy = _apply_proxy(
+            oci.identity.IdentityClient(cfg), creds
+        ).get_tenancy(cfg["tenancy"]).data
         return {
             "items": [
                 {"name": "租户名", "detail": tenancy.name or "-"},
@@ -306,6 +323,7 @@ class OciProvider(Provider):
         {"key": "restart", "label": "重启"},
         {"key": "terminate", "label": "终止", "danger": True},
         {"key": "change_ip", "label": "更换公网 IP"},
+        {"key": "check_ip", "label": "检测 IP 连通性"},
         {"key": "assign_ipv6", "label": "分配 IPv6"},
         {"key": "delete_ipv6", "label": "删除 IPv6"},
         {"key": "update_shape", "label": "更改配置"},
@@ -392,7 +410,10 @@ class OciProvider(Provider):
             compute.terminate_instance(iid, preserve_boot_volume=False)
             return "实例终止请求已提交"
         if action == "change_ip":
-            return self._change_ip(compute, vnet, creds, inst)
+            return self._change_ip(compute, vnet, creds, inst, ctx,
+                                   cidr=(getattr(ctx, "params", {}) or {}).get("cidr"))
+        if action == "check_ip":
+            return self._check_ip(inst, ctx)
         if action == "assign_ipv6":
             return self._assign_ipv6(vnet, inst)
         if action == "delete_ipv6":
@@ -411,7 +432,8 @@ class OciProvider(Provider):
             return self._open_port(vnet, inst, ctx)
         raise ValueError(f"未知操作: {action}")
 
-    def _change_ip(self, compute, vnet, creds, inst: InstanceInfo) -> str:
+    def _change_ip(self, compute, vnet, creds, inst: InstanceInfo,
+                   ctx, cidr: str | None = None) -> str:
         vnic_id = inst.extra.get("vnic_id")
         if not vnic_id:
             raise ValueError("缺少 vnic_id，请刷新实例列表后重试")
@@ -421,24 +443,43 @@ class OciProvider(Provider):
         primary = next((p for p in privates if p.is_primary), None)
         if not primary:
             raise ValueError("未找到主私有 IP")
-        try:
-            existing = vnet.get_public_ip_by_private_ip_id(
-                GetPublicIpByPrivateIpIdDetails(private_ip_id=primary.id)
+        spec = parse_cidr_spec(cidr)
+        # OCI 机制：释放旧临时公网 IP 再分配新的，循环换直到命中目标网段
+        for attempt in range(1, IP_CHANGE_MAX_ATTEMPTS + 1):
+            try:
+                existing = vnet.get_public_ip_by_private_ip_id(
+                    GetPublicIpByPrivateIpIdDetails(private_ip_id=primary.id)
+                ).data
+                if existing.lifetime == "EPHEMERAL":
+                    vnet.delete_public_ip(existing.id)
+                    time.sleep(5)
+            except ServiceError as e:
+                if e.status != 404:
+                    raise
+            new_ip = vnet.create_public_ip(
+                CreatePublicIpDetails(
+                    compartment_id=creds["tenancy_ocid"].strip(),
+                    lifetime="EPHEMERAL",
+                    private_ip_id=primary.id,
+                )
             ).data
-            if existing.lifetime == "EPHEMERAL":
-                vnet.delete_public_ip(existing.id)
-                time.sleep(5)
-        except ServiceError as e:
-            if e.status != 404:
-                raise
-        new_ip = vnet.create_public_ip(
-            CreatePublicIpDetails(
-                compartment_id=creds["tenancy_ocid"].strip(),
-                lifetime="EPHEMERAL",
-                private_ip_id=primary.id,
-            )
-        ).data
-        return f"更换 IP 成功，新公网 IP: {new_ip.ip_address}"
+            if ip_in_spec(new_ip.ip_address, spec):
+                # 换 IP 成功后联动更新 Cloudflare A 记录（失败只记日志）
+                cf.sync_dns(ctx, inst.id, new_ip.ip_address)
+                return f"更换 IP 成功，新公网 IP: {new_ip.ip_address}"
+            ctx.log(f"第 {attempt}/{IP_CHANGE_MAX_ATTEMPTS} 次换得公网 IP "
+                    f"{new_ip.ip_address}，不符合要求（{spec_desc(spec)}），重新更换…")
+        raise ValueError(
+            f"已尝试 {IP_CHANGE_MAX_ATTEMPTS} 次，未能换到符合要求的公网 IP"
+            f"（要求：{spec_desc(spec)}）")
+
+    def _check_ip(self, inst: InstanceInfo, ctx) -> str:
+        """检测公网 IP 连通性：ping + TCP 端口探测（复用 ip_check.probe_ip）。"""
+        from ..ip_check import probe_ip
+        ip = inst.public_ip or ""
+        if not ip:
+            raise ValueError("该实例没有公网 IP")
+        return "\n".join(probe_ip(ip)["lines"])
 
     def _assign_ipv6(self, vnet, inst: InstanceInfo) -> str:
         vnic_id = inst.extra.get("vnic_id")

@@ -12,7 +12,10 @@ from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.resource.resources import ResourceManagementClient
 from azure.mgmt.subscription import SubscriptionClient
 
-from .base import AccountField, InstanceInfo, Provider
+from .. import cf
+from .base import (AccountField, InstanceInfo, IP_CHANGE_MAX_ATTEMPTS,
+                    Provider, ip_in_spec, parse_cidr_spec, proxy_settings,
+                    spec_desc)
 
 log = logging.getLogger(__name__)
 
@@ -48,21 +51,30 @@ def _parse_id(resource_id: str) -> dict:
     return d
 
 
+def _proxy_kwargs(creds: dict) -> dict:
+    """azure-core 原生代理参数（ProxyPolicy / 传输层均支持 proxies）。"""
+    proxies = proxy_settings(creds)
+    return {"proxies": proxies} if proxies else {}
+
+
 def _credential(creds: dict) -> ClientSecretCredential:
+    # 令牌获取同样走代理（azure.identity 内部管道支持 proxies）
     return ClientSecretCredential(
         tenant_id=creds["tenant_id"].strip(),
         client_id=creds["client_id"].strip(),
         client_secret=creds["client_secret"],
+        **_proxy_kwargs(creds),
     )
 
 
 def _clients(creds: dict):
     cred = _credential(creds)
     sub = creds["subscription_id"].strip()
+    kwargs = _proxy_kwargs(creds)
     return (
-        ComputeManagementClient(cred, sub),
-        NetworkManagementClient(cred, sub),
-        ResourceManagementClient(cred, sub),
+        ComputeManagementClient(cred, sub, **kwargs),
+        NetworkManagementClient(cred, sub, **kwargs),
+        ResourceManagementClient(cred, sub, **kwargs),
     )
 
 
@@ -106,8 +118,7 @@ class AzureProvider(Provider):
         需要服务主体在订阅上有 Cost Management Reader（或更高）角色。
         """
         import json
-        import urllib.request
-        import urllib.error
+        import requests
         cred = _credential(creds)
         sub = creds["subscription_id"].strip()
         try:
@@ -124,21 +135,24 @@ class AzureProvider(Provider):
                 "aggregation": {"totalCost": {"name": "Cost", "function": "Sum"}},
                 "grouping": [{"type": "Dimension", "name": "ServiceName"}],
             },
-        }).encode()
-        req = urllib.request.Request(
-            url, data=body,
-            headers={"Authorization": f"Bearer {token}",
-                     "Content-Type": "application/json"})
+        })
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode())
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode(errors="replace")[:300]
-            if e.code in (401, 403):
-                raise ValueError(
-                    "无 Cost Management 查询权限：请给服务主体分配订阅的 "
-                    f"Cost Management Reader 角色 ({detail})") from e
-            raise ValueError(f"Cost Management 查询失败 ({e.code}): {detail}") from e
+            resp = requests.post(
+                url, data=body,
+                headers={"Authorization": f"Bearer {token}",
+                         "Content-Type": "application/json"},
+                proxies=proxy_settings(creds), timeout=30)
+        except Exception as e:  # noqa: BLE001
+            raise ValueError(f"Cost Management 查询失败: {e}") from e
+        if resp.status_code in (401, 403):
+            raise ValueError(
+                "无 Cost Management 查询权限：请给服务主体分配订阅的 "
+                f"Cost Management Reader 角色 ({resp.text[:300]})")
+        if resp.status_code >= 400:
+            raise ValueError(
+                f"Cost Management 查询失败 ({resp.status_code}): "
+                f"{resp.text[:300]}")
+        data = resp.json()
         props = data.get("properties", {})
         cols = [c.get("name") for c in props.get("columns", [])]
         rows = props.get("rows", [])
@@ -260,7 +274,8 @@ class AzureProvider(Provider):
             compute.virtual_machines.begin_delete(rg, name).result()
             return "虚拟机删除请求已提交"
         if action == "change_ip":
-            return self._change_ip(network, rg, name, ctx)
+            return self._change_ip(network, rg, name, ctx, inst.id,
+                                   cidr=(getattr(ctx, "params", {}) or {}).get("cidr"))
         if action == "open_port":
             return self._open_port(compute, network, rg, name, ctx)
         if action == "extend_disk":
@@ -376,13 +391,8 @@ class AzureProvider(Provider):
         return f"磁盘扩容已提交: {cur}GB → {size}GB（系统内需手动扩展分区）"
 
     def _check_ip(self, network, rg: str, vm_name: str, ctx) -> str:
-        """检测公网 IP 连通性：ping + TCP 端口探测。
-
-        注意：这是从面板服务器（境外）发起的探测，只能验证 IP 是否存活、
-        端口是否开放，不能代替从国内发起的"被墙"检测。
-        """
-        import socket
-        import subprocess
+        """检测公网 IP 连通性：ping + TCP 端口探测（复用 ip_check.probe_ip）。"""
+        from ..ip_check import probe_ip
         nic = self._find_nic(network, rg, vm_name)
         ip = ""
         for ipc in (nic.ip_configurations or []):
@@ -395,24 +405,7 @@ class AzureProvider(Provider):
                 break
         if not ip:
             raise ValueError("该虚拟机没有公网 IP")
-        lines = [f"公网 IP: {ip}"]
-        # ping
-        try:
-            r = subprocess.run(["ping", "-c", "3", "-W", "2", ip],
-                               capture_output=True, timeout=15)
-            lines.append("Ping: " + ("通" if r.returncode == 0 else "不通"))
-        except Exception:  # noqa: BLE001
-            lines.append("Ping: 检测失败")
-        # TCP 端口
-        for port, label in [(22, "SSH"), (80, "HTTP"), (443, "HTTPS"), (3389, "RDP")]:
-            try:
-                s = socket.create_connection((ip, port), timeout=5)
-                s.close()
-                lines.append(f"TCP {port}({label}): 开放")
-            except Exception:  # noqa: BLE001
-                lines.append(f"TCP {port}({label}): 关闭/超时")
-        lines.append("注：此为境外探测，仅供参考；被墙检测需从国内网络发起")
-        return "\n".join(lines)
+        return "\n".join(probe_ip(ip)["lines"])
 
     def get_traffic_gb(self, creds: dict, vm_id: str, hours: int, metric: str = "out") -> float:
         """查虚拟机过去 N 小时的流量（GB）。metric: in/out/both。"""
@@ -420,7 +413,7 @@ class AzureProvider(Provider):
         from azure.mgmt.monitor import MonitorManagementClient
         cred = _credential(creds)
         sub_id = creds["subscription_id"].strip()
-        monitor = MonitorManagementClient(cred, sub_id)
+        monitor = MonitorManagementClient(cred, sub_id, **_proxy_kwargs(creds))
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=hours)
         names = []
@@ -575,7 +568,8 @@ class AzureProvider(Provider):
             raise ValueError(f"部署模型失败 ({r.status_code}): {r.text[:300]}")
         return result + f"\n模型部署: {deploy_name}（{model_name} {model_version}）"
 
-    def _change_ip(self, network, rg: str, vm_name: str, ctx) -> str:
+    def _change_ip(self, network, rg: str, vm_name: str, ctx,
+                   inst_id: str = "", cidr: str | None = None) -> str:
         # 通过 VM 找到主网卡
         nic_id = None
         # 简化：按命名约定查找该 VM 的网卡（创建时我们按固定规则命名）
@@ -592,6 +586,7 @@ class AzureProvider(Provider):
             raise ValueError("该网卡未绑定公网 IP")
         pip_parsed = _parse_id(ipc.public_ip_address.id)
         pip_name = pip_parsed["publicipaddresses"]
+        spec = parse_cidr_spec(cidr)
         old_pip = network.public_ip_addresses.get(rg, pip_name)
         ctx.log(f"解绑并删除公网 IP {old_pip.ip_address}…")
         ipc.public_ip_address = None
@@ -603,21 +598,43 @@ class AzureProvider(Provider):
                 time.sleep(5)
             except HttpResponseError:
                 break
+
+        # Azure 机制：重建 PIP，循环换直到命中目标网段
         new_pip_name = f"{pip_name}-new"
-        ctx.log("创建新的公网 IP…")
-        poller = network.public_ip_addresses.begin_create_or_update(
-            rg, new_pip_name,
-            {"location": old_pip.location,
-             "sku": {"name": "Standard"},
-             "public_ip_allocation_method": "Static"})
-        new_pip = poller.result()
-        ipc.public_ip_address = {"id": new_pip.id}
-        network.network_interfaces.begin_create_or_update(rg, nic.name, nic).result()
-        return f"公网 IP 更换成功，新 IP: {new_pip.ip_address}"
+        for attempt in range(1, IP_CHANGE_MAX_ATTEMPTS + 1):
+            ctx.log("创建新的公网 IP…")
+            poller = network.public_ip_addresses.begin_create_or_update(
+                rg, new_pip_name,
+                {"location": old_pip.location,
+                 "sku": {"name": "Standard"},
+                 "public_ip_allocation_method": "Static"})
+            new_pip = poller.result()
+            ipc.public_ip_address = {"id": new_pip.id}
+            network.network_interfaces.begin_create_or_update(rg, nic.name, nic).result()
+            new_ip = new_pip.ip_address or ""
+            if ip_in_spec(new_ip, spec):
+                # 换 IP 成功后联动更新 Cloudflare A 记录（失败只记日志）
+                cf.sync_dns(ctx, inst_id, new_ip)
+                return f"公网 IP 更换成功，新 IP: {new_ip}"
+            ctx.log(f"第 {attempt}/{IP_CHANGE_MAX_ATTEMPTS} 次换得公网 IP "
+                    f"{new_ip}，不符合要求（{spec_desc(spec)}），重建…")
+            # 重建：先解绑并删除刚创建的 PIP，再从头创建
+            ipc.public_ip_address = None
+            network.network_interfaces.begin_create_or_update(rg, nic.name, nic).result()
+            network.public_ip_addresses.begin_delete(rg, new_pip_name).result()
+            for _ in range(60):
+                try:
+                    network.public_ip_addresses.get(rg, new_pip_name)
+                    time.sleep(5)
+                except HttpResponseError:
+                    break
+        raise ValueError(
+            f"已尝试 {IP_CHANGE_MAX_ATTEMPTS} 次，未能换到符合要求的公网 IP"
+            f"（要求：{spec_desc(spec)}）")
 
     def create_options(self, creds: dict) -> dict:
         cred = _credential(creds)
-        sub_client = SubscriptionClient(cred)
+        sub_client = SubscriptionClient(cred, **_proxy_kwargs(creds))
         locations = [loc.name for loc in
                      sub_client.subscriptions.list_locations(creds["subscription_id"].strip())]
         return {

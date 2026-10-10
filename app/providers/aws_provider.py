@@ -1,5 +1,7 @@
 """AWS provider：EC2 实例管理（boto3）。"""
+import base64
 import ipaddress
+import json
 import logging
 import time
 
@@ -963,12 +965,24 @@ class AwsProvider(Provider):
             key_material = kp["KeyMaterial"]
         sg_id = self._ensure_sg(ec2, ctx)
         ctx.log(f"正在创建实例 {name} ({itype})…")
-        resp = ec2.run_instances(
+        run_kwargs = dict(
             ImageId=ami, InstanceType=itype, MinCount=1, MaxCount=1,
             KeyName=key_name, SecurityGroupIds=[sg_id],
             TagSpecifications=[{"ResourceType": "instance",
                                 "Tags": [{"Key": "Name", "Value": name}]}],
         )
+        startup_script = (params.get("startup_script") or "").strip()
+        if startup_script:
+            # 开机脚本包成 cloud-config，EC2 要求 UserData 预先 base64 编码
+            cloud_config = "\n".join([
+                "#cloud-config",
+                "runcmd:",
+                f"  - [ bash, -c, {json.dumps(startup_script)} ]",
+            ])
+            run_kwargs["UserData"] = base64.b64encode(
+                cloud_config.encode()).decode()
+            ctx.log("已附加开机脚本（UserData）")
+        resp = ec2.run_instances(**run_kwargs)
         iid = resp["Instances"][0]["InstanceId"]
         ctx.log(f"实例 {iid} 已提交，等待运行…")
         ec2.get_waiter("instance_running").wait(InstanceIds=[iid])

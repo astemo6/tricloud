@@ -47,6 +47,10 @@ _STATUS_MAP = {
     "TERMINATING": "terminating",
 }
 
+# 安全列表规则协议映射：OCI 用数字（6=TCP, 17=UDP, 1=ICMP, all=全部）
+_PROTOCOL_TO_NUM = {"tcp": "6", "udp": "17", "icmp": "1", "all": "all"}
+_PROTOCOL_TO_NAME = {"6": "tcp", "17": "udp", "1": "icmp", "all": "all"}
+
 
 def _sdk_config(creds: dict) -> dict:
     key = creds["private_key"].replace("\\n", "\n")
@@ -234,6 +238,55 @@ class OciProvider(Provider):
             ],
             "note": "付费订阅详情/免费试用剩余请在 OCI 控制台账单页查看，API 未开放",
         }
+
+    def get_traffic_gb(self, creds: dict, instance_id: str, hours: int,
+                       metric: str = "out") -> float:
+        """查实例过去 N 小时的流量（GB）。metric: in/out/both。"""
+        from datetime import datetime, timedelta, timezone
+        try:
+            compute, _, _ = _clients(creds)
+            tenancy = creds["tenancy_ocid"].strip()
+            atts = oci.pagination.list_call_get_all_results(
+                compute.list_vnic_attachments,
+                compartment_id=tenancy, instance_id=instance_id).data
+            if not atts:
+                log.warning("no vnic attachment for instance %s", instance_id)
+                return 0.0
+            vnic_ocid = atts[0].vnic_id
+            end = datetime.now(timezone.utc)
+            start = end - timedelta(hours=hours)
+            names = []
+            if metric in ("in", "both"):
+                names.append("VnicFromNetworkBytes")
+            if metric in ("out", "both"):
+                names.append("VnicToNetworkBytes")
+            total = 0.0
+            monitoring = oci.monitoring.MonitoringClient(_sdk_config(creds))
+            for mname in names:
+                try:
+                    # OCI Monitoring API 只接受 MQL 表达式，
+                    # 指标名与 resourceId 维度写在 query 里
+                    details = oci.monitoring.models.SummarizeMetricsDataDetails(
+                        namespace="oci_vcn",
+                        query=(f'{mname}[1h]{{resourceId = "{vnic_ocid}"}}.sum()'),
+                        start_time=start,
+                        end_time=end,
+                        resolution="1h",
+                    )
+                    result = monitoring.summarize_metrics_data(
+                        compartment_id=tenancy,
+                        summarize_metrics_data_details=details).data
+                    for m in result:
+                        for dp in m.aggregated_datapoints:
+                            if dp.value is not None:
+                                total += float(dp.value)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("traffic metric %s failed: %s", mname, e)
+            return total / (1024 ** 3)
+        except Exception as e:  # noqa: BLE001
+            log.warning("traffic check instance %s failed: %s", instance_id, e)
+            return 0.0
+
     fields = [
         AccountField("tenancy_ocid", "Tenancy OCID", placeholder="ocid1.tenancy.oc1..…"),
         AccountField("user_ocid", "User OCID", placeholder="ocid1.user.oc1..…"),
@@ -461,13 +514,7 @@ class OciProvider(Provider):
         port = int((getattr(ctx, "params", {}) or {}).get("port") or 0)
         if not (1 <= port <= 65535):
             raise ValueError("请提供有效端口 1-65535")
-        vnic_id = inst.extra.get("vnic_id")
-        subnet_id = inst.extra.get("subnet_id")
-        if not vnic_id or not subnet_id:
-            raise ValueError("缺少网卡/子网信息，请刷新实例列表后重试")
-        vnic = vnet.get_vnic(vnic_id).data
-        seclist = vnet.get_security_list(vnic.nsg_ids[0]).data if vnic.nsg_ids else \
-            vnet.get_security_list(vnet.get_subnet(subnet_id).data.security_list_ids[0]).data
+        seclist = self._get_seclist(vnet, inst)
         for r in seclist.ingress_security_rules or []:
             if (r.protocol == "6" and r.source == "0.0.0.0/0" and r.tcp_options
                     and r.tcp_options.destination_port_range
@@ -482,6 +529,181 @@ class OciProvider(Provider):
             description=f"tricloud open {port}"))
         vnet.update_security_list(seclist.id, UpdateSecurityListDetails(ingress_security_rules=rules))
         return f"已在安全列表放行 TCP 端口 {port}（来源 0.0.0.0/0）"
+
+    # ---------- 安全列表规则 ----------
+    def _get_seclist(self, vnet, inst: InstanceInfo):
+        """定位实例使用的安全列表：优先 NSG，否则取子网安全列表。"""
+        vnic_id = inst.extra.get("vnic_id")
+        subnet_id = inst.extra.get("subnet_id")
+        if not vnic_id or not subnet_id:
+            raise ValueError("缺少网卡/子网信息，请刷新实例列表后重试")
+        vnic = vnet.get_vnic(vnic_id).data
+        return vnet.get_security_list(vnic.nsg_ids[0]).data if vnic.nsg_ids else \
+            vnet.get_security_list(vnet.get_subnet(subnet_id).data.security_list_ids[0]).data
+
+    def _find_instance(self, creds: dict, compute, vnet,
+                       instance_id: str) -> InstanceInfo:
+        """通过实例 ID 构造 InstanceInfo（含 extra 的 vnic_id/subnet_id）。"""
+        tenancy = creds["tenancy_ocid"].strip()
+        all_insts = oci.pagination.list_call_get_all_results(
+            compute.list_instances, compartment_id=tenancy).data
+        inst = next((i for i in all_insts if i.id == instance_id), None)
+        if not inst:
+            raise ValueError("未找到该实例")
+        info = InstanceInfo(
+            id=inst.id,
+            name=inst.display_name or "-",
+            status=_STATUS_MAP.get(inst.lifecycle_state, "unknown"),
+            status_text=inst.lifecycle_state,
+            region=inst.region,
+            zone=inst.availability_domain,
+        )
+        vnic, _ = _primary_vnic(vnet, compute, tenancy, inst.id)
+        if vnic:
+            info.extra["vnic_id"] = vnic.id
+            info.extra["subnet_id"] = vnic.subnet_id
+        return info
+
+    def list_security_rules(self, creds: dict, instance_id: str) -> list[dict]:
+        """该实例所用安全列表的全部 ingress/egress 规则。"""
+        compute, vnet, _ = _clients(creds)
+        info = self._find_instance(creds, compute, vnet, instance_id)
+        seclist = self._get_seclist(vnet, info)
+        rules = [self._fmt_rule(r, "ingress")
+                 for r in seclist.ingress_security_rules or []]
+        rules += [self._fmt_rule(r, "egress")
+                  for r in seclist.egress_security_rules or []]
+        return rules
+
+    def add_security_rule(self, creds: dict, instance_id: str, rule: dict) -> str:
+        direction, protocol, source, port_min, port_max, description = \
+            self._parse_rule(rule)
+        compute, vnet, _ = _clients(creds)
+        info = self._find_instance(creds, compute, vnet, instance_id)
+        seclist = self._get_seclist(vnet, info)
+        existing = (seclist.ingress_security_rules if direction == "ingress"
+                    else seclist.egress_security_rules) or []
+        for r in existing:
+            if self._rule_matches(r, direction, protocol, source, port_min, port_max):
+                return "已存在，无需重复"
+        rules = list(existing)
+        rules.append(self._build_rule(
+            direction, protocol, source, port_min, port_max, description))
+        details = UpdateSecurityListDetails()
+        if direction == "ingress":
+            details.ingress_security_rules = rules
+        else:
+            details.egress_security_rules = rules
+        vnet.update_security_list(seclist.id, details)
+        return (f"已添加{'入向' if direction == 'ingress' else '出向'}"
+                f"{protocol.upper()} 规则（{source}）")
+
+    def delete_security_rule(self, creds: dict, instance_id: str, rule: dict) -> str:
+        direction, protocol, source, port_min, port_max, _desc = \
+            self._parse_rule(rule)
+        compute, vnet, _ = _clients(creds)
+        info = self._find_instance(creds, compute, vnet, instance_id)
+        seclist = self._get_seclist(vnet, info)
+        rules = list(seclist.ingress_security_rules if direction == "ingress"
+                     else seclist.egress_security_rules) or []
+        idx = next((i for i, r in enumerate(rules)
+                    if self._rule_matches(r, direction, protocol, source,
+                                          port_min, port_max)), None)
+        if idx is None:
+            return "未找到匹配规则"
+        rules.pop(idx)
+        details = UpdateSecurityListDetails()
+        if direction == "ingress":
+            details.ingress_security_rules = rules
+        else:
+            details.egress_security_rules = rules
+        vnet.update_security_list(seclist.id, details)
+        return f"已删除匹配的{'入向' if direction == 'ingress' else '出向'}规则"
+
+    def _fmt_rule(self, r, direction: str) -> dict:
+        """OCI 安全规则 → 接口统一格式。"""
+        proto = _PROTOCOL_TO_NAME.get(r.protocol or "", r.protocol or "")
+        endpoint = (r.source if direction == "ingress" else r.destination) or ""
+        ports = "全部"
+        port_min = port_max = None
+        if proto in ("tcp", "udp"):
+            opts = r.tcp_options if proto == "tcp" else r.udp_options
+            pr = getattr(opts, "destination_port_range", None) if opts else None
+            if pr is not None and pr.min is not None and pr.max is not None:
+                port_min, port_max = int(pr.min), int(pr.max)
+                ports = f"{port_min}-{port_max}" if port_min != port_max else str(port_min)
+        elif proto == "icmp" and r.icmp_options and r.icmp_options.type is not None:
+            ports = f"类型 {r.icmp_options.type}"
+        return {
+            "direction": direction,
+            "protocol": proto,
+            "source": endpoint if direction == "ingress" else "",
+            "destination": endpoint if direction == "egress" else "",
+            "ports": ports,
+            "port_min": port_min,
+            "port_max": port_max,
+            "description": r.description or "",
+            "stateless": bool(r.is_stateless),
+        }
+
+    def _parse_rule(self, rule: dict) -> tuple:
+        """校验并提取规则参数（direction/protocol/source/ports/description）。"""
+        direction = (rule.get("direction") or "").strip().lower()
+        if direction not in ("ingress", "egress"):
+            raise ValueError("direction 只能是 ingress/egress")
+        protocol = (rule.get("protocol") or "").strip().lower()
+        if protocol not in ("tcp", "udp", "icmp", "all"):
+            raise ValueError("protocol 只能是 tcp/udp/icmp/all")
+        source = (rule.get("source") or rule.get("destination") or "").strip()
+        if not source:
+            raise ValueError("请填写来源/目标 CIDR（如 0.0.0.0/0）")
+        port_min = port_max = None
+        if protocol in ("tcp", "udp"):
+            try:
+                port_min = int(rule.get("port_min") or 0)
+                port_max = int(rule.get("port_max") or 0)
+            except (TypeError, ValueError):
+                raise ValueError("端口范围无效") from None
+            if not (1 <= port_min <= 65535 and 1 <= port_max <= 65535
+                    and port_min <= port_max):
+                raise ValueError("端口范围无效（1-65535，起始≤结束）")
+        description = (rule.get("description") or "").strip() or None
+        return direction, protocol, source, port_min, port_max, description
+
+    def _build_rule(self, direction: str, protocol: str, source: str,
+                    port_min, port_max, description):
+        from oci.core.models import (
+            EgressSecurityRule, IngressSecurityRule, PortRange,
+            TcpOptions, UdpOptions,
+        )
+        kwargs = {"protocol": _PROTOCOL_TO_NUM[protocol]}
+        if description:
+            kwargs["description"] = description
+        if protocol == "tcp":
+            kwargs["tcp_options"] = TcpOptions(
+                destination_port_range=PortRange(min=port_min, max=port_max))
+        elif protocol == "udp":
+            kwargs["udp_options"] = UdpOptions(
+                destination_port_range=PortRange(min=port_min, max=port_max))
+        if direction == "ingress":
+            return IngressSecurityRule(source=source, **kwargs)
+        return EgressSecurityRule(destination=source, **kwargs)
+
+    def _rule_matches(self, r, direction: str, protocol: str, source: str,
+                      port_min, port_max) -> bool:
+        """按 direction+protocol+source+ports 精确匹配（幂等/防误删）。"""
+        if (r.protocol or "") != _PROTOCOL_TO_NUM[protocol]:
+            return False
+        endpoint = r.source if direction == "ingress" else r.destination
+        if (endpoint or "") != source:
+            return False
+        if protocol in ("tcp", "udp"):
+            opts = r.tcp_options if protocol == "tcp" else r.udp_options
+            pr = getattr(opts, "destination_port_range", None) if opts else None
+            if pr is None:
+                return False
+            return int(pr.min) == port_min and int(pr.max) == port_max
+        return True
 
     def update_shape(self, creds: dict, instance_id: str, shape: str,
                      ocpus: float | None, memory_gbs: float | None, ctx) -> str:

@@ -425,6 +425,59 @@ def snatch_instance(request: Request, account_id: int, params: dict):
     return {"ok": True, "job_id": job_id}
 
 
+# ---------- OCI 安全列表 ----------
+class SecurityRuleBody(BaseModel):
+    instance_id: str
+    rule: dict
+
+
+def _require_oci(acc: dict):
+    if acc["provider"] != "oci":
+        raise HTTPException(status_code=400, detail="仅 OCI 账号支持安全列表管理")
+
+
+@app.get("/api/accounts/{account_id}/security-rules")
+def list_security_rules(request: Request, account_id: int, instance_id: str):
+    _require_login(request)
+    acc = _get_account(account_id)
+    _require_oci(acc)
+    try:
+        return get_provider(acc["provider"]).list_security_rules(
+            acc["creds"], instance_id)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"获取安全规则失败: {e}") from e
+
+
+@app.post("/api/accounts/{account_id}/security-rules")
+def add_security_rule(request: Request, account_id: int, body: SecurityRuleBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    _require_oci(acc)
+    try:
+        msg = get_provider(acc["provider"]).add_security_rule(
+            acc["creds"], body.instance_id, body.rule)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"添加规则失败: {e}") from e
+    return {"ok": True, "message": msg}
+
+
+@app.delete("/api/accounts/{account_id}/security-rules")
+def delete_security_rule(request: Request, account_id: int, body: SecurityRuleBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    _require_oci(acc)
+    try:
+        msg = get_provider(acc["provider"]).delete_security_rule(
+            acc["creds"], body.instance_id, body.rule)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"删除规则失败: {e}") from e
+    return {"ok": True, "message": msg}
+
+
 # ---------- 账单 ----------
 @app.get("/api/accounts/{account_id}/billing")
 def get_billing(request: Request, account_id: int):

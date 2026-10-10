@@ -17,10 +17,10 @@ def _check_once() -> None:
     from . import tasks
     from .providers import get_provider
     for rule in db.traffic_rule_enabled():
-        if rule.get("provider") != "azure":
-            continue  # 目前只支持 Azure
+        if rule.get("provider") not in ("azure", "oci"):
+            continue  # 目前只支持 Azure / OCI
         try:
-            provider = get_provider("azure")
+            provider = get_provider(rule["provider"])
             gb = provider.get_traffic_gb(
                 rule["creds"], rule["instance_key"],
                 rule["window_hours"], rule["metric"])
@@ -36,7 +36,7 @@ def _check_once() -> None:
                 "state": "triggered", "triggered_at": time.time()})
             try:
                 tasks.submit_action(
-                    "azure", rule["account_id"],
+                    rule["provider"], rule["account_id"],
                     {"id": rule["instance_key"], "name": rule["instance_name"],
                      "extra": {}}, "stop", {},
                     f"stop / {rule['instance_name']}（流量超限自动关机）")
@@ -57,7 +57,7 @@ def _check_once() -> None:
                 db.traffic_rule_update(rule["id"], {"state": "normal", "triggered_at": None})
                 try:
                     tasks.submit_action(
-                        "azure", rule["account_id"],
+                        rule["provider"], rule["account_id"],
                         {"id": rule["instance_key"], "name": rule["instance_name"],
                          "extra": {}}, "start", {},
                         f"start / {rule['instance_name']}（流量限制到期自动开机）")

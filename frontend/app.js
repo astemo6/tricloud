@@ -97,7 +97,8 @@ if (curProvider.supports_cloudfront) defs.push({key: 'cloudfront', label: 'Cloud
 if (curProvider.supports_billing) defs.push({key: 'billing', label: '账单'});
 if (curProvider.supports_quotas) defs.push({key: 'quotas', label: '配额'});
 if (curProvider.supports_subscription) defs.push({key: 'subscription', label: '订阅'});
-if (curProvider.id === 'azure') defs.push({key: 'traffic', label: '流量控制'});
+if (curProvider.id === 'azure' || curProvider.id === 'oci') defs.push({key: 'traffic', label: '流量控制'});
+if (curProvider.id === 'oci') defs.push({key: 'security', label: '安全组'});
 if (!defs.find(d => d.key === curTab)) curTab = 'instances';
 document.getElementById('tabs').innerHTML = defs.map(d =>
 `<div class="tab${d.key === curTab? ' active': ''}" onclick="switchTab('${d.key}')">${d.label}</div>`).join('');
@@ -122,6 +123,7 @@ else if (curTab === 'cloudfront') loadCloudFront();
 else if (curTab === 'quotas') loadQuotas();
 else if (curTab === 'subscription') loadSubscription();
 else if (curTab === 'traffic') loadTrafficRules();
+else if (curTab === 'security') loadSecurityRules();
 else loadInstances();
 }
 
@@ -169,7 +171,7 @@ ${row({key: 'metric', label: '监控指标', type: 'select', options: ['out', 'i
 {key: 'window_hours', label: '统计窗口（小时）', type: 'number', value: '24'})}
 ${row({key: 'limit_gb', label: '流量阈值（GB）', type: 'number', required: true, placeholder: '如 100'},
 {key: 'duration_hours', label: '关机时长（小时）', type: 'number', value: '24'})}
-<div class="help" style="color:var(--muted);margin-bottom:14px">超限后自动关机（deallocate，停止计费），到期自动开机并 TG 通知。</div>
+<div class="help" style="color:var(--muted);margin-bottom:14px">超限后自动关机（停止计费），到期自动开机并 TG 通知。</div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
 <button type="submit" class="btn primary">保存</button>
@@ -209,6 +211,118 @@ try {
 await api('DELETE', `/api/traffic-rules/${id}`);
 loadTrafficRules();
 } catch (e) { toast(e.message, true);}
+}
+
+/* ---------- OCI 安全组（安全列表规则） ----------*/
+let secInstId = '';
+let secRules = [];
+const SEC_PROTO = {tcp: 'TCP', udp: 'UDP', icmp: 'ICMP', all: '全部'};
+const secDirName = d => d === 'ingress'? '入向': '出向';
+
+async function loadSecurityRules() {
+const c = document.getElementById('content');
+c.innerHTML = '<div class="empty">加载中…</div>';
+let insts;
+try {
+insts = await api('GET', `/api/accounts/${curAccount.id}/instances`);
+} catch (e) { c.innerHTML = `<div class="empty">加载实例列表失败: ${esc(e.message)}</div>`; return;}
+if (!insts.length) { c.innerHTML = '<div class="empty">该账号下没有实例</div>'; return;}
+if (!secInstId || !insts.find(i => i.id === secInstId)) secInstId = insts[0].id;
+try {
+secRules = await api('GET', `/api/accounts/${curAccount.id}/security-rules?instance_id=${encodeURIComponent(secInstId)}`);
+c.innerHTML = `<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+<select id="secInstSel" onchange="secInstId=this.value;loadSecurityRules()" style="background:var(--bg);color:var(--text);border:1px solid var(--border2);border-radius:8px;padding:8px 10px">
+${insts.map(i => `<option value="${esc(i.id)}"${i.id === secInstId? ' selected': ''}>${esc(i.name)}</option>`).join('')}
+</select>
+<button class="btn sm" onclick="openSecRuleModal()">+ 添加规则</button>
+<span style="color:var(--muted);font-size:12px">安全列表规则，修改立即生效；删除前请确认影响</span></div>` +
+(secRules.length? `<table><thead><tr><th>方向</th><th>协议</th><th>来源/目标</th><th>端口</th><th>描述</th><th>无状态</th><th>操作</th></tr></thead><tbody>` +
+secRules.map((r, i) => `<tr>
+<td>${secDirName(r.direction)}</td>
+<td>${esc(SEC_PROTO[r.protocol] || r.protocol)}</td>
+<td class="mono">${esc(r.source || r.destination || '-')}</td>
+<td>${esc(r.ports || '全部')}</td>
+<td style="font-size:12px">${esc(r.description || '-')}</td>
+<td>${r.stateless? '是': '否'}</td>
+<td><div class="row-actions">
+<button class="btn sm danger" onclick="delSecRule(${i})">删除</button>
+</div></td></tr>`).join('') + '</tbody></table>'
+: '<div class="empty">该实例暂无安全规则</div>');
+} catch (e) {
+c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadSecurityRules()">重试</button></div>`;
+}
+}
+
+async function delSecRule(i) {
+const r = secRules[i];
+if (!r) return;
+const summary = `${secDirName(r.direction)} ${SEC_PROTO[r.protocol] || r.protocol} ${r.source || r.destination || ''} 端口 ${r.ports || '全部'}`;
+if (!confirm(`确定删除这条安全规则吗？\n${summary}\n删除后立即生效，可能影响实例访问。`)) return;
+try {
+await api('DELETE', `/api/accounts/${curAccount.id}/security-rules`, {
+instance_id: secInstId,
+rule: {direction: r.direction, protocol: r.protocol,
+source: r.source || r.destination || '',
+port_min: r.port_min, port_max: r.port_max},
+});
+toast('已删除'); loadSecurityRules();
+} catch (e) { toast(e.message, true);}
+}
+
+function openSecRuleModal() {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>添加安全规则 · 实例 <span class="mono" style="font-size:13px">${esc(secInstId.slice(-12))}</span></h2>
+<form id="secRuleForm">
+${row({key: 'direction', label: '方向', type: 'select', options: ['ingress', 'egress'], value: 'ingress'},
+{key: 'protocol', label: '协议', type: 'select', options: ['tcp', 'udp', 'icmp', 'all'], value: 'tcp'})}
+${formField({key: 'source', label: '来源 CIDR（出向规则为目标 CIDR）', required: true, placeholder: '如 0.0.0.0/0'})}
+${row({key: 'port_min', label: '起始端口', type: 'number', placeholder: '如 80'},
+{key: 'port_max', label: '结束端口', type: 'number', placeholder: '如 80'})}
+${formField({key: 'description', label: '描述（可选）', placeholder: '如 开放web端口'})}
+<div class="help" style="color:var(--muted);margin-bottom:6px">入向规则控制谁能访问实例；来源 0.0.0.0/0 表示对公网开放。TCP/UDP 需填端口范围，ICMP/ALL 不需要。</div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="submit" class="btn primary">添加</button>
+</div></form>`;
+document.getElementById('modalMask').classList.add('show');
+const form = document.getElementById('secRuleForm');
+const togglePorts = () => {
+const dis = form.querySelector('[name="protocol"]').value === 'icmp'
+|| form.querySelector('[name="protocol"]').value === 'all';
+form.querySelector('[name="port_min"]').disabled = dis;
+form.querySelector('[name="port_max"]').disabled = dis;
+};
+form.querySelector('[name="protocol"]').onchange = togglePorts;
+togglePorts();
+form.onsubmit = async e => {
+e.preventDefault();
+const fd = new FormData(form);
+const protocol = fd.get('protocol');
+const rule = {
+direction: fd.get('direction'),
+protocol,
+source: (fd.get('source') || '').trim(),
+port_min: (protocol === 'tcp' || protocol === 'udp')? (parseInt(fd.get('port_min'), 10) || null): null,
+port_max: (protocol === 'tcp' || protocol === 'udp')? (parseInt(fd.get('port_max'), 10) || null): null,
+description: (fd.get('description') || '').trim(),
+};
+if (!rule.source) { toast('请填写来源 CIDR', true); return;}
+if ((protocol === 'tcp' || protocol === 'udp') && (rule.port_min == null || rule.port_max == null)) {
+toast('请填写端口范围', true); return;}
+// 放行全部端口：必须两次确认
+const isAllPorts = protocol === 'all'
+|| (rule.port_min === 1 && rule.port_max === 65535);
+if (isAllPorts) {
+if (!confirm('⚠️ 风险提示：即将放行全部端口（1-65535），实例将对公网完全暴露，存在被攻击/挖矿等严重安全风险。\n确定要继续吗？')) return;
+const ans = prompt('再次确认：请输入 YES 以放行全部端口');
+if (ans === null) return;
+if (ans.trim().toUpperCase() !== 'YES') { toast('两次确认不一致，已取消提交', true); return;}
+}
+try {
+const r = await api('POST', `/api/accounts/${curAccount.id}/security-rules`, {instance_id: secInstId, rule});
+toast(r.message || '规则已添加'); closeModal(); loadSecurityRules();
+} catch (err) { toast(err.message, true);}
+};
 }
 
 /* ---------- 账号存活天数（按云账号创建时间） ---------- */

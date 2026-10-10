@@ -57,11 +57,19 @@ document.documentElement.setAttribute('data-theme','auto');}})();
 <div class="card">
   <h1>Tri<span>Cloud</span></h1>
   <p class="sub">OCI · AWS · Azure 三合一管理面板</p>
-  <div class="pwd-wrap">
-    <input type="password" id="pwd" placeholder="面板密码" autocomplete="current-password">
-    <button type="button" class="pwd-toggle" id="pwdToggle">👁</button>
+  <div id="pwdArea">
+    <div class="pwd-wrap">
+      <input type="password" id="pwd" placeholder="面板密码" autocomplete="current-password">
+      <button type="button" class="pwd-toggle" id="pwdToggle">👁</button>
+    </div>
+    <button onclick="doLogin()">登录</button>
   </div>
-  <button onclick="doLogin()">登录</button>
+  <div id="totpArea" style="display:none">
+    <div style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:16px">
+      请输入验证器中的 6 位数字</div>
+    <input type="text" id="totpCode" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位验证码">
+    <button onclick="doTotpVerify()">验证并登录</button>
+  </div>
   <div class="err" id="err"></div>
 </div>
 <script>
@@ -72,6 +80,7 @@ document.getElementById('pwdToggle').onclick = () => {
   input.type = show ? 'text' : 'password';
   btn.textContent = show ? '🙈' : '👁';
 };
+let pendingPassword = '';
 async function doLogin() {
   const pwd = document.getElementById('pwd').value;
   const err = document.getElementById('err');
@@ -81,12 +90,41 @@ async function doLogin() {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({password: pwd})
     });
-    if (r.ok) { location.href = '/'; return; }
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      if (d.totp_required) {
+        // 两步登录：密码已通过，切到 TOTP 验证码输入
+        pendingPassword = pwd;
+        document.getElementById('pwdArea').style.display = 'none';
+        document.getElementById('totpArea').style.display = '';
+        const code = document.getElementById('totpCode');
+        code.value = '';
+        code.focus();
+        return;
+      }
+      location.href = '/'; return;
+    }
     const d = await r.json();
     err.textContent = d.detail || '登录失败';
   } catch (e) { err.textContent = '网络错误: ' + e.message; }
 }
+async function doTotpVerify() {
+  const code = document.getElementById('totpCode').value.trim();
+  const err = document.getElementById('err');
+  err.textContent = '';
+  if (!/^\d{6}$/.test(code)) { err.textContent = '请输入 6 位数字验证码'; return; }
+  try {
+    const r = await fetch('/api/totp/verify', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({password: pendingPassword, code})
+    });
+    if (r.ok) { location.href = '/'; return; }
+    const d = await r.json();
+    err.textContent = d.detail || '验证失败';
+  } catch (e) { err.textContent = '网络错误: ' + e.message; }
+}
 document.getElementById('pwd').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+document.getElementById('totpCode').addEventListener('keydown', e => { if (e.key === 'Enter') doTotpVerify(); });
 </script>
 </body>
 </html>

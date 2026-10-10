@@ -1,16 +1,19 @@
 """TriCloud 三合一云服务器管理面板：FastAPI 后端。"""
+import io
 import logging
 import os
+import sqlite3
+import time
 
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, billing, config, db, jobs, monitor, tasks, tg, traffic
-from .providers import get_provider, list_providers
+from . import auth, backup as backup_mod, billing, config, db, jobs, monitor, tasks, tg, traffic
+from .providers import get_provider, list_providers, oci_provider
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("tricloud")
@@ -62,14 +65,106 @@ class LoginBody(BaseModel):
     password: str
 
 
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else ""
+
+
 @app.post("/api/login")
-def login(body: LoginBody, response: Response):
+def login(body: LoginBody, request: Request, response: Response):
+    ip = _client_ip(request)
     if not auth.verify_password(body.password):
+        db.audit_add(ip, "login_fail", "密码错误")
         raise HTTPException(status_code=403, detail="密码错误")
+    if auth.totp_enabled():
+        # 两步登录第一步：密码对但启用了 TOTP，先不种 Cookie
+        db.audit_add(ip, "login_totp_stage", "密码正确，等待 TOTP 验证码")
+        return {"totp_required": True}
     token = db.session_create(config.SESSION_TTL_SECONDS)
     response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax",
                         max_age=config.SESSION_TTL_SECONDS, path="/")
+    db.audit_add(ip, "login_ok", "登录成功")
     return {"ok": True}
+
+
+class TotpVerifyBody(BaseModel):
+    password: str
+    code: str
+
+
+@app.post("/api/totp/verify")
+def totp_verify(body: TotpVerifyBody, request: Request, response: Response):
+    """两步登录第二步：密码 + TOTP 码都对才种 Cookie。"""
+    ip = _client_ip(request)
+    if not auth.verify_password(body.password):
+        db.audit_add(ip, "totp_verify_fail", "密码错误")
+        raise HTTPException(status_code=403, detail="密码错误")
+    if not auth.totp_verify(body.code):
+        db.audit_add(ip, "totp_verify_fail", "TOTP 验证码错误")
+        raise HTTPException(status_code=403, detail="验证码错误")
+    token = db.session_create(config.SESSION_TTL_SECONDS)
+    response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax",
+                        max_age=config.SESSION_TTL_SECONDS, path="/")
+    db.audit_add(ip, "login_ok", "登录成功（TOTP 已验证）")
+    return {"ok": True}
+
+
+# ---------- TOTP 管理 ----------
+@app.get("/api/totp/status")
+def totp_status(request: Request):
+    _require_login(request)
+    return {"enabled": auth.totp_enabled()}
+
+
+@app.post("/api/totp/setup")
+def totp_setup(request: Request):
+    _require_login(request)
+    if auth.totp_enabled():
+        raise HTTPException(status_code=400, detail="TOTP 已启用，请先解绑")
+    db.audit_add(_client_ip(request), "totp_setup", "生成 TOTP 密钥（待确认）")
+    return auth.totp_setup()
+
+
+class TotpConfirmBody(BaseModel):
+    code: str
+
+
+@app.post("/api/totp/confirm")
+def totp_confirm(request: Request, body: TotpConfirmBody):
+    _require_login(request)
+    ip = _client_ip(request)
+    if not auth.totp_confirm_enable(body.code):
+        db.audit_add(ip, "totp_confirm_fail", "确认启用失败：验证码错误")
+        raise HTTPException(status_code=400, detail="验证码错误")
+    db.audit_add(ip, "totp_enable", "TOTP 二次验证已启用")
+    return {"ok": True}
+
+
+class TotpDisableBody(BaseModel):
+    password: str
+    code: str
+
+
+@app.post("/api/totp/disable")
+def totp_disable(request: Request, body: TotpDisableBody):
+    _require_login(request)
+    ip = _client_ip(request)
+    if not auth.verify_password(body.password):
+        db.audit_add(ip, "totp_disable_fail", "解绑失败：密码错误")
+        raise HTTPException(status_code=403, detail="密码错误")
+    if not auth.totp_verify(body.code):
+        db.audit_add(ip, "totp_disable_fail", "解绑失败：验证码错误")
+        raise HTTPException(status_code=403, detail="验证码错误")
+    auth.totp_disable()
+    db.audit_add(ip, "totp_disable", "TOTP 二次验证已解绑")
+    return {"ok": True}
+
+
+# ---------- 审计日志 ----------
+@app.get("/api/audit-log")
+def audit_log(request: Request, limit: int = 200):
+    _require_login(request)
+    limit = max(1, min(limit, 1000))
+    return db.audit_list(limit)
 
 
 @app.post("/api/logout")
@@ -93,10 +188,12 @@ class ChangePasswordBody(BaseModel):
 def change_password(request: Request, body: ChangePasswordBody):
     _require_login(request)
     if not auth.verify_password(body.old_password):
+        db.audit_add(_client_ip(request), "change_password_fail", "原密码错误")
         raise HTTPException(status_code=403, detail="原密码错误")
     if len(body.new_password) < 6:
         raise HTTPException(status_code=400, detail="新密码至少 6 位")
     auth.set_password(body.new_password)
+    db.audit_add(_client_ip(request), "change_password", "面板密码已修改")
     return {"ok": True}
 
 
@@ -147,6 +244,8 @@ def create_account(request: Request, body: AccountBody):
     except Exception as e:  # noqa: BLE001 - 凭证错误要原样返回给前端
         raise HTTPException(status_code=400, detail=f"凭证校验失败: {e}") from e
     account_id = db.account_create(body.provider, body.name.strip(), body.creds)
+    db.audit_add(_client_ip(request), "account_create",
+                 f"{body.provider} / {body.name.strip()}")
     return {"ok": True, "id": account_id}
 
 
@@ -176,6 +275,8 @@ def create_accounts_batch(request: Request, body: BatchAccountBody):
         except Exception as e:  # noqa: BLE001
             results.append({"name": name, "ok": False, "error": str(e)})
     ok_count = sum(1 for r in results if r["ok"])
+    db.audit_add(_client_ip(request), "account_create_batch",
+                 f"{body.provider} 成功 {ok_count}/{len(results)}")
     return {"ok": True, "results": results,
             "summary": f"成功 {ok_count}/{len(results)}"}
 
@@ -269,6 +370,8 @@ def update_account(request: Request, account_id: int, body: AccountUpdateBody):
         except Exception as e:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=f"凭证校验失败: {e}") from e
     db.account_update(account_id, body.name.strip(), body.creds)
+    db.audit_add(_client_ip(request), "account_update",
+                 f"{acc['provider']} / {body.name.strip()}")
     return {"ok": True}
 
 
@@ -297,6 +400,8 @@ def delete_account(request: Request, account_id: int):
         days = round((time.time() - acc["cloud_created_at"]) / 86400, 2)
     db.recycle_add(acc["provider"], acc["name"], cost, days)
     db.account_delete(account_id)
+    db.audit_add(_client_ip(request), "account_delete",
+                 f"{acc['provider']} / {acc['name']}")
     return {"ok": True}
 
 
@@ -386,9 +491,42 @@ def instance_action(request: Request, account_id: int, body: ActionBody):
     if body.action not in [a["key"] for a in provider.actions]:
         raise HTTPException(status_code=400, detail="不支持的操作")
     title = f"{body.action} / {body.instance.get('name', body.instance.get('id', ''))}"
+    db.audit_add(_client_ip(request), "instance_action",
+                 f"{acc['provider']} / {title}")
     job_id = tasks.submit_action(acc["provider"], account_id,
                                  body.instance, body.action, body.params, title)
     return {"ok": True, "job_id": job_id}
+
+
+class BootVolumeVpusBody(BaseModel):
+    instance_id: str
+    vpus_per_gb: int
+
+
+@app.post("/api/accounts/{account_id}/boot-volume-vpus")
+def boot_volume_vpus(request: Request, account_id: int, body: BootVolumeVpusBody):
+    """调整 OCI 实例引导卷 VPU（只能调大，同步执行非后台任务）。"""
+    _require_login(request)
+    acc = _get_account(account_id)
+    if acc["provider"] != "oci":
+        raise HTTPException(status_code=400, detail="仅支持 OCI 账号")
+    instance_id = (body.instance_id or "").strip()
+    if not instance_id:
+        raise HTTPException(status_code=400, detail="缺少 instance_id")
+    vpus = int(body.vpus_per_gb or 0)
+    if vpus <= 0:
+        raise HTTPException(status_code=400, detail="VPU 必须是正整数")
+    provider = get_provider("oci")
+    compute, _, _ = oci_provider._clients(acc["creds"])
+    try:
+        msg = provider.update_boot_volume_vpus(compute, acc["creds"], instance_id, vpus)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001 - OCI SDK 报错原样返回
+        raise HTTPException(status_code=502, detail=f"OCI 调用失败: {e}") from e
+    db.audit_add(_client_ip(request), "boot_volume_vpus",
+                 f"账号 {acc['name']} 实例 {instance_id} VPU → {vpus}")
+    return {"ok": True, "message": msg}
 
 
 @app.get("/api/accounts/{account_id}/create-options")
@@ -970,6 +1108,7 @@ def update_settings(request: Request, body: SettingsBody):
     if body.monitor_interval_min is not None:
         db.meta_set("monitor_interval_min", str(max(1, min(120, body.monitor_interval_min))))
     state = tg.refresh_bot()
+    db.audit_add(_client_ip(request), "settings_update", "Telegram/监控设置已保存")
     return {"ok": True, **state}
 
 
@@ -979,6 +1118,124 @@ def tg_test(request: Request):
     if tg.send_message("✅ TriCloud Telegram 联动测试成功"):
         return {"ok": True}
     raise HTTPException(status_code=400, detail="发送失败，请检查 Bot Token 和 Chat ID")
+
+
+# ---------- 加密备份 / 恢复 ----------
+def _db_path() -> str:
+    return os.path.join(config.DATA_DIR, "tricloud.db")
+
+
+class BackupBody(BaseModel):
+    password: str
+
+
+@app.post("/api/backup")
+def backup(request: Request, body: BackupBody):
+    """导出整个 SQLite 库的加密备份。备份密码不存服务器、不记日志。"""
+    _require_login(request)
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="备份密码至少 8 位")
+    db_path = _db_path()
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=500, detail="数据库文件不存在")
+    with open(db_path, "rb") as f:
+        raw = f.read()
+    blob = backup_mod.encrypt_db_file(raw, body.password)
+    fname = "tricloud-backup-%s.bin" % time.strftime("%Y%m%d")
+    db.audit_add(_client_ip(request), "backup", f"导出加密备份 {fname}")
+    return StreamingResponse(
+        io.BytesIO(blob), media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@app.post("/api/restore")
+async def restore(request: Request, file: UploadFile = File(...),
+                  password: str = Form(...), confirm: str = Form("")):
+    """恢复备份。第一步只校验并返回备份信息；带 confirm=true 才真正覆盖。
+
+    覆盖前把当前库重命名为 .bak 保留；恢复后清空 sessions 要求重新登录。
+    """
+    _require_login(request)
+    ip = _client_ip(request)
+    blob = await file.read()
+    try:
+        raw = backup_mod.decrypt_db_file(blob, password)
+        info = backup_mod.inspect_db(raw)
+    except ValueError as e:
+        db.audit_add(ip, "restore_fail", str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if confirm != "true":
+        return {"ok": True, "need_confirm": True,
+                "file_name": file.filename or "",
+                "accounts": info["accounts"],
+                "latest_record_at": info["latest_record_at"]}
+    db_path = _db_path()
+    if os.path.exists(db_path):
+        os.replace(db_path, db_path + ".bak")  # 保留当前库
+    with open(db_path, "wb") as f:
+        f.write(raw)
+    # 清空会话：恢复后要求重新登录
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("DELETE FROM sessions")
+        conn.commit()
+    finally:
+        conn.close()
+    db.audit_add(ip, "restore",
+                 f"从备份恢复：账号 {info['accounts']} 个，原库已保留为 .bak")
+    return {"ok": True, "restored": True}
+
+
+# ---------- 开机脚本模板 ----------
+class ScriptTemplateBody(BaseModel):
+    name: str
+    os_type: str
+    content: str = ""
+
+
+@app.get("/api/script-templates")
+def script_template_list(request: Request, os_type: str | None = None):
+    _require_login(request)
+    return db.script_template_list(os_type)
+
+
+@app.post("/api/script-templates")
+def script_template_add(request: Request, body: ScriptTemplateBody):
+    _require_login(request)
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="模板名称不能为空")
+    try:
+        tpl_id = db.script_template_add(body.name, body.os_type, body.content or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    db.audit_add(_client_ip(request), "script_template_add",
+                 f"{body.os_type} / {body.name.strip()}")
+    return {"ok": True, "id": tpl_id}
+
+
+@app.put("/api/script-templates/{tpl_id}")
+def script_template_update(request: Request, tpl_id: int, body: ScriptTemplateBody):
+    _require_login(request)
+    try:
+        ok = db.script_template_update(tpl_id, {
+            "name": body.name, "os_type": body.os_type,
+            "content": body.content or ""})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not ok:
+        raise HTTPException(status_code=404, detail="模板不存在")
+    db.audit_add(_client_ip(request), "script_template_update",
+                 f"#{tpl_id} {body.name.strip()}")
+    return {"ok": True}
+
+
+@app.delete("/api/script-templates/{tpl_id}")
+def script_template_delete(request: Request, tpl_id: int):
+    _require_login(request)
+    if not db.script_template_delete(tpl_id):
+        raise HTTPException(status_code=404, detail="模板不存在")
+    db.audit_add(_client_ip(request), "script_template_delete", f"#{tpl_id}")
+    return {"ok": True}
 
 
 # ---------- 任务 ----------

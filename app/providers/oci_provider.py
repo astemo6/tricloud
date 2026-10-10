@@ -30,6 +30,7 @@ from oci.core.models import (
     UpdateSecurityListDetails,
     UpdateSubnetDetails,
     UpdateVcnDetails,
+    UpdateBootVolumeDetails,
 )
 from oci.exceptions import ServiceError
 
@@ -259,6 +260,7 @@ class OciProvider(Provider):
         {"key": "rename", "label": "改名"},
         {"key": "extend_disk", "label": "磁盘扩容"},
         {"key": "open_port", "label": "开放端口"},
+        {"key": "boot_volume_vpus", "label": "调整引导卷性能"},
     ]
     supports_quotas = True
     supports_subscription = True
@@ -336,8 +338,9 @@ class OciProvider(Provider):
                            max_wait_seconds=300)
             return "实例已重启"
         if action == "terminate":
-            compute.terminate_instance(iid, preserve_boot_volume=False)
-            return "实例终止请求已提交"
+            preserve = bool((getattr(ctx, "params", {}) or {}).get("preserve_boot_volume"))
+            compute.terminate_instance(iid, preserve_boot_volume=preserve)
+            return "实例终止请求已提交" + ("（已保留引导卷）" if preserve else "")
         if action == "change_ip":
             return self._change_ip(compute, vnet, creds, inst)
         if action == "assign_ipv6":
@@ -434,6 +437,34 @@ class OciProvider(Provider):
             vnet.delete_ipv6(ip.id)
         addrs = ", ".join(ip.ip_address for ip in ipv6s)
         return f"已删除 {len(ipv6s)} 个 IPv6 地址: {addrs}"
+
+    def update_boot_volume_vpus(self, compute, creds: dict,
+                                instance_id: str, vpus_per_gb: int) -> str:
+        """调整引导卷 VPU。只允许调大：新值必须 > 当前值，否则拒绝（防丢数据）。
+
+        注：引导卷属于 Compute 服务，更新走 compute.update_boot_volume
+        （UpdateBootVolumeDetails），BlockStorage 的 update_volume 只管普通数据卷。
+        """
+        vpus = int(vpus_per_gb or 0)
+        if vpus <= 0:
+            raise ValueError("VPU 必须是正整数")
+        if vpus > 120:
+            raise ValueError("VPU 上限为 120")
+        tenancy = creds["tenancy_ocid"].strip()
+        inst = compute.get_instance(instance_id).data
+        bvas = compute.list_boot_volume_attachments(
+            compartment_id=tenancy, availability_domain=inst.availability_domain,
+            instance_id=instance_id).data
+        if not bvas:
+            raise ValueError("未找到该实例的引导卷")
+        bvol_id = bvas[0].boot_volume_id
+        bv = compute.get_boot_volume(bvol_id).data
+        cur = int(bv.vpus_per_gb or 0)
+        if vpus <= cur:
+            raise ValueError(f"只能调大 VPU（当前 {cur}，目标 {vpus}），调小可能导致数据丢失，已拒绝")
+        compute.update_boot_volume(
+            bvol_id, UpdateBootVolumeDetails(vpus_per_gb=vpus))
+        return f"引导卷 VPU 已提交: {cur} → {vpus}（约需数分钟生效）"
 
     def _extend_disk(self, compute, creds: dict, inst: InstanceInfo, ctx) -> str:
         size = int((getattr(ctx, "params", {}) or {}).get("size_gb") or 0)

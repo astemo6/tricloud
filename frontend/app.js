@@ -290,6 +290,8 @@ openParamModal('开放端口', inst, 'open_port',
 [{key: 'port', label: '端口', type: 'number', required: true, placeholder: '如 8080'}],
 '将在安全组/安全列表放行该 TCP 端口（来源 0.0.0.0/0）。');
 return;}
+if (action === 'boot_volume_vpus') { openVpusModal(inst); return;}
+if (action === 'terminate' && curProvider.id === 'oci') { openTerminateModal(inst); return;}
 const needConfirm = meta.danger || action === 'change_ip' || action === 'terminate';
 const tips = {terminate: '确定要终止/删除该实例吗？此操作不可恢复！',
 change_ip: '更换公网 IP 后原 IP 会释放，确定继续吗？'};
@@ -1041,6 +1043,109 @@ ${def.help? `<div class="help">${esc(def.help)}</div>`: ''}</div>`;
 }
 const row = (...defs) => `<div class="field-row">${defs.map(formField).join('')}</div>`;
 
+/* ---------- 开机脚本模板 ---------- */
+let _scriptTemplates = [];  // 最近一次加载的模板列表
+
+function startupScriptFields() {
+return `<div class="field"><label>开机脚本模板（可选）</label>
+<select id="scriptTplSel" onchange="applyScriptTemplate()"><option value="">（不使用模板，手填）</option></select>
+<div class="help">选择模板后填充到下方，可再手动修改；保留手填</div></div>
+${formField({key: 'startup_script', label: '开机脚本（可选）', type: 'textarea'})}`;
+}
+
+async function loadScriptTemplates() {
+try { _scriptTemplates = await api('GET', '/api/script-templates'); }
+catch (e) { _scriptTemplates = []; }
+const sel = document.getElementById('scriptTplSel');
+if (!sel) return;
+sel.innerHTML = '<option value="">（不使用模板，手填）</option>' +
+_scriptTemplates.map(t =>
+`<option value="${t.id}">[${t.os_type}] ${esc(t.name)}</option>`).join('');
+}
+
+function applyScriptTemplate() {
+const sel = document.getElementById('scriptTplSel');
+const id = sel? parseInt(sel.value, 10): 0;
+if (!id) return;
+const t = _scriptTemplates.find(x => x.id === id);
+if (!t) return;
+const ta = document.querySelector('#createForm [name="startup_script"]');
+if (ta) ta.value = t.content || '';
+}
+
+async function openScriptTemplatesModal() {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>开机脚本模板</h2>
+<div class="modal-actions" style="margin-bottom:14px">
+<button class="btn primary sm" onclick="openScriptTemplateEditor(0)">＋ 新增模板</button>
+<span style="flex:1"></span>
+<button class="btn sm" onclick="openScriptTemplatesModal()">刷新</button>
+</div>
+<div id="tplList"><div class="empty">加载中…</div></div>`;
+document.getElementById('modalMask').classList.add('show');
+try {
+const list = await api('GET', '/api/script-templates');
+document.getElementById('tplList').innerHTML = list.length? `
+<table><thead><tr><th>名称</th><th>系统</th><th>创建时间</th><th>操作</th></tr></thead>
+<tbody>${list.map(t => `<tr>
+<td>${esc(t.name)}</td><td class="mono">${esc(t.os_type)}</td>
+<td class="mono">${esc(fmtTime(t.created_at * 1000))}</td>
+<td style="white-space:nowrap">
+<button class="btn sm" onclick="openScriptTemplateEditor(${t.id})">编辑</button>
+<button class="btn sm danger" onclick="deleteScriptTemplate(${t.id}, ${JSON.stringify(t.name)})">删除</button>
+</td></tr>`).join('')}</tbody></table>`
+: '<div class="empty">暂无模板</div>';
+} catch (e) {
+document.getElementById('tplList').innerHTML = `<div class="empty">加载失败: ${esc(e.message)}</div>`;
+}
+}
+
+async function openScriptTemplateEditor(id) {
+let t = {name: '', os_type: 'linux', content: ''};
+if (id) {
+try {
+const list = await api('GET', '/api/script-templates');
+t = list.find(x => x.id === id) || t;
+} catch (e) { toast(e.message, true); return; }
+}
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>${id? '编辑模板': '新增模板'}</h2>
+<div class="field"><label>模板名称</label>
+<input id="tplName" value="${esc(t.name)}" placeholder="如：换 apt 源 + 装 docker"></div>
+<div class="field"><label>系统类型</label>
+<select id="tplOsType">
+<option value="linux"${t.os_type === 'linux'? ' selected': ''}>linux</option>
+<option value="windows"${t.os_type === 'windows'? ' selected': ''}>windows</option>
+</select></div>
+<div class="field"><label>脚本内容</label>
+<textarea id="tplContent" style="min-height:180px" placeholder="开机执行的脚本内容">${esc(t.content)}</textarea></div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="openScriptTemplatesModal()">返回列表</button>
+<button type="button" class="btn primary" onclick="saveScriptTemplate(${id || 0})">保存</button>
+</div>`;
+document.getElementById('modalMask').classList.add('show');
+}
+
+async function saveScriptTemplate(id) {
+const name = document.getElementById('tplName').value.trim();
+const os_type = document.getElementById('tplOsType').value;
+const content = document.getElementById('tplContent').value;
+if (!name) { toast('模板名称不能为空', true); return; }
+try {
+if (id) await api('PUT', `/api/script-templates/${id}`, {name, os_type, content});
+else await api('POST', '/api/script-templates', {name, os_type, content});
+toast('已保存'); openScriptTemplatesModal();
+} catch (e) { toast(e.message, true); }
+}
+
+async function deleteScriptTemplate(id, name) {
+if (!confirm(`确定删除模板「${name}」吗？`)) return;
+try {
+await api('DELETE', `/api/script-templates/${id}`);
+toast('已删除'); openScriptTemplatesModal();
+} catch (e) { toast(e.message, true); }
+}
+
 function createFormHTML(p, opts) {
 if (p.id === 'oci') return `
 ${formField({key: 'name', label: '实例名（可选）', placeholder: '留空自动生成'})}
@@ -1054,14 +1159,15 @@ ${formField({key: 'ssh_key', label: 'SSH 公钥（可选）', type: 'textarea', 
 ${row({key: 'login_user', label: '登录用户', value: 'ubuntu'},
 {key: 'password', label: '密码（可选）', placeholder: '留空自动生成 16 位随机密码'})}
 ${formField({key: 'assign_public_ip', label: '分配公网 IP', type: 'checkbox', value: true})}
-${formField({key: 'startup_script', label: '开机脚本（可选）', type: 'textarea'})}`;
+${startupScriptFields()}`;
 if (p.id === 'aws') return `
 ${formField({key: 'name', label: '实例名（Name 标签）', placeholder: '留空自动生成'})}
 ${row({key: 'region', label: '区域', type: 'select', options: opts.regions, value: opts.default_region || opts.regions[0]},
 {key: 'instance_type', label: '实例类型', type: 'select', options: opts.instance_types, value: 't2.micro'})}
 ${row({key: 'key_name', label: '密钥对', type: 'select', options: ['（自动创建新密钥对）',...(opts.key_pairs || [])]},
 {key: 'ami', label: 'AMI（可选）', placeholder: '留空自动使用最新 Ubuntu 22.04'})}
-<div class="help" style="color:var(--muted);margin:-6px 0 14px">将在目标区域的默认 VPC 自动创建安全组（放行 SSH）。密钥对列表为账号默认区域的——若选择其他区域，将自动创建新密钥对。新密钥对的私钥只在任务结果中显示一次。</div>`;
+<div class="help" style="color:var(--muted);margin:-6px 0 14px">将在目标区域的默认 VPC 自动创建安全组（放行 SSH）。密钥对列表为账号默认区域的——若选择其他区域，将自动创建新密钥对。新密钥对的私钥只在任务结果中显示一次。</div>
+${startupScriptFields()}`;
 if (p.id === 'azure') return `
 ${row({key: 'name', label: '虚拟机名（可选）', placeholder: '留空自动生成'},
 {key: 'resource_group', label: '资源组（可选）', placeholder: '留空自动创建'})}
@@ -1080,7 +1186,7 @@ function readForm(form, p) {
 const fd = new FormData(form), o = {};
 const fields = p.id === 'oci'
 ? ['name', 'availability_domain', 'shape', 'ocpus', 'memory_gbs', 'os', 'ssh_key', 'boot_volume_gb', 'login_user', 'password', 'startup_script']
-: p.id === 'aws'? ['name', 'region', 'instance_type', 'ami', 'key_name']
+: p.id === 'aws'? ['name', 'region', 'instance_type', 'ami', 'key_name', 'startup_script']
 : ['name', 'resource_group', 'location', 'vm_size', 'image', 'admin_username', 'password', 'ssh_key', 'disk_gb'];
 fields.forEach(k => o[k] = (fd.get(k) || '').trim());
 if (p.id === 'oci') {
@@ -1107,6 +1213,64 @@ toast('已保存为默认创建参数');
 } catch (e) { toast(e.message, true);}
 }
 
+/* ---------- OCI 引导卷 VPU 调整 / 终止保留引导卷 ---------- */
+function openVpusModal(inst) {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>调整引导卷性能 · ${esc(inst.name)}</h2>
+<div class="help" style="color:var(--muted);margin-bottom:14px">
+调整该实例引导卷的 VPU（每 GB 性能单位）。<b>只能调大不能调小</b>，调大会增加费用，约需数分钟生效。</div>
+<div class="field"><label>目标 VPU（正整数，常用 10 / 20）</label>
+<input id="vpusInput" type="number" min="1" max="120" placeholder="如 10"></div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="button" class="btn primary" onclick="doVpusUpdate()">提交调整</button>
+</div>`;
+document.getElementById('modalMask').classList.add('show');
+window._vpusInst = inst;
+document.getElementById('vpusInput').focus();
+}
+
+async function doVpusUpdate() {
+const vpus = parseInt((document.getElementById('vpusInput').value || '').trim(), 10);
+if (!vpus || vpus <= 0) { toast('请输入正整数 VPU', true); return; }
+if (!confirm(`确认将实例「${window._vpusInst.name}」的引导卷 VPU 调整为 ${vpus} 吗？只能调大，调大会增加费用。`)) return;
+const inst = window._vpusInst;
+closeModal();
+try {
+const r = await api('POST', `/api/accounts/${curAccount.id}/boot-volume-vpus`,
+{instance_id: inst.id, vpus_per_gb: vpus});
+toast(r.message || '已提交');
+} catch (e) { toast(e.message, true); }
+}
+
+function openTerminateModal(inst) {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>终止实例</h2>
+<div class="help" style="color:var(--red2);margin-bottom:14px">
+确定要终止/删除实例 <b>${esc(inst.name)}</b>（${esc(inst.id)}）吗？此操作不可恢复！</div>
+<div class="check-row"><input type="checkbox" id="preserveBv">
+<span>保留引导卷（只删除实例，保留 boot volume，之后可挂到其他实例恢复数据）</span></div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="button" class="btn danger" onclick="doTerminateConfirmed()">确认终止</button>
+</div>`;
+document.getElementById('modalMask').classList.add('show');
+window._terminateInst = inst;
+}
+
+async function doTerminateConfirmed() {
+const inst = window._terminateInst;
+const preserve = document.getElementById('preserveBv').checked;
+if (!confirm(`最后确认：终止实例「${inst.name}」${preserve? '（保留引导卷）': '（引导卷一并删除）'}？`)) return;
+closeModal();
+try {
+const r = await api('POST', `/api/accounts/${curAccount.id}/action`,
+{instance: inst, action: 'terminate', params: {preserve_boot_volume: preserve}});
+toast('任务已提交，在任务历史中查看进度');
+toggleDrawer(true); trackJob(r.job_id);
+} catch (e) { toast(e.message, true); }
+}
+
 async function openCreateModal() {
 if (!curAccount) { toast('请先添加账号', true); return;}
 const opts = await api('GET', `/api/accounts/${curAccount.id}/create-options`).catch(e => { toast(e.message, true); return null;});
@@ -1128,6 +1292,7 @@ for (const [k, v] of Object.entries(defaults || {})) {
 const el = form.querySelector(`[name="${k}"]`);
 if (el && v !== '' && v != null) el.value = v;
 }
+loadScriptTemplates();  // 填充开机脚本模板下拉（OCI/AWS）
 document.getElementById('createForm').onsubmit = async e => {
 e.preventDefault();
 const params = readForm(e.target, curProvider);
@@ -1328,8 +1493,27 @@ ${s.tg_bot_token_set ? '当前状态：' + (s.tg_bot_running ? 'Bot 运行中 �
 <span style="flex:1"></span>
 <button type="button" class="btn" onclick="closeModal()">取消</button>
 <button type="submit" class="btn primary">保存</button>
-</div></form>`;
+</div></form>
+<h2 style="margin-top:22px">TOTP 二次验证</h2>
+<div id="totpSection"><div class="empty">加载中…</div></div>
+<h2 style="margin-top:22px">备份 / 恢复</h2>
+<div class="check-row">备份为整个数据库的加密文件（含云凭证），备份密码只用于本次加密，服务器不保存。</div>
+<div class="field"><label>备份密码（至少 8 位）</label>
+<input id="backupPwd" type="password" autocomplete="new-password" placeholder="用于加密备份文件"></div>
+<div class="modal-actions" style="margin-bottom:18px">
+<button type="button" class="btn" onclick="doBackup()">📥 下载加密备份</button>
+</div>
+<div class="check-row">恢复</div>
+<div class="field"><label>选择备份文件</label>
+<input id="restoreFile" type="file" accept=".bin"></div>
+<div class="field"><label>备份密码</label>
+<input id="restorePwd" type="password" autocomplete="new-password" placeholder="解密备份文件的密码"></div>
+<div class="modal-actions" style="margin-bottom:8px">
+<button type="button" class="btn" onclick="doRestoreStep1()">校验备份</button>
+</div>
+<div id="restoreInfo"></div>`;
 document.getElementById('modalMask').classList.add('show');
+renderTotpSection();
 document.getElementById('tgForm').onsubmit = async e => {
 e.preventDefault();
 const fd = new FormData(e.target);
@@ -1345,6 +1529,181 @@ closeModal(); toast('设置已保存');
 } catch (err) { toast(err.message, true); }
 };
 }).catch(e => toast(e.message, true));
+}
+
+/* ---------- TOTP 二次验证（设置弹窗内区块） ---------- */
+async function renderTotpSection() {
+const sec = document.getElementById('totpSection');
+if (!sec) return;
+let enabled = false;
+try { enabled = (await api('GET', '/api/totp/status')).enabled; }
+catch (e) { sec.innerHTML = `<div class="help" style="color:var(--red)">加载 TOTP 状态失败: ${esc(e.message)}</div>`; return; }
+if (!enabled) {
+  sec.innerHTML = `
+  <div class="check-row">状态：未启用（登录只需密码）</div>
+  <button type="button" class="btn sm" onclick="totpBind()">🔐 绑定验证器</button>`;
+} else {
+  sec.innerHTML = `
+  <div class="check-row">状态：已启用 ✅（登录需密码 + 验证码）</div>
+  <button type="button" class="btn sm danger" onclick="totpUnbind()">解绑</button>`;
+}
+}
+
+async function totpBind() {
+const sec = document.getElementById('totpSection');
+sec.innerHTML = `<div class="empty">生成密钥中…</div>`;
+try {
+  const d = await api('POST', '/api/totp/setup');
+  sec.innerHTML = `
+  <div class="help" style="color:var(--muted);margin-bottom:10px">用验证器（Google / Microsoft Authenticator 等）扫描二维码，或手动输入密钥：<br>确认启用前登录方式不变。</div>
+  <img src="${d.qr_data_uri}" alt="TOTP 二维码" style="width:160px;height:160px;background:#fff;border:1px solid var(--border2);border-radius:8px;padding:6px">
+  <div class="field" style="margin-top:10px"><label>手动密钥</label>
+  <input class="mono" value="${esc(d.secret)}" readonly onclick="this.select()"></div>
+  <div class="field"><label>当前 6 位验证码</label>
+  <input id="totpConfirmCode" inputmode="numeric" placeholder="如 123456"></div>
+  <div class="modal-actions">
+  <button type="button" class="btn" onclick="renderTotpSection()">取消</button>
+  <button type="button" class="btn primary" onclick="totpConfirm()">确认启用</button>
+  </div>`;
+  document.getElementById('totpConfirmCode').focus();
+} catch (e) { toast(e.message, true); renderTotpSection(); }
+}
+
+async function totpConfirm() {
+const code = (document.getElementById('totpConfirmCode').value || '').trim();
+if (!/^\d{6}$/.test(code)) { toast('请输入 6 位数字验证码', true); return; }
+try {
+  await api('POST', '/api/totp/confirm', {code});
+  toast('TOTP 已启用，下次登录需输入验证码');
+  renderTotpSection();
+} catch (e) { toast(e.message, true); }
+}
+
+function totpUnbind() {
+const sec = document.getElementById('totpSection');
+sec.innerHTML = `
+<div class="help" style="color:var(--yellow);margin-bottom:10px">解绑后登录只需密码。需二次确认：</div>
+<div class="field"><label>面板密码</label>
+<input id="totpUnbindPwd" type="password" autocomplete="current-password"></div>
+<div class="field"><label>当前 6 位验证码</label>
+<input id="totpUnbindCode" inputmode="numeric" placeholder="如 123456"></div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="renderTotpSection()">取消</button>
+<button type="button" class="btn danger" onclick="totpDoUnbind()">确认解绑</button>
+</div>`;
+}
+
+async function totpDoUnbind() {
+const password = document.getElementById('totpUnbindPwd').value;
+const code = (document.getElementById('totpUnbindCode').value || '').trim();
+if (!/^\d{6}$/.test(code)) { toast('请输入 6 位数字验证码', true); return; }
+if (!confirm('确定解绑 TOTP 二次验证吗？解绑后登录只需密码。')) return;
+try {
+  await api('POST', '/api/totp/disable', {password, code});
+  toast('TOTP 已解绑');
+  renderTotpSection();
+} catch (e) { toast(e.message, true); }
+}
+
+/* ---------- 审计日志 ---------- */
+async function openAuditLogModal(limit) {
+limit = parseInt(limit || '200', 10);
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>审计日志</h2>
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+<span style="color:var(--muted);font-size:13px">显示条数</span>
+<select id="auditLimitSel" onchange="openAuditLogModal(this.value)" style="padding:6px 9px;border-radius:8px;border:1px solid var(--border2);background:var(--bg);color:var(--text);font-size:13px">
+${[50, 200, 500].map(n => `<option value="${n}"${n === limit? ' selected': ''}>${n}</option>`).join('')}
+</select>
+<span style="flex:1"></span>
+<button class="btn sm" onclick="openAuditLogModal(document.getElementById('auditLimitSel').value)">刷新</button>
+</div>
+<div id="auditBody"><div class="empty">加载中…</div></div>`;
+document.getElementById('modalMask').classList.add('show');
+try {
+const list = await api('GET', `/api/audit-log?limit=${limit}`);
+document.getElementById('auditBody').innerHTML = `
+<table><thead><tr><th>时间</th><th>IP</th><th>动作</th><th>详情</th></tr></thead>
+<tbody>${list.map(a => `<tr>
+<td class="mono">${esc(fmtTime(a.ts * 1000))}</td>
+<td class="mono">${esc(a.ip)}</td>
+<td>${esc(a.action)}</td>
+<td style="word-break:break-all">${esc(a.detail)}</td>
+</tr>`).join('') || '<tr><td colspan="4" class="empty">暂无记录</td></tr>'}
+</tbody></table>`;
+} catch (e) {
+document.getElementById('auditBody').innerHTML =
+`<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="openAuditLogModal(${limit})">重试</button></div>`;
+}
+}
+
+/* ---------- 加密备份 / 恢复 ---------- */
+async function doBackup() {
+const password = document.getElementById('backupPwd').value;
+if (password.length < 8) { toast('备份密码至少 8 位', true); return; }
+try {
+  const r = await fetch('/api/backup', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({password})
+  });
+  if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || '备份失败'); }
+  const blob = await r.blob();
+  const cd = r.headers.get('Content-Disposition') || '';
+  const m = cd.match(/filename="?([^";]+)"?/);
+  const fname = m ? m[1] : 'tricloud-backup.bin';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast('备份已下载');
+  document.getElementById('backupPwd').value = '';
+} catch (e) { toast(e.message, true); }
+}
+
+async function doRestoreStep1() {
+const fileInput = document.getElementById('restoreFile');
+const password = document.getElementById('restorePwd').value;
+const info = document.getElementById('restoreInfo');
+info.innerHTML = '';
+if (!fileInput.files.length) { toast('请先选择备份文件', true); return; }
+if (!password) { toast('请输入备份密码', true); return; }
+const fd = new FormData();
+fd.append('file', fileInput.files[0]);
+fd.append('password', password);
+try {
+  info.innerHTML = '<div class="empty">校验中…</div>';
+  const r = await fetch('/api/restore', {method: 'POST', body: fd});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || '校验失败');
+  const t = d.latest_record_at ? fmtTime(d.latest_record_at * 1000) : '未知';
+  info.innerHTML = `
+  <div class="help" style="color:var(--yellow);margin:8px 0">
+    备份文件：${esc(d.file_name)}<br>
+    包含账号 ${d.accounts} 个，最新账号记录 ${esc(t)}。<br>
+    确认覆盖将替换当前数据库（当前库会保留为 .bak），并要求重新登录。
+  </div>
+  <div class="modal-actions">
+  <button type="button" class="btn danger" onclick="doRestoreConfirm()">确认覆盖并恢复</button>
+  </div>`;
+} catch (e) { info.innerHTML = ''; toast(e.message, true); }
+}
+
+async function doRestoreConfirm() {
+const password = document.getElementById('restorePwd').value;
+const fileInput = document.getElementById('restoreFile');
+if (!confirm('确定用该备份覆盖当前数据库吗？当前库会保留为 .bak，恢复后需重新登录。')) return;
+const fd = new FormData();
+fd.append('file', fileInput.files[0]);
+fd.append('password', password);
+fd.append('confirm', 'true');
+try {
+  const r = await fetch('/api/restore', {method: 'POST', body: fd});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.restored) throw new Error(d.detail || '恢复失败');
+  toast('恢复成功，请重新登录');
+  setTimeout(() => { location.href = '/login.html'; }, 800);
+} catch (e) { toast(e.message, true); }
 }
 
 async function tgTest() {

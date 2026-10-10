@@ -10,3 +10,5 @@ azure-mgmt-subscription>=3.1.0
 azure-mgmt-monitor>=7.0.0
 cryptography>=41.0.0
 python-telegram-bot>=21.0
+pyotp>=2.8.0
+qrcode[pil]>=7.4

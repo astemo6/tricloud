@@ -78,6 +78,20 @@ CREATE TABLE IF NOT EXISTS recycle_bin (
     data TEXT NOT NULL,
     fetched_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    ip TEXT NOT NULL DEFAULT '',
+    action TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS script_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    os_type TEXT NOT NULL DEFAULT 'linux',   -- linux | windows
+    content TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -392,6 +406,81 @@ def account_set_monitor(account_id: int, alert: bool, restart: bool) -> None:
             "UPDATE accounts SET monitor_alert=?, monitor_restart=?, updated_at=? WHERE id=?",
             (1 if alert else 0, 1 if restart else 0, time.time(), account_id),
         )
+
+
+# ---------- 审计日志 ----------
+def audit_add(ip: str, action: str, detail: str = "") -> None:
+    with _lock, _connect() as conn:
+        conn.execute(
+            "INSERT INTO audit_log(ts, ip, action, detail) VALUES (?,?,?,?)",
+            (time.time(), ip or "", action, detail or ""),
+        )
+
+
+def audit_list(limit: int = 200) -> list[dict]:
+    """按时间倒序取审计日志。"""
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ---------- 开机脚本模板 ----------
+_OS_TYPES = ("linux", "windows")
+
+
+def script_template_list(os_type: str | None = None) -> list[dict]:
+    with _lock, _connect() as conn:
+        if os_type in _OS_TYPES:
+            rows = conn.execute(
+                "SELECT * FROM script_templates WHERE os_type=? ORDER BY id",
+                (os_type,)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM script_templates ORDER BY id").fetchall()
+        return [dict(r) for r in rows]
+
+
+def script_template_add(name: str, os_type: str, content: str) -> int:
+    if os_type not in _OS_TYPES:
+        raise ValueError("os_type 只能是 linux 或 windows")
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO script_templates(name, os_type, content, created_at)"
+            " VALUES (?,?,?,?)",
+            (name.strip(), os_type, content, time.time()),
+        )
+        return cur.lastrowid
+
+
+def script_template_update(tpl_id: int, fields: dict) -> bool:
+    allowed = {"name", "os_type", "content"}
+    sets, vals = [], []
+    for k, v in fields.items():
+        if k not in allowed:
+            continue
+        if k == "os_type" and v not in _OS_TYPES:
+            raise ValueError("os_type 只能是 linux 或 windows")
+        if k == "name":
+            v = (v or "").strip()
+            if not v:
+                raise ValueError("模板名称不能为空")
+        sets.append(f"{k}=?")
+        vals.append(v)
+    if not sets:
+        return False
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            f"UPDATE script_templates SET {', '.join(sets)} WHERE id=?",
+            (*vals, tpl_id))
+        return cur.rowcount > 0
+
+
+def script_template_delete(tpl_id: int) -> bool:
+    with _lock, _connect() as conn:
+        cur = conn.execute("DELETE FROM script_templates WHERE id=?", (tpl_id,))
+        return cur.rowcount > 0
 
 
 # ---------- sessions ----------

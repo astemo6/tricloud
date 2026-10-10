@@ -1,4 +1,5 @@
 """Azure provider：虚拟机管理（azure-mgmt-* SDK）。"""
+import base64
 import logging
 import random
 import string
@@ -93,6 +94,7 @@ class AzureProvider(Provider):
         {"key": "open_port", "label": "开放端口"},
         {"key": "extend_disk", "label": "磁盘扩容"},
         {"key": "resize", "label": "改配置"},
+        {"key": "rename", "label": "改名"},
         {"key": "check_ip", "label": "检测 IP 连通性"},
         {"key": "reimage", "label": "重置系统", "danger": True},
     ]
@@ -177,6 +179,7 @@ class AzureProvider(Provider):
             parsed = _parse_id(vm.id)
             rg = parsed.get("resourcegroups", "")
             name = vm.name
+            display_name = (vm.tags or {}).get("tricloud_display_name") or name
             power, power_text = self._power_state(compute, rg, name)
             public_ip, private_ip = "", ""
             try:
@@ -197,13 +200,47 @@ class AzureProvider(Provider):
                 log.warning("nic info %s failed: %s", name, e)
             hw = vm.hardware_profile.vm_size if vm.hardware_profile else ""
             result.append(InstanceInfo(
-                id=vm.id, name=name, status=power, status_text=power_text,
+                id=vm.id, name=display_name, status=power,
+                status_text=power_text,
                 shape=hw, public_ip=public_ip, private_ip=private_ip,
                 region=vm.location, zone="",
                 created="",
                 extra={"resource_group": rg, "vm_name": name},
             ))
         return result
+
+    def list_resource_groups(self, creds: dict) -> list[dict]:
+        """资源组列表：[{name, location, vm_count}]。
+
+        vm_count 为组内虚拟机数，查不到就 0。任何失败返回 []，不抛异常。
+        """
+        try:
+            compute, _, resource = _clients(creds)
+            counts: dict[str, int] = {}
+            try:
+                for vm in compute.virtual_machines.list_all():
+                    rg = _parse_id(vm.id).get("resourcegroups", "")
+                    counts[rg] = counts.get(rg, 0) + 1
+            except HttpResponseError as e:
+                log.warning("vm list for resource group counts failed: %s", e)
+            return [
+                {"name": rg.name, "location": rg.location or "",
+                 "vm_count": counts.get(rg.name, 0)}
+                for rg in resource.resource_groups.list()
+            ]
+        except Exception as e:  # noqa: BLE001
+            log.warning("list resource groups failed: %s", e)
+            return []
+
+    def delete_resource_group(self, creds: dict, rg_name: str) -> str:
+        """删除资源组（组内所有资源一并删除）。失败抛异常由上层转 502。"""
+        _, _, resource = _clients(creds)
+        name = (rg_name or "").strip()
+        if not name:
+            raise ValueError("资源组名不能为空")
+        poller = resource.resource_groups.begin_delete(name)
+        poller.result()
+        return f"资源组 {name} 已删除（组内资源已一并删除）"
 
     def instance_action(self, creds: dict, inst: InstanceInfo, action: str, ctx) -> str:
         compute, network, _ = _clients(creds)
@@ -230,6 +267,16 @@ class AzureProvider(Provider):
             return self._extend_disk(compute, rg, name, ctx)
         if action == "resize":
             return self._resize(compute, rg, name, ctx)
+        if action == "rename":
+            new_name = (getattr(ctx, "params", {}) or {}).get("new_name", "").strip()
+            if not new_name:
+                raise ValueError("请提供新名称")
+            vm = compute.virtual_machines.get(rg, name)
+            compute.virtual_machines.begin_update(
+                rg, name,
+                {"tags": {**(vm.tags or {}),
+                           "tricloud_display_name": new_name}}).result()
+            return f"实例已改名为 {new_name}"
         if action == "check_ip":
             return self._check_ip(network, rg, name, ctx)
         if action == "reimage":
@@ -429,6 +476,105 @@ class AzureProvider(Provider):
             "note": "为各区域 vCPU/虚拟机数量配额；详情见 Azure 门户订阅-用量+配额页",
         }
 
+    def get_foundry_quotas(self, creds: dict, region: str = "") -> dict:
+        """Foundry / AI 模型配额：指定区域 Cognitive Services 用量（默认 swedencentral）。
+
+        走 ARM REST（Microsoft.CognitiveServices usages）。任何失败都返回
+        {"error": ...}，不抛异常。
+        """
+        import json
+        try:
+            import requests
+            region = (region or "").strip() or "swedencentral"
+            cred = _credential(creds)
+            sub = creds["subscription_id"].strip()
+            token = cred.get_token("https://management.azure.com/.default").token
+            url = (f"https://management.azure.com/subscriptions/{sub}"
+                   f"/providers/Microsoft.CognitiveServices/locations/{region}"
+                   f"/usages?api-version=2024-10-01")
+            resp = requests.get(url,
+                                headers={"Authorization": f"Bearer {token}"},
+                                timeout=30)
+            resp.raise_for_status()
+            quotas = []
+            for u in (resp.json().get("value") or []):
+                limit = u.get("limit") or 0
+                if not limit:
+                    continue
+                name = u.get("name") or {}
+                quotas.append({
+                    "name": name.get("localizedValue") or name.get("value") or "",
+                    "limit": limit,
+                    "used": u.get("currentValue") or 0,
+                })
+            quotas.sort(key=lambda q: (q["name"] or "").lower())
+            return {"region": region, "quotas": quotas[:50]}
+        except Exception as e:  # noqa: BLE001
+            log.warning("foundry quotas failed: %s", e)
+            return {"error": f"查询 Foundry 配额失败: {e}"}
+
+    def foundry_deploy(self, creds: dict, params: dict, ctx) -> str:
+        """Azure Foundry 最小部署：创建/更新 AI Services 账号 + 部署模型。
+
+        params: account_name, region, resource_group, sku, model_name,
+                model_format, model_version, deploy_model（均有默认值）。
+        """
+        import json
+        import re
+        import requests
+        params = params or {}
+        account_name = (params.get("account_name") or "").strip() or "tricloud-ai"
+        region = (params.get("region") or "").strip() or "swedencentral"
+        rg_name = (params.get("resource_group") or f"{account_name}-rg").strip()
+        sku = (params.get("sku") or "S0").strip()
+        model_name = (params.get("model_name") or "").strip() or "gpt-4o"
+        model_format = (params.get("model_format") or "").strip() or "OpenAI"
+        model_version = (params.get("model_version") or "").strip()
+        if not model_version:
+            model_version = "2024-11-20" if model_name.lower() == "gpt-4o" else "latest"
+        _, _, resource = _clients(creds)
+        cred = _credential(creds)
+        sub = creds["subscription_id"].strip()
+        token = cred.get_token("https://management.azure.com/.default").token
+        headers = {"Authorization": f"Bearer {token}",
+                   "Content-Type": "application/json"}
+        base = (f"https://management.azure.com/subscriptions/{sub}"
+                f"/resourceGroups/{rg_name}"
+                f"/providers/Microsoft.CognitiveServices/accounts/{account_name}")
+
+        ctx.log(f"创建/更新资源组 {rg_name}…")
+        resource.resource_groups.create_or_update(rg_name, {"location": region})
+
+        ctx.log(f"创建 AI Services 账号 {account_name}（kind=AIServices, {region}）…")
+        account_body = {"location": region, "kind": "AIServices",
+                        "sku": {"name": sku}, "properties": {}}
+        r = requests.put(f"{base}?api-version=2024-10-01",
+                         data=json.dumps(account_body), headers=headers,
+                         timeout=120)
+        if r.status_code not in (200, 201):
+            raise ValueError(f"创建 AI Services 账号失败 ({r.status_code}): "
+                             f"{r.text[:300]}")
+        endpoint = (r.json().get("properties") or {}).get("endpoint", "")
+
+        result = (f"AI Services 账号已就绪: {account_name}\n"
+                  f"资源组: {rg_name}\n区域: {region}\nEndpoint: {endpoint}")
+        if not params.get("deploy_model", True):
+            return result + "\n（按参数未部署模型）"
+
+        deploy_name = re.sub(r"[^a-z0-9-]+", "-", model_name.lower()).strip("-")
+        ctx.log(f"部署模型 {model_name}（{model_format}, {model_version}）…")
+        deploy_body = {"sku": {"name": "Standard"},
+                       "properties": {"model": {
+                           "format": model_format,
+                           "name": model_name,
+                           "version": model_version}}}
+        r = requests.put(
+            f"{base}/deployments/{deploy_name}?api-version=2024-10-01",
+            data=json.dumps(deploy_body), headers=headers, timeout=180)
+        if r.status_code not in (200, 201):
+            raise ValueError(f"部署模型失败 ({r.status_code}): {r.text[:300]}")
+        return result + f"\n模型部署: {deploy_name}（{model_name} {model_version}）"
+
     def _change_ip(self, network, rg: str, vm_name: str, ctx) -> str:
         # 通过 VM 找到主网卡
         nic_id = None
@@ -491,6 +637,7 @@ class AzureProvider(Provider):
         admin_user = params.get("admin_username") or "azureuser"
         password = (params.get("password") or "").strip() or _gen_password()
         ssh_key = (params.get("ssh_key") or "").strip()
+        startup_script = (params.get("startup_script") or "").strip()
 
         ctx.log(f"创建资源组 {rg_name}…")
         resource.resource_groups.create_or_update(rg_name, {"location": location})
@@ -542,6 +689,10 @@ class AzureProvider(Provider):
                     "key_data": ssh_key}]}}
         else:
             os_profile["admin_password"] = password
+        if startup_script:
+            os_profile["custom_data"] = base64.b64encode(
+                startup_script.encode()).decode()
+            ctx.log("已注入开机脚本")
         vm_params = {
             "location": location,
             "hardware_profile": {"vm_size": size},

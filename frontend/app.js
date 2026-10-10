@@ -99,6 +99,8 @@ if (curProvider.supports_quotas) defs.push({key: 'quotas', label: '配额'});
 if (curProvider.supports_subscription) defs.push({key: 'subscription', label: '订阅'});
 if (curProvider.id === 'azure' || curProvider.id === 'oci') defs.push({key: 'traffic', label: '流量控制'});
 if (curProvider.id === 'oci') defs.push({key: 'security', label: '安全组'});
+if (curProvider.id === 'azure') defs.push({key: 'foundry', label: 'Foundry'});
+if (curProvider.id === 'azure') defs.push({key: 'rgroups', label: '资源组'});
 if (!defs.find(d => d.key === curTab)) curTab = 'instances';
 document.getElementById('tabs').innerHTML = defs.map(d =>
 `<div class="tab${d.key === curTab? ' active': ''}" onclick="switchTab('${d.key}')">${d.label}</div>`).join('');
@@ -124,6 +126,8 @@ else if (curTab === 'quotas') loadQuotas();
 else if (curTab === 'subscription') loadSubscription();
 else if (curTab === 'traffic') loadTrafficRules();
 else if (curTab === 'security') loadSecurityRules();
+else if (curTab === 'foundry') loadFoundry();
+else if (curTab === 'rgroups') loadResourceGroups();
 else loadInstances();
 }
 
@@ -622,6 +626,98 @@ c.innerHTML = `<table><thead><tr><th>项目</th><th>详情</th></tr></thead><tbo
 } catch (e) {
 c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadSubscription()">重试</button></div>`;
 }
+}
+
+/* ---------- Azure Foundry ---------- */
+const FOUNDRY_REGIONS = ['swedencentral', 'eastus2', 'eastus', 'westeurope', 'japaneast', 'southeastasia'];
+let foundryRegion = 'swedencentral';
+
+async function loadFoundry() {
+const c = document.getElementById('content');
+c.innerHTML = '<div class="empty">加载中…</div>';
+let q;
+try {
+q = await api('GET', `/api/accounts/${curAccount.id}/foundry-quotas?region=${encodeURIComponent(foundryRegion)}`);
+} catch (e) {
+q = {error: e.message};
+}
+c.innerHTML = `<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+<select id="foundryRegionSel" onchange="foundryRegion=this.value;loadFoundry()" style="background:var(--bg);color:var(--text);border:1px solid var(--border2);border-radius:8px;padding:8px 10px">
+${FOUNDRY_REGIONS.map(r => `<option value="${r}"${r === foundryRegion? ' selected': ''}>${esc(r)}</option>`).join('')}
+</select>
+<button class="btn sm" onclick="loadFoundry()">刷新配额</button>
+</div>` +
+(q.error
+? `<div class="empty" style="color:var(--muted)">配额查询失败: ${esc(q.error)}</div>`
+: ((q.quotas || []).length
+? `<table><thead><tr><th>配额项</th><th>已用</th><th>上限</th></tr></thead><tbody>` +
+(q.quotas || []).map(it => `<tr><td>${esc(it.name)}</td><td>${esc(String(it.used))}</td><td>${esc(String(it.limit))}</td></tr>`).join('') + '</tbody></table>'
+: '<div class="empty">该区域暂无配额数据</div>')) +
+`<h3 style="margin:18px 0 10px;font-size:14px;color:var(--text2)">部署模型</h3>
+<form id="foundryForm">
+${row({key: 'account_name', label: 'AI Services 账号名', placeholder: '留空用默认 tricloud-ai'},
+{key: 'region', label: '区域', type: 'select', options: FOUNDRY_REGIONS, value: foundryRegion})}
+${formField({key: 'model_name', label: '模型名', placeholder: '默认 gpt-4o'})}
+<div class="help" style="color:var(--muted);margin-bottom:14px">创建/更新 AI Services 账号并部署一个模型（默认 gpt-4o）。需要订阅级别的 Cognitive Services 权限。</div>
+<div class="modal-actions">
+<button type="submit" class="btn primary" id="foundryDeployBtn">部署</button>
+</div>
+</form>
+<div id="foundryResult" style="margin-top:12px"></div>`;
+document.getElementById('foundryForm').onsubmit = async e => {
+e.preventDefault();
+const fd = new FormData(e.target);
+const btn = document.getElementById('foundryDeployBtn');
+btn.disabled = true;
+const out = document.getElementById('foundryResult');
+out.innerHTML = '<div class="empty">部署中，请稍候…</div>';
+try {
+const r = await api('POST', `/api/accounts/${curAccount.id}/foundry-deploy`, {
+account_name: (fd.get('account_name') || '').trim(),
+region: (fd.get('region') || foundryRegion).trim(),
+model_name: (fd.get('model_name') || '').trim(),
+});
+out.innerHTML = `<div class="help" style="color:var(--text);white-space:pre-wrap">${esc(r.result || '部署完成')}</div>` +
+((r.logs || []).map(l => `<div style="color:var(--faint);font-size:11px">${esc(l)}</div>`).join(''));
+foundryRegion = (fd.get('region') || foundryRegion).trim();
+} catch (err) {
+out.innerHTML = `<div class="empty" style="color:var(--muted)">部署失败: ${esc(err.message)}</div>`;
+} finally {
+btn.disabled = false;
+}
+};
+}
+
+/* ---------- Azure 资源组 ---------- */
+async function loadResourceGroups() {
+const c = document.getElementById('content');
+c.innerHTML = '<div class="empty">加载中…</div>';
+try {
+const r = await api('GET', `/api/accounts/${curAccount.id}/resource-groups`);
+const groups = r.groups || [];
+c.innerHTML = (groups.length
+? `<table><thead><tr><th>资源组</th><th>区域</th><th>VM 数</th><th>操作</th></tr></thead><tbody>` +
+groups.map(g => `<tr>
+<td class="mono">${esc(g.name)}</td>
+<td>${esc(g.location || '-')}</td>
+<td>${esc(String(g.vm_count != null? g.vm_count: 0))}</td>
+<td><div class="row-actions">
+<button class="btn sm danger" onclick="delResourceGroup('${esc(g.name)}')">删除</button>
+</div></td></tr>`).join('') + '</tbody></table>'
+: '<div class="empty">该账号下没有资源组</div>') +
+`<div class="help" style="color:var(--faint);margin-top:12px;font-size:12px">删除资源组会一并删除组内所有资源（虚拟机、网络等），不可恢复。</div>`;
+} catch (e) {
+c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadResourceGroups()">重试</button></div>`;
+}
+}
+
+async function delResourceGroup(name) {
+if (!confirm(`确定删除资源组 ${name} 吗？组内资源会一起删除！`)) return;
+try {
+await api('DELETE', `/api/accounts/${curAccount.id}/resource-groups/${encodeURIComponent(name)}`);
+toast('资源组已删除');
+loadResourceGroups();
+} catch (e) { toast(e.message, true);}
 }
 
 /* ---------- Lightsail ---------- */const LS_REGIONS = ['us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'eu-west-2',
@@ -1185,7 +1281,8 @@ ${row({key: 'image', label: '镜像', type: 'select', options: opts.images},
 {key: 'disk_gb', label: '系统盘 GB', type: 'number', value: '30'})}
 ${row({key: 'admin_username', label: '管理员用户', value: 'azureuser'},
 {key: 'password', label: '密码（可选）', placeholder: '留空自动生成'})}
-${formField({key: 'ssh_key', label: 'SSH 公钥（可选，Linux 有效）', type: 'textarea'})}`;
+${formField({key: 'ssh_key', label: 'SSH 公钥（可选，Linux 有效）', type: 'textarea'})}
+${formField({key: 'startup_script', label: '开机脚本（可选）', type: 'textarea', help: 'cloud-init 格式（如 #cloud-config）'})}`;
 return '';
 }
 
@@ -1195,7 +1292,7 @@ const fd = new FormData(form), o = {};
 const fields = p.id === 'oci'
 ? ['name', 'availability_domain', 'shape', 'ocpus', 'memory_gbs', 'os', 'ssh_key', 'boot_volume_gb', 'login_user', 'password', 'startup_script']
 : p.id === 'aws'? ['name', 'region', 'instance_type', 'ami', 'key_name']
-: ['name', 'resource_group', 'location', 'vm_size', 'image', 'admin_username', 'password', 'ssh_key', 'disk_gb'];
+: ['name', 'resource_group', 'location', 'vm_size', 'image', 'admin_username', 'password', 'ssh_key', 'disk_gb', 'startup_script'];
 fields.forEach(k => o[k] = (fd.get(k) || '').trim());
 if (p.id === 'oci') {
 o.assign_public_ip =!!fd.get('assign_public_ip');

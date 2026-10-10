@@ -274,7 +274,10 @@ def main():
 
         # 21. 监控设置读写
         m0 = c.get(f"/api/accounts/{oci_id}/monitor").json()
-        assert m0 == {"monitor_alert": False, "monitor_restart": False}, m0
+        # track-c 起接口新增 monitor_ip_check/auto_change_ip/
+        # auto_change_ip_used/auto_change_ip_limit 字段，这里只断言原有 2 项
+        assert m0["monitor_alert"] is False and \
+            m0["monitor_restart"] is False, m0
         r = c.put(f"/api/accounts/{oci_id}/monitor",
                   json={"monitor_alert": True, "monitor_restart": False})
         assert r.status_code == 200, r.text

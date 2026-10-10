@@ -651,6 +651,89 @@ def get_quotas(request: Request, account_id: int):
         raise HTTPException(status_code=502, detail=f"获取配额失败: {e}") from e
 
 
+# ---------- Azure Foundry ----------
+@app.get("/api/accounts/{account_id}/foundry-quotas")
+def get_foundry_quotas(request: Request, account_id: int, region: str = ""):
+    _require_login(request)
+    acc = _get_account(account_id)
+    provider = get_provider(acc["provider"])
+    if acc["provider"] != "azure":
+        raise HTTPException(status_code=400, detail="仅 Azure 账号支持此功能")
+    try:
+        result = provider.get_foundry_quotas(acc["creds"], region)
+        if "error" in result:
+            raise ValueError(result["error"])
+        return result
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"获取 Foundry 配额失败: {e}") from e
+
+
+class FoundryDeployBody(BaseModel):
+    account_name: str = ""
+    region: str = ""
+    model_name: str = ""
+
+
+@app.post("/api/accounts/{account_id}/foundry-deploy")
+def foundry_deploy(request: Request, account_id: int, body: FoundryDeployBody):
+    _require_login(request)
+    acc = _get_account(account_id)
+    if acc["provider"] != "azure":
+        raise HTTPException(status_code=400, detail="仅 Azure 账号支持此功能")
+    try:
+        # 直接同步执行（账号创建/模型部署通常 < 2 分钟），结果文本返回前端
+        provider = get_provider(acc["provider"])
+        ctx = _LogCtx()
+        result = provider.foundry_deploy(
+            acc["creds"],
+            {"account_name": body.account_name,
+             "region": body.region,
+             "model_name": body.model_name},
+            ctx)
+        return {"ok": True, "result": result, "logs": ctx.lines}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Foundry 部署失败: {e}") from e
+
+
+class _LogCtx:
+    """最小 ctx：收集 provider 的 ctx.log 输出，随结果返回前端。"""
+
+    def __init__(self):
+        self.lines: list[str] = []
+
+    def log(self, message: str) -> None:
+        self.lines.append(message)
+        log.info("foundry-deploy: %s", message)
+
+
+# ---------- Azure 资源组 ----------
+@app.get("/api/accounts/{account_id}/resource-groups")
+def list_resource_groups(request: Request, account_id: int):
+    _require_login(request)
+    acc = _get_account(account_id)
+    if acc["provider"] != "azure":
+        raise HTTPException(status_code=400, detail="仅 Azure 账号支持此功能")
+    provider = get_provider(acc["provider"])
+    groups = provider.list_resource_groups(acc["creds"])
+    return {"groups": groups}
+
+
+@app.delete("/api/accounts/{account_id}/resource-groups/{rg_name}")
+def delete_resource_group(request: Request, account_id: int, rg_name: str):
+    _require_login(request)
+    acc = _get_account(account_id)
+    if acc["provider"] != "azure":
+        raise HTTPException(status_code=400, detail="仅 Azure 账号支持此功能")
+    provider = get_provider(acc["provider"])
+    try:
+        msg = provider.delete_resource_group(acc["creds"], rg_name)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"删除资源组失败: {e}") from e
+    return {"ok": True, "message": msg}
+
+
 @app.get("/api/accounts/{account_id}/subscription")
 def get_subscription(request: Request, account_id: int):
     _require_login(request)

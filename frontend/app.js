@@ -251,7 +251,9 @@ instances = await api('GET', `/api/accounts/${curAccount.id}/instances`);
 } catch (e) { c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadInstances()">重试</button></div>`; return;}
 if (!instances.length) { c.innerHTML = '<div class="empty">该账号下没有实例</div>'; return;}
 const badge = s => `<span class="badge b-${s}">${s}</span>`;
-c.innerHTML = `<table><thead><tr>
+c.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+<button class="btn sm" onclick="openDnsMappingModal()">🔗 Cloudflare DNS 映射</button></div>` +
+`<table><thead><tr>
 <th>名称</th><th>状态</th><th>规格</th><th>公网 IP</th><th>内网 IP</th>
 <th>地域</th><th>创建时间</th><th>操作</th></tr></thead><tbody>` +
 instances.map((it, i) => `<tr>
@@ -290,9 +292,9 @@ openParamModal('开放端口', inst, 'open_port',
 [{key: 'port', label: '端口', type: 'number', required: true, placeholder: '如 8080'}],
 '将在安全组/安全列表放行该 TCP 端口（来源 0.0.0.0/0）。');
 return;}
-const needConfirm = meta.danger || action === 'change_ip' || action === 'terminate';
-const tips = {terminate: '确定要终止/删除该实例吗？此操作不可恢复！',
-change_ip: '更换公网 IP 后原 IP 会释放，确定继续吗？'};
+if (action === 'change_ip') { openChangeIpModal(inst); return;}
+const needConfirm = meta.danger || action === 'terminate';
+const tips = {terminate: '确定要终止/删除该实例吗？此操作不可恢复！'};
 if (needConfirm &&!confirm(tips[action] || `确定执行「${meta.label}」吗？`)) return;
 try {
 const r = await api('POST', `/api/accounts/${curAccount.id}/action`,
@@ -818,6 +820,23 @@ return `<input name="${f.key}" type="${f.field_type === 'password'? 'password': 
 placeholder="${esc(f.placeholder || '')}" value="${v}">`;
 }
 
+// 代理出口（可选）区；cur 传账号对象时回显已存配置（密码不回显）
+function proxyFieldsHtml(cur) {
+const c = cur || {};
+const hasProxy = !!(c.proxy_url || '');
+return `<div style="margin:16px 0 6px;font-size:13px;color:var(--text2)">代理出口（可选）</div>
+<div class="field"><label>代理 URL</label>
+<input name="proxy_url" autocomplete="off" value="${esc(c.proxy_url || '')}"
+placeholder="如 http://host:port 或 socks5://host:port">
+<div class="help">留空表示直连${hasProxy? '；清空并保存可移除代理': ''}</div></div>
+<div class="field"><label>代理用户名</label>
+<input name="proxy_user" autocomplete="off" value="${esc(c.proxy_user || '')}"
+placeholder="代理无需认证时留空"></div>
+<div class="field"><label>代理密码</label>
+<input name="proxy_pass" type="password" autocomplete="new-password"
+placeholder="${hasProxy? '已保存，留空保持不变': '代理需要认证时填写'}"></div>`;
+}
+
 function openAccountModal() {
 const p = curProvider;
 const box = document.getElementById('modalBox');
@@ -842,6 +861,7 @@ d != null? `存活 ${d} 天（${fmtDate(a.cloud_created_at)}创建） <a href="j
 <input name="name" required placeholder="如：甲骨文-东京"></div>
 ${p.fields.map(f => `<div class="field"><label>${esc(f.label)}${f.required? ' <span class="req">*</span>': ''}</label>
 ${fieldInput(f, '')}${f.help? `<div class="help">${esc(f.help)}</div>`: ''}</div>`).join('')}
+${proxyFieldsHtml()}
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
 <button type="submit" class="btn primary">保存（自动校验连通性）</button>
@@ -867,7 +887,10 @@ const fd = new FormData(e.target);
 const creds = {};
 p.fields.forEach(f => creds[f.key] = (fd.get(f.key) || '').trim());
 try {
-await api('POST', '/api/accounts', {provider: p.id, name: fd.get('name').trim(), creds});
+await api('POST', '/api/accounts', {provider: p.id, name: fd.get('name').trim(), creds,
+proxy_url: (fd.get('proxy_url') || '').trim(),
+proxy_user: (fd.get('proxy_user') || '').trim(),
+proxy_pass: fd.get('proxy_pass') || ''});
 toast('账号已添加'); closeModal(); loadAccounts();
 } catch (err) { toast(err.message, true);}
 };
@@ -930,13 +953,15 @@ box.innerHTML = `<h2>🗑️ 回收站</h2><div class="empty">加载失败: ${es
 
 async function editAccount(id) {
 const p = curProvider;
+const cur = accounts.find(a => a.id === id) || {};
 // 重新拉取解密后的凭证需要后端支持，这里简化：只改别名，或重填全部凭证
 const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>编辑账号</h2>
 <form id="accEditForm">
 <div class="field"><label>账号别名 <span class="req">*</span></label>
-<input name="name" required value="${esc(accounts.find(a => a.id === id).name)}"></div>
+<input name="name" required value="${esc(cur.name)}"></div>
 <div class="help" style="color:var(--muted);margin-bottom:14px">如需更换凭证请删除后重新添加；这里只修改别名。</div>
+${proxyFieldsHtml(cur)}
 <div class="modal-actions">
 <button type="button" class="btn" onclick="openAccountModal()">返回</button>
 <button type="submit" class="btn primary">保存</button>
@@ -944,8 +969,18 @@ box.innerHTML = `<h2>编辑账号</h2>
 </form>`;
 document.getElementById('accEditForm').onsubmit = async e => {
 e.preventDefault();
-const name = new FormData(e.target).get('name').trim();
-try { await api('PUT', `/api/accounts/${id}`, {name}); toast('已保存'); closeModal(); loadAccounts(id);}
+const fd = new FormData(e.target);
+const body = {name: fd.get('name').trim()};
+// 代理区未改动（URL/用户名与已存一致且密码留空）时不提交，保持原配置（含已存密码）
+const purl = (fd.get('proxy_url') || '').trim();
+const puser = (fd.get('proxy_user') || '').trim();
+const ppass = fd.get('proxy_pass') || '';
+if (purl !== (cur.proxy_url || '') || puser !== (cur.proxy_user || '') || ppass) {
+body.proxy_url = purl;
+body.proxy_user = puser;
+body.proxy_pass = ppass;
+}
+try { await api('PUT', `/api/accounts/${id}`, body); toast('已保存'); closeModal(); loadAccounts(id);}
 catch (err) { toast(err.message, true);}
 };
 }
@@ -990,7 +1025,7 @@ ${r.ok? '✅': '❌'} ${esc(r.name)} <span style="color:var(--faint)">${esc(r.me
 
 async function openMonitorModal(id) {
 const acc = accounts.find(a => a.id === id);
-let m = {monitor_alert: false, monitor_restart: false};
+let m = {monitor_alert: false, monitor_restart: false, monitor_ip_check: false, auto_change_ip: false, auto_change_ip_used: 0, auto_change_ip_limit: 3};
 try { m = await api('GET', `/api/accounts/${id}/monitor`);} catch (e) { toast(e.message, true); return;}
 const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>监控设置 · ${esc(acc.name)}</h2>
@@ -999,7 +1034,11 @@ box.innerHTML = `<h2>监控设置 · ${esc(acc.name)}</h2>
 <span>状态告警：实例异常停止/恢复时 Telegram 推送通知</span></div>
 <div class="check-row"><input type="checkbox" name="monitor_restart"${m.monitor_restart? ' checked': ''}>
 <span>异常自启：实例异常停止后自动提交启动任务</span></div>
-<div class="help" style="color:var(--muted);margin-bottom:14px">后台每 N 分钟巡检一次（N 在"设置"里配置，默认 5 分钟）。需要先在设置里配置 Telegram 才能收到通知。</div>
+<div class="check-row"><input type="checkbox" name="monitor_ip_check"${m.monitor_ip_check? ' checked': ''}>
+<span>IP 连通性检测：定期探测运行中实例的公网 IP（ping + TCP 22/80/443/3389），由连通变为不通时 Telegram 告警</span></div>
+<div class="check-row"><input type="checkbox" name="auto_change_ip"${m.auto_change_ip? ' checked': ''}>
+<span>IP 不通自动换 IP：检测到 IP 不通时自动更换公网 IP（每天最多 ${m.auto_change_ip_limit} 次，今日已用 ${m.auto_change_ip_used} 次；换 IP 失败只发 TG 告警，不循环重试）</span></div>
+<div class="help" style="color:var(--muted);margin-bottom:14px">后台每 N 分钟巡检一次（N 在"设置"里配置，默认 5 分钟），IP 检测与自动换 IP 共用该巡检周期。需要先在设置里配置 Telegram 才能收到通知。换 IP 成功后若已配置 Cloudflare 联动，会自动更新对应 A 记录。</div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="openAccountModal()">返回</button>
 <button type="submit" class="btn primary">保存</button>
@@ -1009,7 +1048,8 @@ e.preventDefault();
 const fd = new FormData(e.target);
 try {
 await api('PUT', `/api/accounts/${id}/monitor`,
-{monitor_alert: !!fd.get('monitor_alert'), monitor_restart: !!fd.get('monitor_restart')});
+{monitor_alert: !!fd.get('monitor_alert'), monitor_restart: !!fd.get('monitor_restart'),
+monitor_ip_check: !!fd.get('monitor_ip_check'), auto_change_ip: !!fd.get('auto_change_ip')});
 toast('监控设置已保存'); openAccountModal();
 } catch (err) { toast(err.message, true);}
 };
@@ -1203,6 +1243,32 @@ closeModal(); toast('任务已提交'); toggleDrawer(true); trackJob(r.job_id);
 };
 }
 
+/* 换 IP 确认框：可附带目标网段（留空走原有随机换 IP 逻辑） */
+function openChangeIpModal(inst) {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>更换公网 IP · ${esc(inst.name)}</h2>
+<form id="changeIpForm">
+${formField({key: 'cidr', label: '目标网段（可选）', placeholder: '如 192.0.2.0/24', help: '留空则随机更换。可指定新 IP 必须落在的网段（如 192.0.2.0/24），或加 ! 前缀表示排除网段（如 !192.0.2.0/24）；换到的 IP 不符合时会自动重试，最多 5 次，用尽则任务失败。'})}
+<div class="help" style="color:var(--yellow);margin-bottom:6px">更换公网 IP 后原 IP 会释放，确定继续吗？</div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="submit" class="btn primary">确定</button>
+</div></form>`;
+document.getElementById('modalMask').classList.add('show');
+document.getElementById('changeIpForm').onsubmit = async e => {
+e.preventDefault();
+const cidr = (new FormData(e.target).get('cidr') || '').trim();
+if (cidr && !/^!?(?:(?:\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]+)\/\d{1,2}$/.test(cidr)) {
+toast('网段格式不正确：应为 CIDR 格式（如 192.0.2.0/24），排除网段加 ! 前缀', true); return;
+}
+try {
+const r = await api('POST', `/api/accounts/${curAccount.id}/action`,
+{instance: inst, action: 'change_ip', params: {cidr}});
+closeModal(); toast('任务已提交'); toggleDrawer(true); trackJob(r.job_id);
+} catch (err) { toast(err.message, true);}
+};
+}
+
 function openShapeModal(inst) {const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>更改实例配置 · ${esc(inst.name)}</h2>
 <form id="shapeForm">
@@ -1303,7 +1369,8 @@ closeModal(); toast('密码已修改');
 function openSettingsModal() {
 api('GET', '/api/settings').then(s => {
 const box = document.getElementById('modalBox');
-box.innerHTML = `<h2>设置 · Telegram 联动</h2>
+box.innerHTML = `<h2>设置</h2>
+<h3 style="margin:6px 0 8px">Telegram 联动</h3>
 <div class="help" style="color:var(--muted);margin-bottom:14px">
 1. 在 Telegram 里找 @BotFather 创建 Bot，拿到 Token<br>
 2. 给你的 Bot 发任意消息，然后访问 <span class="mono">https://api.telegram.org/bot&lt;Token&gt;/getUpdates</span> 查出 chat.id<br>
@@ -1314,7 +1381,14 @@ ${s.tg_bot_token_set ? '当前状态：' + (s.tg_bot_running ? 'Bot 运行中 �
 <input name="tg_bot_token" type="password" placeholder="${s.tg_bot_token_set ? '已保存，留空不修改' : '如 123456:ABC-DEF…'}"></div>
 <div class="field"><label>Chat ID</label>
 <input name="tg_chat_id" value="${esc(s.tg_chat_id || '')}" placeholder="如 123456789"></div>
-<h2 style="margin-top:20px">监控与每日报告</h2>
+<h3 style="margin:18px 0 8px">Cloudflare DNS 联动</h3>
+<div class="help" style="color:var(--muted);margin-bottom:14px">
+实例更换公网 IP 后，自动更新 Cloudflare 上对应的 A 记录。<br>
+Token 权限：Zone:Zone:Read + Zone:DNS:Edit（创建 API Token，勾选这两个模板权限即可）。<br>
+${s.cf_token_set ? '当前状态：已保存 ✅' : '当前状态：未配置'}</div>
+<div class="field"><label>API Token</label>
+<input name="cf_api_token" type="password" placeholder="${s.cf_token_set ? '已保存，留空不修改' : '如 6pxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}"></div>
+<h3 style="margin:18px 0 8px">监控与每日报告</h3>
 <div class="check-row"><input type="checkbox" name="daily_report"${s.daily_report? ' checked': ''}>
 <span>每日账单报告（Telegram 推送全部账号当日费用汇总）</span></div>
 <div class="field-row">
@@ -1337,6 +1411,7 @@ try {
 await api('PUT', '/api/settings', {
 tg_bot_token: fd.get('tg_bot_token').trim(),
 tg_chat_id: fd.get('tg_chat_id').trim(),
+cf_api_token: fd.get('cf_api_token').trim(),
 daily_report: !!fd.get('daily_report'),
 daily_report_hour: parseInt(fd.get('daily_report_hour') || '9', 10),
 monitor_interval_min: parseInt(fd.get('monitor_interval_min') || '5', 10),
@@ -1350,6 +1425,85 @@ closeModal(); toast('设置已保存');
 async function tgTest() {
 try { await api('POST', '/api/settings/tg-test'); toast('测试消息已发送，去 Telegram 看看'); }
 catch (e) { toast(e.message, true); }
+}
+
+/* ---------- Cloudflare DNS 映射 ---------- */
+async function openDnsMappingModal() {
+if (!curAccount) return;
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>Cloudflare DNS 映射</h2>
+<div class="help" style="color:var(--muted);margin-bottom:14px">
+实例更换公网 IP 后，自动把对应的 Cloudflare A 记录更新为新 IP。<br>
+需先在「设置」里配置 Cloudflare API Token（Zone:Zone:Read + Zone:DNS:Edit 权限）。</div>
+<div id="dnsMapList">加载中…</div>
+<form id="dnsMapForm">
+<div class="field"><label>实例</label><select name="instance_id" id="dnsMapInstSel"><option value="">加载中…</option></select></div>
+<div class="field-row">
+<div class="field"><label>Zone 域名</label><input name="zone_name" placeholder="如 example.com"></div>
+<div class="field"><label>A 记录名</label><input name="record_name" placeholder="如 www.example.com 或 @"></div>
+</div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">取消</button>
+<button type="submit" class="btn primary">添加映射</button>
+</div></form>`;
+document.getElementById('modalMask').classList.add('show');
+let insts = [];
+try { insts = await api('GET', `/api/accounts/${curAccount.id}/instances`); }
+catch (e) { toast('获取实例列表失败: ' + e.message, true); }
+const sel = document.getElementById('dnsMapInstSel');
+sel.innerHTML = insts.length
+? insts.map(it => `<option value="${esc(it.id)}">${esc(it.name)}（${esc(it.public_ip || '无公网IP')}）</option>`).join('')
+: '<option value="">该账号下没有实例</option>';
+document.getElementById('dnsMapForm').onsubmit = async e => {
+e.preventDefault();
+const fd = new FormData(e.target);
+const instId = fd.get('instance_id');
+if (!instId) { toast('请选择实例', true); return;}
+let zone = fd.get('zone_name').trim();
+let rec = fd.get('record_name').trim();
+if (!zone || !rec) { toast('请填写 Zone 域名和 A 记录名', true); return;}
+if (rec === '@') rec = zone;
+else if (!rec.includes('.')) rec = rec + '.' + zone;
+try {
+await api('POST', '/api/dns-mappings', {
+account_id: curAccount.id, instance_id: instId,
+zone_name: zone, record_name: rec});
+toast('映射已添加');
+renderDnsMappingList(insts);
+e.target.reset();
+} catch (err) { toast(err.message, true); }
+};
+renderDnsMappingList(insts);
+}
+
+async function renderDnsMappingList(insts) {
+const el = document.getElementById('dnsMapList');
+if (!el || !curAccount) return;
+if (!insts) insts = instances;
+let maps = [];
+try { maps = await api('GET', `/api/dns-mappings?account_id=${curAccount.id}`); }
+catch (e) { el.innerHTML = '<div class="empty">加载失败</div>'; return;}
+const instLabel = id => {
+const it = (insts || []).find(x => x.id === id);
+return it? `${esc(it.name)}（${esc(it.public_ip || '无公网IP')}）`
+: `<span class="mono">${esc(String(id).slice(-16))}</span>`;
+};
+el.innerHTML = maps.length
+? `<table><thead><tr><th>实例</th><th>Zone</th><th>A 记录</th><th>操作</th></tr></thead><tbody>` +
+maps.map(m => `<tr><td>${instLabel(m.instance_id)}</td>
+<td class="mono">${esc(m.zone_name)}</td>
+<td class="mono">${esc(m.record_name)}</td>
+<td><button class="btn sm danger" onclick="delDnsMapping(${m.id})">删除</button></td></tr>`).join('') + '</tbody></table>'
+: '<div class="empty">还没有映射。添加后，该实例换 IP 会自动更新 A 记录。</div>';
+}
+
+async function delDnsMapping(id) {
+if (!confirm('确定删除这条 DNS 映射吗？')) return;
+try {
+await api('DELETE', `/api/dns-mappings/${id}`);
+toast('映射已删除');
+renderDnsMappingList(instances);
+} catch (e) { toast(e.message, true); }
 }
 
 init();

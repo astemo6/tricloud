@@ -1,11 +1,15 @@
 """AWS provider：EC2 实例管理（boto3）。"""
+import ipaddress
 import logging
 import time
 
 import boto3
 from botocore.exceptions import ClientError
 
-from .base import AccountField, InstanceInfo, Provider
+from .. import cf
+from .base import (AccountField, InstanceInfo, IP_CHANGE_MAX_ATTEMPTS,
+                    Provider, ip_in_spec, parse_cidr_spec, proxy_settings,
+                    spec_desc)
 
 log = logging.getLogger(__name__)
 
@@ -24,13 +28,19 @@ INSTANCE_TYPES = [
 ]
 
 
-def _client(creds: dict, service="ec2"):
-    return boto3.client(
-        service,
+def _client(creds: dict, service="ec2", region=None):
+    """创建 AWS 客户端。账号配置了代理时走 botocore 原生
+    Config(proxies=...) 代理；未配置则直连。"""
+    kwargs = dict(
         aws_access_key_id=creds["access_key"].strip(),
         aws_secret_access_key=creds["secret_key"].strip(),
-        region_name=creds["region"].strip(),
+        region_name=(region or creds["region"]).strip(),
     )
+    proxies = proxy_settings(creds)
+    if proxies:
+        from botocore.config import Config
+        kwargs["config"] = Config(proxies=proxies)
+    return boto3.client(service, **kwargs)
 
 
 def _name_of(tags) -> str:
@@ -58,6 +68,7 @@ class AwsProvider(Provider):
         {"key": "reboot", "label": "重启"},
         {"key": "terminate", "label": "终止", "danger": True},
         {"key": "change_ip", "label": "更换公网 IP"},
+        {"key": "check_ip", "label": "检测 IP 连通性"},
         {"key": "rename", "label": "改名"},
         {"key": "extend_disk", "label": "磁盘扩容"},
         {"key": "open_port", "label": "开放端口"},
@@ -118,7 +129,10 @@ class AwsProvider(Provider):
             ec2.terminate_instances(InstanceIds=[iid])
             return "实例终止请求已提交"
         if action == "change_ip":
-            return self._change_ip(ec2, iid, ctx)
+            return self._change_ip(ec2, iid, ctx,
+                                   cidr=(getattr(ctx, "params", {}) or {}).get("cidr"))
+        if action == "check_ip":
+            return self._check_ip(inst, ctx)
         if action == "rename":
             new_name = (getattr(ctx, "params", {}) or {}).get("new_name", "").strip()
             if not new_name:
@@ -131,29 +145,87 @@ class AwsProvider(Provider):
             return self._open_port(ec2, iid, ctx)
         raise ValueError(f"未知操作: {action}")
 
-    def _change_ip(self, ec2, iid: str, ctx) -> str:
+    def _change_ip(self, ec2, iid: str, ctx,
+                   cidr: str | None = None) -> str:
         desc = ec2.describe_instances(InstanceIds=[iid])["Reservations"][0]["Instances"][0]
         private_ip = desc.get("PrivateIpAddress")
         addrs = ec2.describe_addresses(
             Filters=[{"Name": "private-ip-address", "Values": [private_ip]}]
         )["Addresses"] if private_ip else []
         eip = next((a for a in addrs if a.get("InstanceId") == iid), None)
+        spec = parse_cidr_spec(cidr)
         if eip:
-            ctx.log(f"解绑并释放弹性 IP {eip['PublicIp']}…")
-            ec2.disassociate_address(AssociationId=eip["AssociationId"])
-            ec2.release_address(AllocationId=eip["AllocationId"])
-            new = ec2.allocate_address(Domain="vpc")
-            ec2.associate_address(InstanceId=iid, AllocationId=new["AllocationId"])
-            return f"已更换弹性 IP，新 IP: {new['PublicIp']}"
+            return self._change_eip(ec2, iid, eip, spec, ctx)
         # 无弹性 IP：停机再开机换临时公网 IP
         ctx.log("实例使用临时公网 IP，将通过停止→启动来更换（约需 1-2 分钟）…")
-        ec2.stop_instances(InstanceIds=[iid])
-        ec2.get_waiter("instance_stopped").wait(InstanceIds=[iid])
-        ec2.start_instances(InstanceIds=[iid])
-        ec2.get_waiter("instance_running").wait(InstanceIds=[iid])
-        time.sleep(5)
-        desc = ec2.describe_instances(InstanceIds=[iid])["Reservations"][0]["Instances"][0]
-        return f"已通过重启更换公网 IP，新 IP: {desc.get('PublicIpAddress', '未知')}"
+        for attempt in range(1, IP_CHANGE_MAX_ATTEMPTS + 1):
+            ec2.stop_instances(InstanceIds=[iid])
+            ec2.get_waiter("instance_stopped").wait(InstanceIds=[iid])
+            ec2.start_instances(InstanceIds=[iid])
+            ec2.get_waiter("instance_running").wait(InstanceIds=[iid])
+            time.sleep(5)
+            desc = ec2.describe_instances(InstanceIds=[iid])["Reservations"][0]["Instances"][0]
+            new_ip = desc.get("PublicIpAddress") or ""
+            if ip_in_spec(new_ip, spec):
+                # 换 IP 成功后联动更新 Cloudflare A 记录（失败只记日志）
+                cf.sync_dns(ctx, iid, new_ip)
+                return f"已通过重启更换公网 IP，新 IP: {new_ip}"
+            ctx.log(f"第 {attempt}/{IP_CHANGE_MAX_ATTEMPTS} 次换得公网 IP "
+                    f"{new_ip or '（空）'}，不符合要求（{spec_desc(spec)}），" +
+                    "重新停止→启动…")
+        raise ValueError(
+            f"已尝试 {IP_CHANGE_MAX_ATTEMPTS} 次，未能换到符合要求的公网 IP"
+            f"（要求：{spec_desc(spec)}；临时公网 IP 无法指定网段，建议改用弹性 IP）")
+
+    def _change_eip(self, ec2, iid: str, eip: dict, spec, ctx) -> str:
+        """弹性 IP 换 IP：释放旧 EIP 后从池中分配新的，直到符合网段要求。"""
+        old_ip = eip["PublicIp"]
+        old_assoc, old_alloc = eip["AssociationId"], eip["AllocationId"]
+        for attempt in range(1, IP_CHANGE_MAX_ATTEMPTS + 1):
+            # 优先从账号已有弹性 IP 池（DescribeAddresses）找符合网段且未绑定的
+            candidate = self._find_pool_eip(ec2, spec)
+            from_pool = candidate is not None
+            if not candidate:
+                candidate = ec2.allocate_address(Domain="vpc")
+            new_ip = candidate["PublicIp"]
+            if ip_in_spec(new_ip, spec):
+                ctx.log(f"解绑并释放弹性 IP {old_ip}…")
+                ec2.disassociate_address(AssociationId=old_assoc)
+                ec2.release_address(AllocationId=old_alloc)
+                ec2.associate_address(InstanceId=iid,
+                                      AllocationId=candidate["AllocationId"])
+                # 换 IP 成功后联动更新 Cloudflare A 记录（失败只记日志）
+                cf.sync_dns(ctx, iid, new_ip)
+                return f"已更换弹性 IP，新 IP: {new_ip}"
+            ctx.log(f"第 {attempt}/{IP_CHANGE_MAX_ATTEMPTS} 次换得弹性 IP "
+                    f"{new_ip}，不符合要求（{spec_desc(spec)}），重新分配…")
+            if not from_pool:
+                ec2.release_address(AllocationId=candidate["AllocationId"])
+        raise ValueError(
+            f"已尝试 {IP_CHANGE_MAX_ATTEMPTS} 次，未能换到符合要求的弹性 IP"
+            f"（要求：{spec_desc(spec)}）")
+
+    def _find_pool_eip(self, ec2, spec) -> dict | None:
+        """从账号已有弹性 IP 池中找符合目标网段（非排除）且未绑定的 EIP。"""
+        if spec is None or spec[0]:
+            return None
+        net = spec[1]
+        try:
+            addrs = ec2.describe_addresses()["Addresses"]
+        except ClientError:
+            return None
+        for a in addrs:
+            if a.get("Domain") != "vpc":
+                continue
+            if (a.get("InstanceId") or a.get("AssociationId")
+                    or a.get("NetworkInterfaceId")):
+                continue
+            try:
+                if ipaddress.ip_address(a["PublicIp"]) in net:
+                    return a
+            except (KeyError, ValueError):
+                continue
+        return None
 
     def get_billing(self, creds: dict) -> dict:
         """AWS 账单：Cost Explorer 按服务汇总当月费用。
@@ -161,12 +233,7 @@ class AwsProvider(Provider):
         Cost Explorer 是全局服务，走 us-east-1 endpoint。
         """
         import datetime
-        ce = boto3.client(
-            "ce",
-            aws_access_key_id=creds["access_key"].strip(),
-            aws_secret_access_key=creds["secret_key"].strip(),
-            region_name="us-east-1",
-        )
+        ce = _client(creds, "ce", "us-east-1")
         today = datetime.date.today()
         start = today.replace(day=1).isoformat()
         try:
@@ -211,11 +278,9 @@ class AwsProvider(Provider):
         try:
             ak = creds["access_key"].strip()
             sk = creds["secret_key"].strip()
-            sts = boto3.client("sts", aws_access_key_id=ak,
-                               aws_secret_access_key=sk, region_name="us-east-1")
+            sts = _client(creds, "sts", "us-east-1")
             account_id = sts.get_caller_identity()["Account"]
-            billing = boto3.client("billing", aws_access_key_id=ak,
-                                   aws_secret_access_key=sk, region_name="us-east-1")
+            billing = _client(creds, "billing", "us-east-1")
             start_dt = datetime.datetime.now() - datetime.timedelta(days=365)
             kwargs: dict = {"accountId": account_id, "startDate": start_dt}
             while True:
@@ -256,12 +321,7 @@ class AwsProvider(Provider):
 
     def get_credit_applied(self, creds: dict, start: str, end: str) -> float:
         """指定周期 [start, end) 内 credit 抵扣总额（正数）。start/end 为 YYYY-MM-DD。"""
-        ce = boto3.client(
-            "ce",
-            aws_access_key_id=creds["access_key"].strip(),
-            aws_secret_access_key=creds["secret_key"].strip(),
-            region_name="us-east-1",
-        )
+        ce = _client(creds, "ce", "us-east-1")
         resp = ce.get_cost_and_usage(
             TimePeriod={"Start": start, "End": end},
             Granularity="MONTHLY",
@@ -282,12 +342,7 @@ class AwsProvider(Provider):
     ]
 
     def _ls_client(self, creds: dict, region: str):
-        return boto3.client(
-            "lightsail",
-            aws_access_key_id=creds["access_key"].strip(),
-            aws_secret_access_key=creds["secret_key"].strip(),
-            region_name=region,
-        )
+        return _client(creds, "lightsail", region)
 
     def list_lightsail(self, creds: dict, region: str = "") -> list[dict]:
         """列出 Lightsail 实例。region 为空时并行扫所有 Lightsail 区域。"""
@@ -465,12 +520,7 @@ class AwsProvider(Provider):
 
     # ---------- CloudFront ----------
     def _cf_client(self, creds: dict):
-        return boto3.client(
-            "cloudfront",
-            aws_access_key_id=creds["access_key"].strip(),
-            aws_secret_access_key=creds["secret_key"].strip(),
-            region_name="us-east-1",  # CloudFront 是全局服务
-        )
+        return _client(creds, "cloudfront", "us-east-1")  # CloudFront 是全局服务
 
     def delete_distribution(self, creds: dict, dist_id: str) -> str:
         """删除分发：必须先停用且部署完成（Deployed）才能删。"""
@@ -488,12 +538,7 @@ class AwsProvider(Provider):
         return f"分发 {dist_id} 已删除"
 
     def _ppm_client(self, creds: dict):
-        return boto3.client(
-            "pricing-plan-manager",
-            aws_access_key_id=creds["access_key"].strip(),
-            aws_secret_access_key=creds["secret_key"].strip(),
-            region_name="us-east-1",
-        )
+        return _client(creds, "pricing-plan-manager", "us-east-1")
 
     def get_cf_plans(self, creds: dict) -> dict:
         """返回 {dist_id: plan_tier}，pay-as-you-go 的分发不在其中。"""
@@ -721,6 +766,14 @@ class AwsProvider(Provider):
                 f"域名: {d['DomainName']}\n"
                 f"状态: {d['Status']}（部署约需 15 分钟，之后生效）")
 
+    def _check_ip(self, inst: InstanceInfo, ctx) -> str:
+        """检测公网 IP 连通性：ping + TCP 端口探测（复用 ip_check.probe_ip）。"""
+        from ..ip_check import probe_ip
+        ip = inst.public_ip or ""
+        if not ip:
+            raise ValueError("该实例没有公网 IP")
+        return "\n".join(probe_ip(ip)["lines"])
+
     def _extend_disk(self, ec2, iid: str, ctx) -> str:
         size = int((getattr(ctx, "params", {}) or {}).get("size_gb") or 0)
         if size <= 0:
@@ -771,17 +824,12 @@ class AwsProvider(Provider):
         import time as _time
         ak = creds["access_key"].strip()
         sk = creds["secret_key"].strip()
-        sq = boto3.client(
-            "service-quotas", aws_access_key_id=ak, aws_secret_access_key=sk,
-            region_name=creds["region"].strip(),
-        )
+        sq = _client(creds, "service-quotas")
         items, groups = [], []
         warn = ""
         # 配额页只保留两项：Standard vCPU（全区域取最大）+ CloudFront 分发配额
         def _mk_client(rg):
-            return boto3.client(
-                "service-quotas", aws_access_key_id=ak,
-                aws_secret_access_key=sk, region_name=rg)
+            return _client(creds, "service-quotas", rg)
         try:
             # Standard 全区域掃，取最大值
             try:
@@ -820,10 +868,7 @@ class AwsProvider(Provider):
             groups.append({"title": "EC2 按需实例配额", "items": items})
         # CloudFront 分发配额：单点查询（Service Quotas 里 CloudFront 只能在 us-east-1 查）
         try:
-            sq_cf = boto3.client(
-                "service-quotas", aws_access_key_id=ak, aws_secret_access_key=sk,
-                region_name="us-east-1",
-            )
+            sq_cf = _client(creds, "service-quotas", "us-east-1")
             q = sq_cf.get_service_quota(
                 ServiceCode="cloudfront", QuotaCode="L-24B04930")["Quota"]
             groups.append({"title": "CloudFront 分发配额", "items": [{
@@ -903,12 +948,7 @@ class AwsProvider(Provider):
 
     def create_instance(self, creds: dict, params: dict, ctx) -> str:
         region = (params.get("region") or "").strip() or creds["region"].strip()
-        ec2 = boto3.client(
-            "ec2",
-            aws_access_key_id=creds["access_key"].strip(),
-            aws_secret_access_key=creds["secret_key"].strip(),
-            region_name=region,
-        )
+        ec2 = _client(creds, "ec2", region)
         ctx.log(f"目标区域: {region}")
         ami = (params.get("ami") or "").strip() or self._latest_ubuntu_ami(ec2)
         ctx.log(f"使用镜像: {ami}")

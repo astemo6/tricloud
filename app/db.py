@@ -78,6 +78,19 @@ CREATE TABLE IF NOT EXISTS recycle_bin (
     data TEXT NOT NULL,
     fetched_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS dns_mappings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    instance_id TEXT NOT NULL,
+    zone_name TEXT NOT NULL,
+    record_name TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ip_change_daily (
+    account_id INTEGER PRIMARY KEY,
+    day TEXT NOT NULL,          -- YYYY-MM-DD，跨天计数自然清零
+    count INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -103,6 +116,17 @@ def init_db() -> None:
             conn.execute("ALTER TABLE accounts ADD COLUMN cloud_created_at REAL")
         if "edu_expires_at" not in cols:
             conn.execute("ALTER TABLE accounts ADD COLUMN edu_expires_at REAL")
+        if "monitor_ip_check" not in cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN monitor_ip_check INTEGER DEFAULT 0")
+        if "auto_change_ip" not in cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN auto_change_ip INTEGER DEFAULT 0")
+        # 迁移：账号表加代理出口配置（老库升级）
+        if "proxy_url" not in cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN proxy_url TEXT DEFAULT ''")
+        if "proxy_user" not in cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN proxy_user TEXT DEFAULT ''")
+        if "proxy_pass_enc" not in cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN proxy_pass_enc BLOB")
         # account_credits 表老库升级：加 start_at（credit 生效日期）
         ccols = {r["name"] for r in conn.execute("PRAGMA table_info(account_credits)")}
         if "start_at" not in ccols:
@@ -131,10 +155,47 @@ def meta_set(key: str, value: str) -> None:
 
 
 # ---------- accounts ----------
+# ---------- 账号级代理出口 ----------
+# 代理配置独立存列（proxy_pass_enc 用 Fernet 加密），不混入 creds 加密块；
+# 读取账号时由 _merge_proxy 注入 creds，供 provider 创建客户端使用。
+_PROXY_CREDS_KEYS = ("proxy_url", "proxy_user", "proxy_pass")
+
+
+def _norm_proxy(proxy: dict | None) -> dict:
+    """归一化代理配置：{"proxy_url", "proxy_user", "proxy_pass_enc"}。"""
+    p = proxy or {}
+    url = (p.get("proxy_url") or "").strip()
+    if not url:
+        return {"proxy_url": "", "proxy_user": "", "proxy_pass_enc": None}
+    pwd = p.get("proxy_pass") or ""
+    return {
+        "proxy_url": url,
+        "proxy_user": (p.get("proxy_user") or "").strip(),
+        "proxy_pass_enc": encrypt_secret(pwd) if pwd else None,
+    }
+
+
+def _merge_proxy(acc: dict) -> None:
+    """把账号的代理配置注入 creds（仅当配置了代理；未配置时 creds 原样返回）。"""
+    url = (acc.get("proxy_url") or "").strip()
+    creds = acc.get("creds")
+    if not url or not isinstance(creds, dict):
+        return
+    creds["proxy_url"] = url
+    if acc.get("proxy_user"):
+        creds["proxy_user"] = acc["proxy_user"]
+    if acc.get("proxy_pass_enc"):
+        try:
+            creds["proxy_pass"] = decrypt_secret(acc["proxy_pass_enc"])
+        except Exception:  # noqa: BLE001 - 解密失败按无密码处理
+            pass
+
+
 def account_list(provider: str | None = None) -> list[dict]:
     with _lock, _connect() as conn:
         rows = conn.execute(
-            "SELECT id, provider, name, created_at, credit_total, cloud_created_at, edu_expires_at FROM accounts"
+            "SELECT id, provider, name, created_at, credit_total, cloud_created_at,"
+            " edu_expires_at, proxy_url, proxy_user FROM accounts"
             + (" WHERE provider=?" if provider else "")
             + " ORDER BY id",
             (provider,) if provider else (),
@@ -143,41 +204,54 @@ def account_list(provider: str | None = None) -> list[dict]:
 
 
 def account_get(account_id: int) -> dict | None:
-    """返回账号，含解密后的 creds。"""
+    """返回账号，含解密后的 creds（及注入的代理配置）。"""
     with _lock, _connect() as conn:
         row = conn.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone()
         if not row:
             return None
         d = dict(row)
         d["creds"] = json.loads(decrypt_secret(d.pop("creds_enc")))
+        _merge_proxy(d)
         return d
 
 
-def account_create(provider: str, name: str, creds: dict) -> int:
+def account_create(provider: str, name: str, creds: dict,
+                   proxy: dict | None = None) -> int:
     now = time.time()
     blob = encrypt_secret(json.dumps(creds))
+    p = _norm_proxy(proxy)
     with _lock, _connect() as conn:
         cur = conn.execute(
-            "INSERT INTO accounts(provider, name, creds_enc, created_at, updated_at)"
-            " VALUES (?,?,?,?,?)",
-            (provider, name, blob, now, now),
+            "INSERT INTO accounts(provider, name, creds_enc, proxy_url, proxy_user,"
+            " proxy_pass_enc, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (provider, name, blob, p["proxy_url"], p["proxy_user"],
+             p["proxy_pass_enc"], now, now),
         )
         return cur.lastrowid
 
 
-def account_update(account_id: int, name: str, creds: dict | None) -> bool:
+def account_update(account_id: int, name: str, creds: dict | None = None,
+                   proxy: dict | None = None) -> bool:
+    """更新账号。creds 为 None 时不改凭证；proxy 为 None 时不改代理配置
+    （传空 dict {"proxy_url": ""} 表示清除代理）。"""
+    sets = ["name=?", "updated_at=?"]
+    vals: list = [name, time.time()]
+    if creds is not None:
+        # 代理配置独立存列，防止混入 creds 加密块
+        clean = {k: v for k, v in creds.items()
+                 if k not in _PROXY_CREDS_KEYS}
+        sets.append("creds_enc=?")
+        vals.append(encrypt_secret(json.dumps(clean)))
+    if proxy is not None:
+        p = _norm_proxy(proxy)
+        sets += ["proxy_url=?", "proxy_user=?", "proxy_pass_enc=?"]
+        vals += [p["proxy_url"], p["proxy_user"], p["proxy_pass_enc"]]
     with _lock, _connect() as conn:
-        if creds is None:
-            cur = conn.execute(
-                "UPDATE accounts SET name=?, updated_at=? WHERE id=?",
-                (name, time.time(), account_id),
-            )
-        else:
-            blob = encrypt_secret(json.dumps(creds))
-            cur = conn.execute(
-                "UPDATE accounts SET name=?, creds_enc=?, updated_at=? WHERE id=?",
-                (name, blob, time.time(), account_id),
-            )
+        cur = conn.execute(
+            f"UPDATE accounts SET {', '.join(sets)} WHERE id=?",
+            (*vals, account_id),
+        )
         return cur.rowcount > 0
 
 
@@ -331,16 +405,108 @@ def traffic_rule_enabled() -> list[dict]:
     """列出所有启用的规则（含账号凭证，供后台巡检）。"""
     with _lock, _connect() as conn:
         rows = conn.execute(
-            "SELECT r.*, a.provider, a.creds_enc, a.name as account_name"
+            "SELECT r.*, a.provider, a.creds_enc, a.name as account_name,"
+            " a.proxy_url, a.proxy_user, a.proxy_pass_enc"
             " FROM traffic_rules r JOIN accounts a ON r.account_id=a.id"
             " WHERE r.enabled=1").fetchall()
         out = []
         for r in rows:
             d = dict(r)
             from .crypto import decrypt
-            d["creds"] = decrypt(d.pop("creds_enc"))
+            d["creds"] = json.loads(decrypt(d.pop("creds_enc")))
+            _merge_proxy(d)
             out.append(d)
         return out
+
+
+# ---------- Cloudflare DNS 映射 ----------
+
+def dns_mapping_list(account_id: int | None = None) -> list[dict]:
+    with _lock, _connect() as conn:
+        if account_id:
+            rows = conn.execute(
+                "SELECT * FROM dns_mappings WHERE account_id=? ORDER BY id DESC",
+                (account_id,)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM dns_mappings ORDER BY id DESC").fetchall()
+        return [dict(r) for r in rows]
+
+
+def dns_mapping_get(mapping_id: int, account_id: int | None = None) -> dict | None:
+    with _lock, _connect() as conn:
+        if account_id:
+            row = conn.execute(
+                "SELECT * FROM dns_mappings WHERE id=? AND account_id=?",
+                (mapping_id, account_id)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM dns_mappings WHERE id=?", (mapping_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def dns_mapping_add(account_id: int, instance_id: str,
+                    zone_name: str, record_name: str) -> int:
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO dns_mappings(account_id, instance_id, zone_name,"
+            " record_name, created_at) VALUES (?,?,?,?,?)",
+            (account_id, instance_id, zone_name, record_name, time.time()))
+        return cur.lastrowid
+
+
+def dns_mapping_update(mapping_id: int, account_id: int | None,
+                       fields: dict) -> bool:
+    allowed = {"instance_id", "zone_name", "record_name"}
+    sets, vals = [], []
+    for k, v in fields.items():
+        if k in allowed:
+            sets.append(f"{k}=?")
+            vals.append(v)
+    if not sets:
+        return False
+    with _lock, _connect() as conn:
+        if account_id:
+            cur = conn.execute(
+                f"UPDATE dns_mappings SET {', '.join(sets)}"
+                " WHERE id=? AND account_id=?",
+                (*vals, mapping_id, account_id))
+        else:
+            cur = conn.execute(
+                f"UPDATE dns_mappings SET {', '.join(sets)} WHERE id=?",
+                (*vals, mapping_id))
+        return cur.rowcount > 0
+
+
+def dns_mapping_delete(mapping_id: int, account_id: int | None = None) -> bool:
+    with _lock, _connect() as conn:
+        if account_id:
+            cur = conn.execute(
+                "DELETE FROM dns_mappings WHERE id=? AND account_id=?",
+                (mapping_id, account_id))
+        else:
+            cur = conn.execute(
+                "DELETE FROM dns_mappings WHERE id=?", (mapping_id,))
+        return cur.rowcount > 0
+
+
+def dns_mapping_delete_by_account(account_id: int) -> None:
+    with _lock, _connect() as conn:
+        conn.execute("DELETE FROM dns_mappings WHERE account_id=?", (account_id,))
+
+
+def dns_mappings_for_instance(account_id: int | None, instance_id: str) -> list[dict]:
+    """按实例查 DNS 映射（换 IP 联动用）。"""
+    with _lock, _connect() as conn:
+        if account_id:
+            rows = conn.execute(
+                "SELECT * FROM dns_mappings WHERE account_id=? AND instance_id=?",
+                (account_id, instance_id)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM dns_mappings WHERE instance_id=?",
+                (instance_id,)).fetchall()
+        return [dict(r) for r in rows]
 
 
 # ---------- 回收站 ----------
@@ -382,6 +548,7 @@ def account_list_monitored() -> list[dict]:
         for r in rows:
             d = dict(r)
             d["creds"] = json.loads(decrypt_secret(d.pop("creds_enc")))
+            _merge_proxy(d)
             out.append(d)
         return out
 
@@ -392,6 +559,65 @@ def account_set_monitor(account_id: int, alert: bool, restart: bool) -> None:
             "UPDATE accounts SET monitor_alert=?, monitor_restart=?, updated_at=? WHERE id=?",
             (1 if alert else 0, 1 if restart else 0, time.time(), account_id),
         )
+
+
+# ---------- IP 连通性检测 / 不通自动换 IP ----------
+AUTO_CHANGE_IP_DAILY_LIMIT = 3  # 每个账号每天最多自动换 IP 次数
+
+
+def account_set_ip_check(account_id: int, ip_check: bool,
+                         auto_change: bool) -> None:
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE accounts SET monitor_ip_check=?, auto_change_ip=?,"
+            " updated_at=? WHERE id=?",
+            (1 if ip_check else 0, 1 if auto_change else 0,
+             time.time(), account_id),
+        )
+
+
+def account_list_ip_checked() -> list[dict]:
+    """列出开启了 IP 连通性检测的账号（含解密凭证）。"""
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM accounts WHERE monitor_ip_check=1").fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["creds"] = json.loads(decrypt_secret(d.pop("creds_enc")))
+            _merge_proxy(d)
+            out.append(d)
+        return out
+
+
+def ip_change_daily_count(account_id: int, day: str) -> int:
+    """当日自动换 IP 次数（day 为 YYYY-MM-DD）。"""
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT count FROM ip_change_daily WHERE account_id=? AND day=?",
+            (account_id, day)).fetchone()
+        return int(row["count"]) if row else 0
+
+
+def ip_change_daily_inc(account_id: int, day: str) -> int:
+    """当日计数 +1 并返回自增后的值；day 变化（跨天）时自动清零。"""
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT day, count FROM ip_change_daily WHERE account_id=?",
+            (account_id,)).fetchone()
+        if row and row["day"] == day:
+            new = int(row["count"]) + 1
+            conn.execute(
+                "UPDATE ip_change_daily SET count=? WHERE account_id=?",
+                (new, account_id))
+        else:
+            new = 1
+            conn.execute(
+                "INSERT INTO ip_change_daily(account_id, day, count)"
+                " VALUES (?,?,1)"
+                " ON CONFLICT(account_id) DO UPDATE SET day=?, count=1",
+                (account_id, day, day))
+        return new
 
 
 # ---------- sessions ----------

@@ -25,7 +25,7 @@ class MainActivity : Activity() {
 
     companion object {
         const val KEY_URL = "server_url"
-        const val DEFAULT_URL = "https://panel.6668800.xyz"
+        const val DEFAULT_URL = "https://your-panel.example.com"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

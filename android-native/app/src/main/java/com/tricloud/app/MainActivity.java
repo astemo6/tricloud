@@ -32,7 +32,7 @@ public class MainActivity extends Activity {
         Button btnLogin = findViewById(R.id.btnLogin);
         TextView tvError = findViewById(R.id.tvError);
 
-        etServer.setText(prefs.getString("server_url", "https://panel.6668800.xyz"));
+        etServer.setText(prefs.getString("server_url", "https://your-panel.example.com"));
 
         btnLogin.setOnClickListener(v -> {
             String server = etServer.getText().toString().trim().replaceAll("/+$", "");

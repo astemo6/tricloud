@@ -29,7 +29,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="服务器地址"
-        android:text="https://panel.6668800.xyz"
+        android:text="https://your-panel.example.com"
         android:inputType="textUri"
         android:textColor="#e6e9f0"
         android:textColorHint="#5a6480"

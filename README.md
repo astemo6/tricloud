@@ -41,7 +41,7 @@ git clone https://github.com/<你的用户名>/tricloud.git
 cd tricloud
 
 # 1. 设置面板登录密码（只在首次启动时用于初始化，之后在面板内修改）
-echo "PANEL_PASSWORD=换成你自己的强密码" > .env
+cp .env.example .env   # 按需修改 PANEL_PASSWORD
 chmod 600 .env
 
 # 2. 启动（默认只监听本机 127.0.0.1:18711，不直接暴露公网）

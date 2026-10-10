@@ -23,7 +23,7 @@ import android.widget.Toast;
 public class MainActivity extends Activity {
 
     private static final String KEY_URL = "server_url";
-    private static final String DEFAULT_URL = "https://panel.6668800.xyz";
+    private static final String DEFAULT_URL = "https://your-panel.example.com";
 
     private WebView webView;
     private ProgressBar progress;

@@ -286,6 +286,26 @@ toast('已删除'); loadSecurityRules();
 } catch (e) { toast(e.message, true);}
 }
 
+// 批量端口解析：按行 + 逗号拆分，trim，空行跳过；每项须匹配 ^\d{1,5}(-\d{1,5})?$，端口 1-65535，范围起<=止
+function parseBatchPorts(input) {
+const items = [], errors = [];
+for (const line of String(input || '').split('\n')) {
+for (const tok of line.split(',')) {
+const t = tok.trim();
+if (!t) continue;
+if (!/^\d{1,5}(-\d{1,5})?$/.test(t)) { errors.push(`「${t}」格式无效（应为 80 或 8000-8100）`); continue;}
+const [loS, hiS] = t.split('-');
+const lo = parseInt(loS, 10);
+const hi = hiS != null? parseInt(hiS, 10): lo;
+if (lo < 1 || lo > 65535 || hi < 1 || hi > 65535) { errors.push(`「${t}」端口超出 1-65535`); continue;}
+if (hi < lo) { errors.push(`「${t}」范围起始大于结束`); continue;}
+items.push({port_min: lo, port_max: hi, label: hi > lo? `${lo}-${hi}`: `${lo}`});
+}
+}
+if (!items.length && !errors.length) errors.push('未填写任何端口');
+return {items, errors};
+}
+
 function openSecRuleModal() {
 const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>添加安全规则 · 实例 <span class="mono" style="font-size:13px">${esc(secInstId.slice(-12))}</span></h2>
@@ -293,22 +313,44 @@ box.innerHTML = `<h2>添加安全规则 · 实例 <span class="mono" style="font
 ${row({key: 'direction', label: '方向', type: 'select', options: ['ingress', 'egress'], value: 'ingress'},
 {key: 'protocol', label: '协议', type: 'select', options: ['tcp', 'udp', 'icmp', 'all'], value: 'tcp'})}
 ${formField({key: 'source', label: '来源 CIDR（出向规则为目标 CIDR）', required: true, placeholder: '如 0.0.0.0/0'})}
+<div class="field"><label>端口输入方式</label>
+<select id="secPortMode">
+<option value="single" selected>单端口（起始/结束端口）</option>
+<option value="batch">批量端口（每行一个或逗号分隔）</option>
+</select></div>
+<div id="secSinglePorts">
 ${row({key: 'port_min', label: '起始端口', type: 'number', placeholder: '如 80'},
 {key: 'port_max', label: '结束端口', type: 'number', placeholder: '如 80'})}
+</div>
+<div id="secBatchPorts" style="display:none">
+${formField({key: 'ports_batch', label: '批量端口', type: 'textarea', placeholder: '如 80\n443\n8000-8100',
+help: '每行一个或逗号分隔；支持单个端口（80）、范围（8000-8100）或混合（80,443,8000-8100）'})}
+</div>
 ${formField({key: 'description', label: '描述（可选）', placeholder: '如 开放web端口'})}
 <div class="help" style="color:var(--muted);margin-bottom:6px">入向规则控制谁能访问实例；来源 0.0.0.0/0 表示对公网开放。TCP/UDP 需填端口范围，ICMP/ALL 不需要。</div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
-<button type="submit" class="btn primary">添加</button>
+<button type="submit" class="btn primary" id="secRuleSubmit">添加</button>
 </div></form>`;
 document.getElementById('modalMask').classList.add('show');
 const form = document.getElementById('secRuleForm');
+const modeSel = document.getElementById('secPortMode');
+const singleBox = document.getElementById('secSinglePorts');
+const batchBox = document.getElementById('secBatchPorts');
+const batchTa = batchBox.querySelector('textarea');
+batchTa.classList.add('code');
+const submitBtn = document.getElementById('secRuleSubmit');
 const togglePorts = () => {
 const dis = form.querySelector('[name="protocol"]').value === 'icmp'
 || form.querySelector('[name="protocol"]').value === 'all';
 form.querySelector('[name="port_min"]').disabled = dis;
 form.querySelector('[name="port_max"]').disabled = dis;
+batchTa.disabled = dis;
+const isBatch = modeSel.value === 'batch';
+singleBox.style.display = isBatch? 'none': '';
+batchBox.style.display = isBatch? '': 'none';
 };
+modeSel.onchange = togglePorts;
 form.querySelector('[name="protocol"]').onchange = togglePorts;
 togglePorts();
 form.onsubmit = async e => {
@@ -319,26 +361,63 @@ const rule = {
 direction: fd.get('direction'),
 protocol,
 source: (fd.get('source') || '').trim(),
-port_min: (protocol === 'tcp' || protocol === 'udp')? (parseInt(fd.get('port_min'), 10) || null): null,
-port_max: (protocol === 'tcp' || protocol === 'udp')? (parseInt(fd.get('port_max'), 10) || null): null,
 description: (fd.get('description') || '').trim(),
 };
 if (!rule.source) { toast('请填写来源 CIDR', true); return;}
+const isBatch = modeSel.value === 'batch';
+// 端口项：批量模式逐个解析；单端口模式沿用原有取数逻辑
+let items;
+if (isBatch) {
+if (protocol === 'tcp' || protocol === 'udp') {
+const parsed = parseBatchPorts(fd.get('ports_batch'));
+if (parsed.errors.length) { toast('批量端口有误，未提交：\n' + parsed.errors.join('\n'), true); return;}
+items = parsed.items;
+} else {
+items = [{port_min: null, port_max: null}];  // ICMP/ALL 无端口（输入框已禁用），按一条规则处理
+}
+} else {
+rule.port_min = (protocol === 'tcp' || protocol === 'udp')? (parseInt(fd.get('port_min'), 10) || null): null;
+rule.port_max = (protocol === 'tcp' || protocol === 'udp')? (parseInt(fd.get('port_max'), 10) || null): null;
 if ((protocol === 'tcp' || protocol === 'udp') && (rule.port_min == null || rule.port_max == null)) {
 toast('请填写端口范围', true); return;}
-// 放行全部端口：必须两次确认
+items = [rule];
+}
+// 放行全部端口：必须两次确认（批量中如含 1-65535 全范围同样生效）
 const isAllPorts = protocol === 'all'
-|| (rule.port_min === 1 && rule.port_max === 65535);
+|| items.some(it => it.port_min === 1 && it.port_max === 65535);
 if (isAllPorts) {
 if (!confirm('⚠️ 风险提示：即将放行全部端口（1-65535），实例将对公网完全暴露，存在被攻击/挖矿等严重安全风险。\n确定要继续吗？')) return;
 const ans = prompt('再次确认：请输入 YES 以放行全部端口');
 if (ans === null) return;
 if (ans.trim().toUpperCase() !== 'YES') { toast('两次确认不一致，已取消提交', true); return;}
 }
+if (!isBatch) {
 try {
 const r = await api('POST', `/api/accounts/${curAccount.id}/security-rules`, {instance_id: secInstId, rule});
 toast(r.message || '规则已添加'); closeModal(); loadSecurityRules();
 } catch (err) { toast(err.message, true);}
+return;
+}
+// 批量：方向/协议/来源/描述对所有端口共用，逐条串行调用单条添加接口
+submitBtn.disabled = true;
+let ok = 0, fail = 0, dup = 0;
+const failed = [];
+for (let i = 0; i < items.length; i++) {
+const it = items[i];
+submitBtn.textContent = `添加中… ${i + 1}/${items.length}`;
+try {
+const r = await api('POST', `/api/accounts/${curAccount.id}/security-rules`, {
+instance_id: secInstId,
+rule: {...rule, port_min: it.port_min, port_max: it.port_max},
+});
+if (String(r.message || '').includes('已存在')) dup++; else ok++;
+} catch (err) {
+fail++;
+failed.push(it.label);
+}
+}
+toast(`成功 ${ok} 条，失败 ${fail} 条，已存在 ${dup} 条` + (fail? `\n失败端口：${failed.join(', ')}`: ''), fail > 0);
+closeModal(); loadSecurityRules();
 };
 }
 

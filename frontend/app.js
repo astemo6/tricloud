@@ -49,7 +49,7 @@ try {
 } catch (e) {}
 providers = await api('GET', '/api/providers');
 const nav = document.getElementById('providerNav');
-const colors = {oci: 'var(--green)', aws: 'var(--yellow)', azure: 'var(--accent)'};
+const colors = {oci: 'var(--oci)', aws: 'var(--aws)', azure: 'var(--azure)'};
 const icons = {oci: '☁️', aws: '🟠', azure: '🔷'};
 nav.innerHTML = providers.map(p =>
 `<div class="nav-item" data-p="${p.id}" onclick="selectProvider('${p.id}')">

@@ -1260,15 +1260,32 @@ box.innerHTML = `<h2>🗑️ 回收站</h2><div class="empty">加载失败: ${es
 
 async function editAccount(id) {
 const p = curProvider;
-const cur = accounts.find(a => a.id === id) || {};
-// 重新拉取解密后的凭证需要后端支持，这里简化：只改别名，或重填全部凭证
 const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>编辑账号</h2><div class="empty">加载中…</div>`;
+let d;
+try { d = await api('GET', `/api/accounts/${id}/detail`); }
+catch (e) {
+box.innerHTML = `<h2>编辑账号</h2><div class="empty">加载失败: ${esc(e.message)}</div>`;
+return;
+}
+// 非敏感字段（如区域）回显当前值可直接改；敏感凭证不回显，占位留空
+const credFields = p.fields.map(f => {
+const v = d.creds[f.key];
+if (typeof v === 'string')
+return `<div class="field"><label>${esc(f.label)}</label>
+<input name="${f.key}" value="${esc(v)}" placeholder="${esc(f.placeholder || '')}">${f.help? `<div class="help">${esc(f.help)}</div>`: ''}</div>`;
+const input = f.field_type === 'textarea'
+? `<textarea name="${f.key}" placeholder="••••••••"></textarea>`
+: `<input name="${f.key}" type="password" autocomplete="new-password" placeholder="••••••••">`;
+return `<div class="field"><label>${esc(f.label)}</label>${input}
+<div class="help" style="color:var(--faint)">不修改请留空${v && v.set? '（已设置）': ''}</div></div>`;
+}).join('');
 box.innerHTML = `<h2>编辑账号</h2>
 <form id="accEditForm">
 <div class="field"><label>账号别名 <span class="req">*</span></label>
-<input name="name" required value="${esc(cur.name)}"></div>
-<div class="help" style="color:var(--muted);margin-bottom:14px">如需更换凭证请删除后重新添加；这里只修改别名。</div>
-${proxyFieldsHtml(cur)}
+<input name="name" required value="${esc(d.name)}"></div>
+${credFields}
+${proxyFieldsHtml(d)}
 <div class="modal-actions">
 <button type="button" class="btn" onclick="openAccountModal()">返回</button>
 <button type="submit" class="btn primary">保存</button>
@@ -1277,12 +1294,23 @@ ${proxyFieldsHtml(cur)}
 document.getElementById('accEditForm').onsubmit = async e => {
 e.preventDefault();
 const fd = new FormData(e.target);
-const body = {name: fd.get('name').trim()};
+const body = {name: (fd.get('name') || '').trim()};
+// 凭证：只提交用户实际填了的字段（敏感字段留空 = 不修改）
+const creds = {};
+p.fields.forEach(f => {
+const v = (fd.get(f.key) || '').trim();
+if (typeof d.creds[f.key] === 'string') {  // 非敏感：改动才提交
+if (v !== d.creds[f.key]) creds[f.key] = v;
+} else if (v) {  // 敏感：填了才提交
+creds[f.key] = v;
+}
+});
+if (Object.keys(creds).length) body.creds = creds;
 // 代理区未改动（URL/用户名与已存一致且密码留空）时不提交，保持原配置（含已存密码）
 const purl = (fd.get('proxy_url') || '').trim();
 const puser = (fd.get('proxy_user') || '').trim();
 const ppass = fd.get('proxy_pass') || '';
-if (purl !== (cur.proxy_url || '') || puser !== (cur.proxy_user || '') || ppass) {
+if (purl !== (d.proxy_url || '') || puser !== (d.proxy_user || '') || ppass) {
 body.proxy_url = purl;
 body.proxy_user = puser;
 body.proxy_pass = ppass;

@@ -332,12 +332,18 @@ class AccountBody(BaseModel):
 
 
 class AccountUpdateBody(BaseModel):
-    name: str
+    # 部分更新：未提交的字段保持原值
+    name: str | None = None
     creds: dict | None = None
     # None = 未提交（保持原代理配置不变）；"" = 清除代理
     proxy_url: str | None = None
     proxy_user: str | None = None
     proxy_pass: str | None = None
+
+
+# 凭证中的非敏感字段：detail 接口回显明文、更新时提交即改（空值拒绝）；
+# 其余凭证字段一律视为敏感（不回显明文、留空不更新）
+_NON_SENSITIVE_CREDS = ("region",)
 
 
 def _proxy_of(body) -> dict | None:
@@ -352,16 +358,25 @@ def _proxy_of(body) -> dict | None:
     }
 
 
-def _proxy_update_of(body: AccountUpdateBody) -> dict | None:
-    """编辑账号时的代理配置：未提交返回 None（不变），空 URL 返回 {}（清除）。"""
+def _proxy_update_of(body: AccountUpdateBody, acc: dict) -> dict | None:
+    """编辑账号时的代理配置：都未提交返回 None（不变）；
+    否则以现有配置为基础合并提交值（proxy_pass 留空保持原值）。"""
     if (body.proxy_url is None and body.proxy_user is None
             and body.proxy_pass is None):
         return None
-    return {
-        "proxy_url": (body.proxy_url or "").strip(),
-        "proxy_user": (body.proxy_user or "").strip(),
-        "proxy_pass": body.proxy_pass or "",
-    }
+    old_creds = acc.get("creds") or {}
+    url = (acc.get("proxy_url") or "").strip()
+    user = (acc.get("proxy_user") or "").strip()
+    pwd = old_creds.get("proxy_pass") or ""
+    if body.proxy_url is not None:
+        url = (body.proxy_url or "").strip()
+    if body.proxy_user is not None:
+        user = (body.proxy_user or "").strip()
+    if body.proxy_pass:  # 敏感字段：仅非空新值更新
+        pwd = body.proxy_pass
+    if not url:
+        return {"proxy_url": "", "proxy_user": "", "proxy_pass": ""}
+    return {"proxy_url": url, "proxy_user": user, "proxy_pass": pwd}
 
 
 @app.get("/api/accounts")
@@ -550,24 +565,78 @@ def list_recycle_bin(request: Request):
     return {"items": db.recycle_list(), "stats": db.recycle_stats()}
 
 
+@app.get("/api/accounts/{account_id}/detail")
+def account_detail(request: Request, account_id: int):
+    """账号编辑回显：非敏感字段明文返回，敏感凭证只标记是否已设置。"""
+    _require_login(request)
+    acc = db.account_get(account_id)
+    if not acc:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    creds = acc.get("creds") or {}
+    creds_out = {}
+    for f in get_provider(acc["provider"]).fields:
+        if f.key in _NON_SENSITIVE_CREDS:
+            creds_out[f.key] = creds.get(f.key) or ""
+        else:
+            creds_out[f.key] = {"set": bool(creds.get(f.key))}
+    return {
+        "id": acc["id"],
+        "name": acc["name"],
+        "provider": acc["provider"],
+        "region": creds.get("region") or "",
+        "proxy_url": acc.get("proxy_url") or "",
+        "proxy_user": acc.get("proxy_user") or "",
+        "proxy_pass": {"set": bool(acc.get("proxy_pass_enc"))},
+        "creds": creds_out,
+    }
+
+
 @app.put("/api/accounts/{account_id}")
 def update_account(request: Request, account_id: int, body: AccountUpdateBody):
     _require_write(request)
     acc = db.account_get(account_id)
     if not acc:
         raise HTTPException(status_code=404, detail="账号不存在")
-    proxy = _proxy_update_of(body)
-    creds = body.creds if body.creds is not None else acc["creds"]
-    # 只有提交了新凭证才做连通性测试（走新代理配置，若有）
-    if body.creds is not None:
+    # 别名：未提交保持原值；提交空字符串拒绝
+    name = (body.name if body.name is not None else acc["name"]).strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="别名不能为空")
+    proxy = _proxy_update_of(body, acc)
+    # 凭证部分更新：以现有凭证为基础，只应用提交的字段
+    new_creds = None
+    if body.creds:
+        merged = {k: v for k, v in (acc.get("creds") or {}).items()
+                  if k not in db._PROXY_CREDS_KEYS}
+        changed = False
+        for k, v in body.creds.items():
+            if k in db._PROXY_CREDS_KEYS:
+                continue
+            if isinstance(v, str):
+                v = v.strip()
+            if k in _NON_SENSITIVE_CREDS:  # 非敏感：提交即更新，空值拒绝
+                if not v:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="区域不能为空" if k == "region" else f"{k} 不能为空")
+                if merged.get(k) != v:
+                    merged[k] = v
+                    changed = True
+            elif v:  # 敏感字段：仅非空新值更新，留空保持原值
+                if merged.get(k) != v:
+                    merged[k] = v
+                    changed = True
+        if changed:
+            new_creds = merged
+    # 只有凭证实际变更才做连通性测试（走新代理配置，若有）
+    if new_creds is not None:
         provider = get_provider(acc["provider"])
         try:
-            provider.test({**body.creds, **(proxy or {})})
+            provider.test({**new_creds, **(proxy or {})})
         except Exception as e:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=f"凭证校验失败: {e}") from e
-    db.account_update(account_id, body.name.strip(), body.creds, proxy=proxy)
+    db.account_update(account_id, name, new_creds, proxy=proxy)
     db.audit_add(_client_ip(request), "account_update",
-                 f"{acc['provider']} / {body.name.strip()}")
+                 f"{acc['provider']} / {name}")
     return {"ok": True}
 
 

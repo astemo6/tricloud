@@ -104,6 +104,11 @@ async function doLogin() {
       }
       location.href = '/'; return;
     }
+    if (r.status === 429) {
+      // 防爆破锁定：友好提示，而非通用密码错误
+      err.textContent = '🔒 IP 已锁定，请 15 分钟后再试';
+      return;
+    }
     const d = await r.json();
     err.textContent = d.detail || '登录失败';
   } catch (e) { err.textContent = '网络错误: ' + e.message; }

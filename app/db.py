@@ -1,4 +1,6 @@
-"""SQLite 持久层：账号（凭证加密存储）、任务、会话、元信息。"""
+"""SQLite 持久层：账号（凭证加密存储）、任务、会话、API Token、元信息。"""
+import datetime
+import hashlib
 import json
 import os
 import secrets
@@ -98,6 +100,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
     action TEXT NOT NULL,
     detail TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS login_attempts (
+    ip TEXT PRIMARY KEY,
+    fail_count INTEGER NOT NULL DEFAULT 0,
+    locked_until TEXT,               -- ISO 时间，可空；过期自动解锁
+    updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS script_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -112,6 +120,22 @@ CREATE TABLE IF NOT EXISTS instance_passwords (
     username TEXT NOT NULL DEFAULT '',
     password_enc BLOB NOT NULL,
     created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS password_vault (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id TEXT NOT NULL,
+    instance_name TEXT NOT NULL DEFAULT '',
+    account_id INTEGER,
+    password_enc BLOB NOT NULL,             -- Fernet 加密后的开机密码
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,        -- sha256 hex，绝不存明文
+    scope TEXT NOT NULL DEFAULT 'readonly', -- readonly | full
+    created_at REAL NOT NULL,
+    last_used_at REAL
 );
 """
 
@@ -678,6 +702,98 @@ def password_get(instance_id: str) -> dict | None:
             "SELECT * FROM instance_passwords WHERE instance_id=?",
             (instance_id,), ).fetchone()
         return dict(row) if row else None
+# ---------- 登录防爆破（IP 锁定） ----------
+LOGIN_MAX_FAILS = 5            # 连续失败多少次锁定
+LOGIN_LOCK_SECONDS = 15 * 60   # 锁定时长 15 分钟
+
+
+def _iso_ts(ts: float) -> str:
+    return datetime.datetime.fromtimestamp(ts).isoformat(timespec="seconds")
+
+
+def record_login_fail(ip: str) -> bool:
+    """失败次数 +1；达到阈值则锁定 15 分钟。返回本次是否刚触发锁定。"""
+    now = time.time()
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT fail_count FROM login_attempts WHERE ip=?", (ip,)).fetchone()
+        count = (int(row["fail_count"]) if row else 0) + 1
+        locked_until = None
+        just_locked = False
+        if count >= LOGIN_MAX_FAILS:
+            locked_until = _iso_ts(now + LOGIN_LOCK_SECONDS)
+            just_locked = True
+        conn.execute(
+            "INSERT INTO login_attempts(ip, fail_count, locked_until, updated_at)"
+            " VALUES (?,?,?,?)"
+            " ON CONFLICT(ip) DO UPDATE SET fail_count=excluded.fail_count,"
+            " locked_until=excluded.locked_until,"
+            " updated_at=excluded.updated_at",
+            (ip, count, locked_until, _iso_ts(now)),
+        )
+        return just_locked
+
+
+def is_ip_locked(ip: str) -> bool:
+    """locked_until 未过期返回 True；已过期则清零失败次数并返回 False。"""
+    now = time.time()
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT locked_until FROM login_attempts WHERE ip=?", (ip,)).fetchone()
+        if not row or not row["locked_until"]:
+            return False
+        try:
+            locked_ts = datetime.datetime.fromisoformat(
+                row["locked_until"]).timestamp()
+        except ValueError:
+            locked_ts = 0.0  # 坏数据按已过期处理
+        if locked_ts > now:
+            return True
+        # 锁定已过期：自动清零失败次数
+        conn.execute(
+            "UPDATE login_attempts SET fail_count=0, locked_until=NULL,"
+            " updated_at=? WHERE ip=?",
+            (_iso_ts(now), ip),
+        )
+        return False
+
+
+def record_login_ok(ip: str) -> None:
+    """登录成功：清零该 IP 的失败计数与锁定状态。"""
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE login_attempts SET fail_count=0, locked_until=NULL,"
+            " updated_at=? WHERE ip=?",
+            (_iso_ts(time.time()), ip),
+        )
+
+
+def locked_ip_list() -> list[dict]:
+    """当前仍处于锁定状态的 IP 列表（含锁定到期时间）。"""
+    now = time.time()
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT ip, fail_count, locked_until FROM login_attempts"
+            " WHERE locked_until IS NOT NULL ORDER BY locked_until DESC",
+        ).fetchall()
+        out = []
+        for r in rows:
+            try:
+                locked_ts = datetime.datetime.fromisoformat(
+                    r["locked_until"]).timestamp()
+            except ValueError:
+                continue
+            if locked_ts > now:
+                out.append({"ip": r["ip"], "fail_count": r["fail_count"],
+                            "locked_until": r["locked_until"]})
+        return out
+
+
+def unlock_ip(ip: str) -> bool:
+    """手动解锁：删除该 IP 的锁定记录。返回是否有记录被清除。"""
+    with _lock, _connect() as conn:
+        cur = conn.execute("DELETE FROM login_attempts WHERE ip=?", (ip,))
+        return cur.rowcount > 0
 
 
 # ---------- 开机脚本模板 ----------
@@ -735,6 +851,116 @@ def script_template_delete(tpl_id: int) -> bool:
     with _lock, _connect() as conn:
         cur = conn.execute("DELETE FROM script_templates WHERE id=?", (tpl_id,))
         return cur.rowcount > 0
+
+
+# ---------- 开机密码保险箱 ----------
+def vault_add(instance_id: str, instance_name: str,
+              account_id: int | None, password: str) -> int:
+    """创建实例成功后存档随机生成的 root 密码（Fernet 加密）。"""
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO password_vault(instance_id, instance_name,"
+            " account_id, password_enc, created_at)"
+            " VALUES (?,?,?,?,?)",
+            (instance_id, instance_name or "", account_id,
+             encrypt_secret(password), time.time()),
+        )
+        return cur.lastrowid
+
+
+def vault_list() -> list[dict]:
+    """列出全部记录（不含密码）。"""
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, instance_id, instance_name, account_id, created_at"
+            " FROM password_vault ORDER BY id DESC",
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def vault_get(vault_id: int) -> dict | None:
+    """取单条记录（不含密码）。"""
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT id, instance_id, instance_name, account_id, created_at"
+            " FROM password_vault WHERE id=?", (vault_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def vault_get_password(vault_id: int) -> str | None:
+    """取解密后的明文密码；记录不存在返回 None。"""
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT password_enc FROM password_vault WHERE id=?",
+            (vault_id,)).fetchone()
+        if not row:
+            return None
+        return decrypt_secret(row["password_enc"])
+
+
+def vault_delete(vault_id: int) -> bool:
+    with _lock, _connect() as conn:
+        cur = conn.execute("DELETE FROM password_vault WHERE id=?",
+                           (vault_id,))
+        return cur.rowcount > 0
+
+
+def vault_delete_by_instance(instance_id: str) -> None:
+    """实例终止时清理其密码记录。"""
+    with _lock, _connect() as conn:
+        conn.execute("DELETE FROM password_vault WHERE instance_id=?",
+                     (instance_id,))
+
+
+# ---------- API Token（只存 sha256 hash，明文仅创建时返回一次） ----------
+_TOKEN_SCOPES = ("readonly", "full")
+
+
+def token_create(name: str, scope: str = "readonly") -> tuple[int, str]:
+    """创建 API token，返回 (id, 明文 token)。库内只存 sha256 hash。"""
+    if scope not in _TOKEN_SCOPES:
+        raise ValueError("scope 只能是 readonly 或 full")
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO api_tokens(name, token_hash, scope, created_at)"
+            " VALUES (?,?,?,?)",
+            (name.strip(), token_hash, scope, time.time()),
+        )
+        return cur.lastrowid, token
+
+
+def token_list() -> list[dict]:
+    """列出全部 token（不含 hash 与明文）。"""
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, name, scope, created_at, last_used_at"
+            " FROM api_tokens ORDER BY id DESC",
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def token_delete(token_id: int) -> bool:
+    with _lock, _connect() as conn:
+        cur = conn.execute("DELETE FROM api_tokens WHERE id=?", (token_id,))
+        return cur.rowcount > 0
+
+
+def token_lookup_by_hash(token_hash: str) -> dict | None:
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM api_tokens WHERE token_hash=?",
+            (token_hash,),).fetchone()
+        return dict(row) if row else None
+
+
+def token_touch(token_id: int) -> None:
+    """更新 last_used_at（每次 Bearer 认证成功时调用）。"""
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE api_tokens SET last_used_at=? WHERE id=?",
+            (time.time(), token_id))
 
 
 # ---------- sessions ----------

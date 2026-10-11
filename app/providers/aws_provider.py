@@ -8,7 +8,7 @@ import time
 import boto3
 from botocore.exceptions import ClientError
 
-from .. import cf
+from .. import cf, db
 from .base import (AccountField, InstanceInfo, IP_CHANGE_MAX_ATTEMPTS,
                     Provider, ip_in_spec, parse_cidr_spec, proxy_settings,
                     spec_desc)
@@ -996,4 +996,12 @@ class AwsProvider(Provider):
                 f"密钥对: {key_name}")
         if key_material:
             text += f"\n私钥（仅显示一次，请妥善保存）:\n{key_material}"
+        # AWS 用密钥对登录，本身不生成 root 密码；
+        # 若调用方传了密码参数，创建成功后一并存入保险箱
+        if (params.get("password") or "").strip():
+            try:
+                db.vault_add(iid, name, params.get("_account_id"),
+                             params["password"].strip())
+            except Exception as e:  # noqa: BLE001 - 保险箱保存失败不影响创建
+                ctx.log(f"密码保险箱保存失败: {e}")
         return text

@@ -2177,4 +2177,188 @@ renderDnsMappingList(instances);
 } catch (e) { toast(e.message, true); }
 }
 
+/* ---------- 开机密码保险箱 ---------- */
+let _vaultHideTimer = null;
+
+function vaultAccName(accountId) {
+const acc = (accounts || []).find(a => a.id === accountId);
+return acc ? acc.name : ('#' + (accountId == null ? '-' : accountId));
+}
+
+async function openVaultModal() {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>🔐 密码保险箱</h2>
+<div class="help" style="color:var(--muted);margin-bottom:14px">创建实例时自动保存的 root 密码。查看需验证面板密码，明文 30 秒后自动隐藏。</div>
+<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+<button class="btn sm" onclick="openVaultModal()">刷新</button>
+</div>
+<div id="vaultList"><div class="empty">加载中…</div></div>`;
+document.getElementById('modalMask').classList.add('show');
+try {
+const list = await api('GET', '/api/password-vault');
+document.getElementById('vaultList').innerHTML = list.length ? `
+<table><thead><tr><th>实例名</th><th>账号</th><th>创建时间</th><th>操作</th></tr></thead>
+<tbody>${list.map(v => `<tr>
+<td>${esc(v.instance_name)}</td>
+<td>${esc(vaultAccName(v.account_id))}</td>
+<td class="mono">${esc(fmtTime((v.created_at || 0) * 1000))}</td>
+<td style="white-space:nowrap">
+<button class="btn sm" onclick="vaultRevealForm(${v.id}, ${JSON.stringify(v.instance_name || '')})">查看</button>
+<button class="btn sm danger" onclick="deleteVaultEntry(${v.id}, ${JSON.stringify(v.instance_name || '')})">删除</button>
+</td></tr>`).join('')}</tbody></table>`
+: '<div class="empty">暂无记录</div>';
+} catch (e) {
+document.getElementById('vaultList').innerHTML = `<div class="empty">加载失败: ${esc(e.message)}</div>`;
+}
+}
+
+function vaultRevealForm(id, name) {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>查看开机密码</h2>
+<div class="field"><label>实例</label><input value="${esc(name)}" disabled></div>
+<div class="field"><label>面板密码（验证通过后显示明文）</label>
+<input type="password" id="vaultPwd" placeholder="输入面板密码"></div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="openVaultModal()">返回</button>
+<button type="button" class="btn primary" onclick="doVaultReveal(${id})">显示密码</button>
+</div>`;
+document.getElementById('modalMask').classList.add('show');
+setTimeout(() => { const p = document.getElementById('vaultPwd'); if (p) p.focus(); }, 50);
+}
+
+async function doVaultReveal(id) {
+const pwdEl = document.getElementById('vaultPwd');
+if (!pwdEl) return;
+const pwd = pwdEl.value;
+if (!pwd) { toast('请输入面板密码', true); return; }
+try {
+const r = await api('POST', `/api/password-vault/${id}/reveal`, {password: pwd});
+if (_vaultHideTimer) { clearTimeout(_vaultHideTimer); _vaultHideTimer = null; }
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>开机密码（30 秒后自动隐藏）</h2>
+<div class="field"><label>实例</label><input value="${esc(r.instance_name)}" disabled></div>
+<div class="field"><label>密码</label>
+<div class="mono" id="vaultSecret" style="padding:9px 11px;border:1px solid var(--border2);border-radius:8px;background:var(--bg);word-break:break-all">${esc(r.password)}</div></div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="openVaultModal()">返回列表</button>
+<button type="button" class="btn" onclick="hideVaultSecret()">立即隐藏</button>
+</div>`;
+_vaultHideTimer = setTimeout(hideVaultSecret, 30000);
+} catch (e) { toast(e.message, true); }
+}
+
+function hideVaultSecret() {
+if (_vaultHideTimer) { clearTimeout(_vaultHideTimer); _vaultHideTimer = null; }
+const el = document.getElementById('vaultSecret');
+if (el) el.textContent = '（已隐藏）';
+}
+
+async function deleteVaultEntry(id, name) {
+if (!confirm(`确定删除实例「${name}」的密码记录吗？删除后无法再查看。`)) return;
+try {
+await api('DELETE', `/api/password-vault/${id}`);
+toast('密码记录已删除');
+openVaultModal();
+} catch (e) { toast(e.message, true); }
+}
+
+/* ---------- API Token 管理 ---------- */
+let _apiTokens = [];
+
+async function openApiTokensModal() {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>🔒 API Token</h2>
+<div class="help" style="color:var(--muted);margin-bottom:14px">供外部脚本 / 程序调用 API 使用。readonly 只能读取，full 可读写。请求头：Authorization: Bearer &lt;token&gt;</div>
+<form id="apiTokenForm">
+<div class="field-row">
+<div class="field"><label>名称</label><input name="name" placeholder="如 生产监控脚本" required></div>
+<div class="field"><label>权限</label><select name="scope">
+<option value="readonly">只读 readonly</option>
+<option value="full">完整 full（可读写）</option>
+</select></div>
+</div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeModal()">关闭</button>
+<button type="submit" class="btn primary">创建 Token</button>
+</div></form>
+<div id="apiTokenList" style="margin-top:18px"><div class="empty">加载中…</div></div>`;
+document.getElementById('modalMask').classList.add('show');
+document.getElementById('apiTokenForm').onsubmit = async e => {
+e.preventDefault();
+const fd = new FormData(e.target);
+try {
+const r = await api('POST', '/api/api-tokens', {
+name: (fd.get('name') || '').trim(),
+scope: fd.get('scope') || 'readonly'});
+showApiTokenSecret(r);
+} catch (err) { toast(err.message, true); }
+};
+loadApiTokens();
+}
+
+async function loadApiTokens() {
+const el = document.getElementById('apiTokenList');
+if (!el) return;
+let list = [];
+try { list = await api('GET', '/api/api-tokens'); }
+catch (e) { el.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}</div>`; return; }
+_apiTokens = list;
+el.innerHTML = list.length ? `
+<table><thead><tr><th>名称</th><th>权限</th><th>创建时间</th><th>最后使用</th><th>操作</th></tr></thead>
+<tbody>${list.map(t => `<tr>
+<td>${esc(t.name)}</td>
+<td>${t.scope === 'full'
+? '<span class="badge b-pending">full 完整</span>'
+: '<span class="badge b-success">readonly 只读</span>'}</td>
+<td class="mono">${esc(fmtTime((t.created_at || 0) * 1000))}</td>
+<td class="mono">${esc(fmtTime((t.last_used_at || 0) * 1000))}</td>
+<td><button class="btn sm danger" onclick="deleteApiToken(${t.id})">删除</button></td>
+</tr>`).join('')}</tbody></table>`
+: '<div class="empty">还没有 API Token。</div>';
+}
+
+function showApiTokenSecret(r) {
+const box = document.getElementById('modalBox');
+box.innerHTML = `<h2>🔒 API Token 已创建</h2>
+<div class="field-row">
+<div class="field"><label>名称</label><input value="${esc(r.name)}" disabled></div>
+<div class="field"><label>权限</label><input value="${esc(r.scope === 'full' ? 'full 完整' : 'readonly 只读')}" disabled></div>
+</div>
+<div class="field"><label>Token</label>
+<div class="mono" id="apiTokenSecret" style="padding:9px 11px;border:1px solid var(--border2);border-radius:8px;background:var(--bg);word-break:break-all;user-select:all">${esc(r.token)}</div>
+<div class="help" style="color:var(--yellow)">⚠️ 只显示一次，请立即复制！服务器只保存 hash，之后无法再次查看。</div></div>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="openApiTokensModal()">返回列表</button>
+<button type="button" class="btn primary" onclick="copyApiToken()">复制 Token</button>
+</div>`;
+document.getElementById('modalMask').classList.add('show');
+}
+
+async function copyApiToken() {
+const el = document.getElementById('apiTokenSecret');
+if (!el) return;
+try {
+await navigator.clipboard.writeText(el.textContent);
+toast('已复制到剪贴板');
+} catch (e) {
+const range = document.createRange();
+range.selectNodeContents(el);
+const sel = window.getSelection();
+sel.removeAllRanges();
+sel.addRange(range);
+toast('请手动复制（已全选）');
+}
+}
+
+async function deleteApiToken(id) {
+const t = _apiTokens.find(x => x.id === id);
+const name = t ? t.name : ('#' + id);
+if (!confirm(`确定删除 API Token「${name}」吗？\n删除后使用该 Token 的请求将立即失效。`)) return;
+try {
+await api('DELETE', `/api/api-tokens/${id}`);
+toast('Token 已删除');
+loadApiTokens();
+} catch (e) { toast(e.message, true); }
+}
+
 init();

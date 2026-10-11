@@ -19,7 +19,11 @@ def job_action(ctx, provider_id: str, account_id: int, inst_dict: dict, action: 
             ctx)
     ctx.log(f"执行操作: {action} / {inst.name}")
     ctx.params = params  # 需要参数的操作（改名/扩容/开端口）从这里取
-    return provider.instance_action(acc["creds"], inst, action, ctx)
+    result = provider.instance_action(acc["creds"], inst, action, ctx)
+    if action == "terminate":
+        # 实例已终止，清理保险箱里保存的开机密码
+        db.vault_delete_by_instance(inst.id)
+    return result
 
 
 def job_create(ctx, provider_id: str, account_id: int, params: dict):

@@ -11,6 +11,7 @@ document.documentElement.setAttribute('data-theme','auto');}})();
 <title>TriCloud 三合一云管理面板</title>
 <style>
   :root, :root[data-theme="dark"] {
+    --oci: #C74634; --aws: #FF9900; --azure: #0078D4;
     --bg: #0f1420; --panel: #131829; --panel2: #171d2e;
     --hover: #1b2340; --active: #24325e;
     --border: #232b45; --border2: #2a3350;
@@ -33,6 +34,7 @@ document.documentElement.setAttribute('data-theme','auto');}})();
     --pill-blue-bg: rgba(96,165,250,.20); --pill-blue-fg: #93c5fd;
   }
   :root[data-theme="light"] {
+    --oci: #C74634; --aws: #FF9900; --azure: #0078D4;
     --bg: #f2f4f9; --panel: #ffffff; --panel2: #ffffff;
     --hover: #edf0f7; --active: #dfe7fa;
     --border: #dde1ee; --border2: #c9d0e6;
@@ -56,6 +58,7 @@ document.documentElement.setAttribute('data-theme','auto');}})();
   }
   @media (prefers-color-scheme: light) {
     :root[data-theme="auto"] {
+      --oci: #C74634; --aws: #FF9900; --azure: #0078D4;
       --bg: #f2f4f9; --panel: #ffffff; --panel2: #ffffff;
       --hover: #edf0f7; --active: #dfe7fa;
       --border: #dde1ee; --border2: #c9d0e6;

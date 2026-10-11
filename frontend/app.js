@@ -100,6 +100,7 @@ switchTab(s.tab);
 
 function renderTabs() {
 const defs = [{key: 'instances', label: curProvider.id === 'aws'? 'EC2': '实例'}];
+if (curProvider.supports_snatch) defs.push({key: 'snatch', label: '自动抢机'});
 if (curProvider.supports_lightsail) defs.push({key: 'lightsail', label: 'Lightsail'});
 if (curProvider.supports_cloudfront) defs.push({key: 'cloudfront', label: 'CloudFront'});
 if (curProvider.supports_billing) defs.push({key: 'billing', label: '账单'});
@@ -110,18 +111,19 @@ if (curProvider.id === 'oci') defs.push({key: 'security', label: '安全组'});
 if (curProvider.id === 'azure') defs.push({key: 'foundry', label: 'Foundry'});
 if (curProvider.id === 'azure') defs.push({key: 'rgroups', label: '资源组'});
 if (!defs.find(d => d.key === curTab)) curTab = 'instances';
-const tabIcons = {instances: '🖥️', lightsail: '💡', cloudfront: '🌐', billing: '💰',
+const tabIcons = {instances: '🖥️', snatch: '🎯', lightsail: '💡', cloudfront: '🌐', billing: '💰',
   quotas: '📊', subscription: '📄', traffic: '🚦', security: '🛡️', foundry: '🧠', rgroups: '📁'};
 document.getElementById('tabs').innerHTML = defs.map(d =>
 `<div class="tab${d.key === curTab? ' active': ''}" onclick="switchTab('${d.key}')">${tabIcons[d.key] || ''} ${d.label}</div>`).join('');
 const isInst = curTab === 'instances';
 document.getElementById('createBtn').style.display = isInst? '': 'none';
 document.getElementById('snatchBtn').style.display =
-(isInst && curProvider.supports_snatch)? '': 'none';
+curProvider.supports_snatch? '': 'none';
 }
 
 function switchTab(key) {
 curTab = key;
+clearInterval(snatchPoll); snatchPoll = null;
 renderTabs();
 refreshCurTab();
 syncHash();
@@ -136,6 +138,7 @@ else if (curTab === 'quotas') loadQuotas();
 else if (curTab === 'subscription') loadSubscription();
 else if (curTab === 'traffic') loadTrafficRules();
 else if (curTab === 'security') loadSecurityRules();
+else if (curTab === 'snatch') loadSnatchTasks();
 else if (curTab === 'foundry') loadFoundry();
 else if (curTab === 'rgroups') loadResourceGroups();
 else loadInstances();
@@ -1309,9 +1312,10 @@ const row = (...defs) => `<div class="field-row">${defs.map(formField).join('')}
 /* ---------- 开机脚本模板 ---------- */
 let _scriptTemplates = [];  // 最近一次加载的模板列表
 
-function startupScriptFields() {
+function startupScriptFields(selId) {
+selId = selId || 'scriptTplSel';
 return `<div class="field"><label>开机脚本模板（可选）</label>
-<select id="scriptTplSel" onchange="applyScriptTemplate()"><option value="">（不使用模板，手填）</option></select>
+<select id="${selId}" class="script-tpl-sel" onchange="applyScriptTemplate('${selId}')"><option value="">（不使用模板，手填）</option></select>
 <div class="help">选择模板后填充到下方，可再手动修改；保留手填</div></div>
 ${formField({key: 'startup_script', label: '开机脚本（可选）', type: 'textarea', help: '留空则不注入'})}`;
 }
@@ -1319,20 +1323,22 @@ ${formField({key: 'startup_script', label: '开机脚本（可选）', type: 'te
 async function loadScriptTemplates() {
 try { _scriptTemplates = await api('GET', '/api/script-templates'); }
 catch (e) { _scriptTemplates = []; }
-const sel = document.getElementById('scriptTplSel');
-if (!sel) return;
+document.querySelectorAll('.script-tpl-sel').forEach(sel => {
 sel.innerHTML = '<option value="">（不使用模板，手填）</option>' +
 _scriptTemplates.map(t =>
 `<option value="${t.id}">[${t.os_type}] ${esc(t.name)}</option>`).join('');
+});
 }
 
-function applyScriptTemplate() {
-const sel = document.getElementById('scriptTplSel');
+function applyScriptTemplate(selId) {
+selId = selId || 'scriptTplSel';
+const sel = document.getElementById(selId);
 const id = sel? parseInt(sel.value, 10): 0;
 if (!id) return;
 const t = _scriptTemplates.find(x => x.id === id);
 if (!t) return;
-const ta = document.querySelector('#createForm [name="startup_script"]');
+const root = (sel && sel.closest('form')) || document;
+const ta = root.querySelector('[name="startup_script"]');
 if (ta) ta.value = t.content || '';
 }
 
@@ -1567,39 +1573,121 @@ closeModal(); toast('创建任务已提交'); toggleDrawer(true); trackJob(r.job
 };
 }
 
-async function openSnatchModal() {
-if (!curAccount) { toast('请先添加账号', true); return;}
-const opts = await api('GET', `/api/accounts/${curAccount.id}/create-options`).catch(e => { toast(e.message, true); return null;});
-if (!opts) return;
-const box = document.getElementById('modalBox');
-box.innerHTML = `<h2>自动抢机 · ${esc(curProvider.name)}</h2>
-<div class="help" style="color:var(--yellow);margin-bottom:14px">后台循环尝试创建，遇到资源不足自动按间隔重试，手动停止前不会停。请合理设置间隔，避免被限流。</div>
-<form id="snatchForm">
+/* ---------- OCI 自动抢机（标签页） ----------*/
+let snatchPoll = null;
+const SNATCH_STATUS = {queued: '排队中', running: '运行中',
+  stop_requested: '停止中', success: '成功', failed: '失败',
+  stopped: '已停止', interrupted: '已中断'};
+const SNATCH_RUNNING = ['queued', 'running', 'stop_requested'];
+
+async function loadSnatchTasks() {
+const c = document.getElementById('content');
+c.innerHTML = '<div class="empty">加载中…</div>';
+let list, opts;
+try {
+[list, opts] = await Promise.all([
+api('GET', `/api/accounts/${curAccount.id}/snatch-tasks`),
+api('GET', `/api/accounts/${curAccount.id}/create-options`)]);
+} catch (e) {
+c.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}<br><button class="btn" onclick="loadSnatchTasks()">重试</button></div>`;
+return;
+}
+const running = list.some(j => SNATCH_RUNNING.includes(j.status));
+c.innerHTML = `
+<div style="margin-bottom:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+<span style="font-size:14px;font-weight:600">抢机任务</span>
+<span style="color:var(--muted);font-size:12px">${running? '运行中的任务每 10 秒自动刷新': '手动停止前会一直循环重试'}</span>
+</div>
+${list.length? `<table><thead><tr><th>配置</th><th>状态</th><th>重试次数</th><th>创建时间</th><th>操作</th></tr></thead><tbody>` +
+list.map(j => `<tr>
+<td style="font-size:12px">${esc((j.title || '').split(' / ').slice(1).join(' · ') || j.title)}</td>
+<td><span class="badge b-${j.status}">${esc(SNATCH_STATUS[j.status] || j.status)}</span></td>
+<td>${j.retries? `第 ${j.retries} 次`: '—'}</td>
+<td class="mono">${esc(fmtTime(j.created_at * 1000))}</td>
+<td><div class="row-actions">${SNATCH_RUNNING.includes(j.status)? `<button class="btn sm danger" onclick="stopSnatchJob('${j.id}')">停止</button>`: ''}</div></td>
+</tr>`).join('') + '</tbody></table>'
+: '<div class="empty">暂无抢机任务</div>'}
+<form id="snatchNewForm" style="margin-top:22px">
+<h3 style="font-size:14px;margin-bottom:12px">新建抢机任务</h3>
+${snatchFormHTML(opts)}
+<div class="modal-actions">
+<button type="submit" class="btn primary">开始抢机</button>
+</div>
+</form>`;
+bindSnatchForm();
+loadScriptTemplates();
+// 运行中的任务每 10 秒自动刷新
+clearInterval(snatchPoll); snatchPoll = null;
+if (running) snatchPoll = setInterval(() => {
+if (curTab === 'snatch' && curAccount) loadSnatchTasks();
+}, 10000);
+}
+
+function snatchFormHTML(opts) {
+const adBoxes = (opts.availability_domains || []).map(ad =>
+`<div class="check-row"><input type="checkbox" name="ad" value="${esc(ad)}" checked><span>${esc(ad)}</span></div>`).join('')
+|| '<div class="help">暂无可用域</div>';
+return `
+<div class="field"><label>区域</label>
+<input value="${esc(opts.region || '')}" disabled></div>
+<div class="field"><label>可用域（至少选 1 个，按尝试顺序轮换）</label>
+${adBoxes}
+<div class="help">每次尝试按顺序轮换一个可用域，提高抢中概率</div></div>
 ${row({key: 'shape', label: '规格', type: 'select', options: opts.shapes, value: opts.shapes.find(s => s.includes('A1.Flex')) || opts.shapes[0]},
-{key: 'retry_interval', label: '重试间隔（秒）', type: 'number', value: '30'})}
+{key: 'retry_interval', label: '重试间隔（秒）', type: 'number', value: '60'})}
 ${row({key: 'ocpus', label: 'OCPU（仅 Flex）', type: 'number', value: '4'},
 {key: 'memory_gbs', label: '内存 GB（仅 Flex）', type: 'number', value: '24'})}
-${row({key: 'availability_domain', label: '可用域', type: 'select', options: opts.availability_domains},
-{key: 'os', label: '操作系统', type: 'select', options: opts.os_options})}
-${row({key: 'name', label: '实例名（可选）', placeholder: '留空自动生成'},
-{key: 'password', label: '密码（可选）', placeholder: '留空自动生成'})}
-${formField({key: 'ssh_key', label: 'SSH 公钥（可选）', type: 'textarea'})}
-<div class="modal-actions">
-<button type="button" class="btn" onclick="closeModal()">取消</button>
-<button type="submit" class="btn primary">开始抢机</button>
-</div></form>`;
-document.getElementById('modalMask').classList.add('show');
-document.getElementById('snatchForm').onsubmit = async e => {
+${row({key: 'os', label: '操作系统', type: 'select', options: opts.os_options},
+{key: 'boot_volume_gb', label: '引导卷 GB', type: 'number', value: '50'})}
+${row({key: 'login_user', label: '登录用户', value: 'ubuntu'},
+{key: 'name', label: '实例名（可选）', placeholder: '留空自动生成'})}
+${formField({key: 'ssh_key', label: 'SSH 公钥（可选）', type: 'textarea', help: '留空则使用账号的默认 SSH 公钥'})}
+${startupScriptFields('snatchTplSel')}
+<div class="check-row"><input type="checkbox" name="random_password" checked>
+<span>随机 root 密码（16 位强随机，创建成功后加密保存，不写入任务日志）</span></div>
+`;
+}
+
+function bindSnatchForm() {
+const form = document.getElementById('snatchNewForm');
+if (!form) return;
+form.onsubmit = async e => {
 e.preventDefault();
-const fd = new FormData(e.target), o = {};
-['shape', 'retry_interval', 'ocpus', 'memory_gbs', 'availability_domain', 'os', 'name', 'password', 'ssh_key']
-.forEach(k => o[k] = (fd.get(k) || '').trim());
-o.assign_public_ip = true;
+const fd = new FormData(form);
+const ads = [...form.querySelectorAll('input[name="ad"]:checked')].map(x => x.value);
+if (!ads.length) { toast('请至少选择一个可用域', true); return; }
+const o = {
+shape: (fd.get('shape') || '').trim(),
+availability_domains: ads,
+ocpus: (fd.get('ocpus') || '').trim(),
+memory_gbs: (fd.get('memory_gbs') || '').trim(),
+os: (fd.get('os') || '').trim(),
+boot_volume_gb: (fd.get('boot_volume_gb') || '').trim(),
+login_user: (fd.get('login_user') || '').trim() || 'ubuntu',
+name: (fd.get('name') || '').trim(),
+ssh_key: (fd.get('ssh_key') || '').trim(),
+startup_script: (fd.get('startup_script') || '').trim(),
+random_password: !!fd.get('random_password'),
+retry_interval: parseInt(fd.get('retry_interval') || '60', 10) || 60,
+assign_public_ip: true,
+};
+if (!o.shape) { toast('请选择规格', true); return; }
+if (!confirm(`确认开始抢机？\n\n规格: ${o.shape}\n可用域: ${ads.join(', ')}\n重试间隔: ${o.retry_interval} 秒\n随机 root 密码: ${o.random_password? '是（加密保存）': '否'}\n\n任务将在后台循环尝试，手动停止前不会停。`)) return;
 try {
 const r = await api('POST', `/api/accounts/${curAccount.id}/snatch`, o);
-closeModal(); toast('抢机任务已启动'); toggleDrawer(true); trackJob(r.job_id);
-} catch (err) { toast(err.message, true);}
+toast('抢机任务已启动');
+loadSnatchTasks();
+toggleDrawer(true); trackJob(r.job_id);
+} catch (err) { toast(err.message, true); }
 };
+}
+
+async function stopSnatchJob(id) {
+try {
+await api('POST', `/api/jobs/${id}/stop`);
+toast('停止请求已发送');
+loadSnatchTasks();
+} catch (e) { toast(e.message, true); }
 }
 
 /* 通用参数弹窗：改名 / 磁盘扩容 / 开放端口 */

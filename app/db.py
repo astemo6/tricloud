@@ -105,6 +105,14 @@ CREATE TABLE IF NOT EXISTS script_templates (
     content TEXT NOT NULL DEFAULT '',
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS instance_passwords (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    instance_id TEXT NOT NULL,
+    username TEXT NOT NULL DEFAULT '',
+    password_enc BLOB NOT NULL,
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -652,6 +660,26 @@ def audit_list(limit: int = 200) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+# ---------- 抢机随机密码（密码保险箱，Fernet 加密存储） ----------
+def password_save(account_id: int, instance_id: str,
+                  username: str, password_enc: bytes) -> int:
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO instance_passwords(account_id, instance_id,"
+            " username, password_enc, created_at) VALUES (?,?,?,?,?)",
+            (account_id, instance_id, username, password_enc, time.time()),
+        )
+        return cur.lastrowid
+
+
+def password_get(instance_id: str) -> dict | None:
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM instance_passwords WHERE instance_id=?",
+            (instance_id,), ).fetchone()
+        return dict(row) if row else None
+
+
 # ---------- 开机脚本模板 ----------
 _OS_TYPES = ("linux", "windows")
 
@@ -771,6 +799,23 @@ def job_list(limit: int = 100) -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def job_list_by_type(job_type: str, account_id: int | None = None,
+                     limit: int = 100) -> list[dict]:
+    """按任务类型（可加账号过滤）取任务列表，时间倒序。"""
+    with _lock, _connect() as conn:
+        if account_id is not None:
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE type=? AND account_id=?"
+                " ORDER BY created_at DESC LIMIT ?",
+                (job_type, account_id, limit)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE type=?"
+                " ORDER BY created_at DESC LIMIT ?",
+                (job_type, limit)).fetchall()
         return [dict(r) for r in rows]
 
 

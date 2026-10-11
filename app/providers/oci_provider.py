@@ -7,6 +7,8 @@ import base64
 import json
 import logging
 import random
+import re
+import string
 import time
 
 import oci
@@ -54,6 +56,9 @@ _STATUS_MAP = {
 # 安全列表规则协议映射：OCI 用数字（6=TCP, 17=UDP, 1=ICMP, all=全部）
 _PROTOCOL_TO_NUM = {"tcp": "6", "udp": "17", "icmp": "1", "all": "all"}
 _PROTOCOL_TO_NAME = {"6": "tcp", "17": "udp", "1": "icmp", "all": "all"}
+
+# 抢机随机密码符号集（避开 YAML/cloud-config 敏感字符：# " ' \\ { } [ ] | > &）
+_PW_SYMBOLS = "!@$%^*()-_=+~?"
 
 
 def _sdk_config(creds: dict) -> dict:
@@ -805,6 +810,7 @@ class OciProvider(Provider):
             except ServiceError as e:
                 log.warning("list_shapes failed: %s", e)
         return {
+            "region": creds["region"].strip(),
             "availability_domains": ad_names,
             "shapes": sorted(set(shapes)),
             "os_options": ["Canonical Ubuntu", "Oracle Linux"],
@@ -930,15 +936,51 @@ class OciProvider(Provider):
 
     def snatch_instance(self, creds: dict, params: dict, ctx) -> str:
         interval = int(params.get("retry_interval") or 30)
+        # 新参数：availability_domains（列表，按尝试顺序轮换），兼容旧单 availability_domain
+        ad_list = [str(a).strip() for a in (params.get("availability_domains") or [])
+                   if str(a).strip()]
+        # 兼容旧参数：若没传列表但有单 AD，转为单元素列表
+        if not ad_list and params.get("availability_domain"):
+            ad_list = [str(params["availability_domain"]).strip()]
+        random_pw = bool(params.get("random_password"))
         attempt = 0
-        ctx.log(f"开始抢机: {params.get('shape')}，重试间隔 {interval}s，手动停止前一直尝试")
+        ctx.log(f"开始抢机: {params.get('shape')}，重试间隔 {interval}s"
+                + (f"，可用域轮换（{'/'.join(ad_list)}）" if ad_list else "，单可用域")
+                + ("，随机 root 密码" if random_pw else "")
+                + "，手动停止前一直尝试")
         while True:
             if ctx.should_stop():
                 return "抢机任务已手动停止"
             attempt += 1
+            # 可用域轮换：按尝试顺序依次切换 AD（覆盖 params 的 availability_domain）
+            if ad_list:
+                params["availability_domain"] = ad_list[(attempt - 1) % len(ad_list)]
             try:
-                _, text = self._launch(creds, params.get("_account_id"), params, ctx)
+                if random_pw:
+                    # 16 位强随机密码：大小写+数字+符号（避开 YAML/cloud-config 敏感字符）
+                    params["password"] = "".join(random.choice(
+                        string.ascii_letters + string.digits + _PW_SYMBOLS)
+                        for _ in range(16))
+                instance_id, text = self._launch(
+                    creds, params.get("_account_id"), params, ctx)
                 ctx.log(f"第 {attempt} 次尝试成功！")
+                if random_pw:
+                    # 密码只加密入库，绝不写进任务日志/结果
+                    try:
+                        from .. import db as _db
+                        from ..crypto import encrypt_secret
+                        _db.password_save(
+                            params.get("_account_id"), instance_id,
+                            params.get("login_user") or "ubuntu",
+                            encrypt_secret(params["password"]))
+                        ctx.log("已生成随机密码并加密保存")
+                    except Exception as e:  # noqa: BLE001 - 密码入库失败不影响抢机结果
+                        log.warning("save snatch password failed: %s", e)
+                        ctx.log("随机密码加密保存失败，请尽快手动记录")
+                    text = re.sub(r"(?m)^密码: .*$",
+                                  "密码: 已加密保存（见密码保险箱）", text)
+                # 更新任务结果的重试次数，供前端展示
+                ctx.set_result(f"已重试 {attempt} 次…")
                 return f"抢机成功（第 {attempt} 次尝试）\n{text}"
             except ServiceError as e:
                 msg = f"{e.code}: {e.message}"
@@ -946,6 +988,7 @@ class OciProvider(Provider):
                         or "Out of host capacity" in str(e.message)
                         or "OutOfCapacity" in str(e.code)):
                     ctx.log(f"第 {attempt} 次尝试: 资源不足 ({e.code})，{interval}s 后重试…")
+                    ctx.set_result(f"已重试 {attempt} 次…")
                     for _ in range(interval):
                         if ctx.should_stop():
                             return "抢机任务已手动停止"

@@ -2,6 +2,7 @@
 import io
 import logging
 import os
+import re
 import sqlite3
 import time
 
@@ -653,10 +654,45 @@ def snatch_instance(request: Request, account_id: int, params: dict):
     provider = get_provider(acc["provider"])
     if not provider.supports_snatch:
         raise HTTPException(status_code=400, detail="该云厂商不支持抢机")
-    job_id = jobs.submit("snatch", acc["provider"], account_id,
-                         f"抢机 / {params.get('shape', '')}",
+    # 新参数：availability_domains（数组，按尝试顺序轮换）/ random_password
+    # 不传时保持原有单 availability_domain 行为（向后兼容）
+    ads = params.get("availability_domains")
+    if ads is not None:
+        if isinstance(ads, str):
+            ads = [ads]
+        params["availability_domains"] = [
+            str(a).strip() for a in ads if str(a).strip()]
+    params["random_password"] = bool(params.get("random_password", False))
+    # 标题携带配置摘要（shape/AD/间隔），供抢机任务列表展示
+    ad_txt = ",".join(params["availability_domains"]) \
+        if params.get("availability_domains") else (params.get("availability_domain") or "")
+    title = f"抢机 / {params.get('shape', '')}"
+    if ad_txt:
+        title += f" / AD:{ad_txt}"
+    title += f" / 间隔{params.get('retry_interval') or 30}s"
+    job_id = jobs.submit("snatch", acc["provider"], account_id, title,
                          tasks.job_snatch, acc["provider"], account_id, params)
     return {"ok": True, "job_id": job_id}
+
+
+def _snatch_retries(result: str) -> int:
+    """从抢机任务结果里解析重试/尝试次数。"""
+    m = re.search(r"已重试 (\d+) 次", result or "")
+    if m:
+        return int(m.group(1))
+    m = re.search(r"第 (\d+) 次尝试", result or "")
+    return int(m.group(1)) if m else 0
+
+
+@app.get("/api/accounts/{account_id}/snatch-tasks")
+def snatch_tasks(request: Request, account_id: int):
+    """该账号的抢机任务列表（含从 result 解析的重试次数）。"""
+    _require_login(request)
+    _get_account(account_id)
+    return [
+        {**j, "retries": _snatch_retries(j.get("result") or "")}
+        for j in db.job_list_by_type("snatch", account_id)
+    ]
 
 
 # ---------- OCI 安全列表 ----------

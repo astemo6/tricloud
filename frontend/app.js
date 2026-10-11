@@ -22,6 +22,13 @@ t.textContent = msg; t.className = 'toast show' + (isErr? ' err': '');
 clearTimeout(t._h); t._h = setTimeout(() => t.className = 'toast', 3200);
 }
 const esc = s => String(s == null? '': s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// 用量进度条：按 used/total 比例填充，<60% 绿、60-85% 橙、>85% 红
+const usageBar = (used, total) => {
+const u = total > 0? Math.min(1, Math.max(0, used / total)): 0;
+const pct = Math.round(u * 100);
+const cls = pct < 60? 'low': (pct <= 85? 'mid': 'high');
+return `<span class="meter" title="已用 ${pct}%"><span class="meter-fill ${cls}" style="width:${pct}%"></span></span>`;
+};
 const fmtTime = s => { if (!s) return '-'; const d = new Date(s); return isNaN(d)? s: d.toLocaleString('zh-CN', {hour12: false});};
 
 function setTheme(t) {
@@ -43,9 +50,10 @@ try {
 providers = await api('GET', '/api/providers');
 const nav = document.getElementById('providerNav');
 const colors = {oci: 'var(--green)', aws: 'var(--yellow)', azure: 'var(--accent)'};
+const icons = {oci: '☁️', aws: '🟠', azure: '🔷'};
 nav.innerHTML = providers.map(p =>
 `<div class="nav-item" data-p="${p.id}" onclick="selectProvider('${p.id}')">
-<span class="dot" style="background:${colors[p.id] || 'var(--muted)'}"></span>${esc(p.name)}
+<span class="dot" style="background:${colors[p.id] || 'var(--muted)'}"></span>${icons[p.id] || ''} ${esc(p.name)}
 </div>`).join('');
 const s = parseHash();
 if (s && providers.find(p => p.id === s.provider)) {
@@ -102,8 +110,10 @@ if (curProvider.id === 'oci') defs.push({key: 'security', label: '安全组'});
 if (curProvider.id === 'azure') defs.push({key: 'foundry', label: 'Foundry'});
 if (curProvider.id === 'azure') defs.push({key: 'rgroups', label: '资源组'});
 if (!defs.find(d => d.key === curTab)) curTab = 'instances';
+const tabIcons = {instances: '🖥️', lightsail: '💡', cloudfront: '🌐', billing: '💰',
+  quotas: '📊', subscription: '📄', traffic: '🚦', security: '🛡️', foundry: '🧠', rgroups: '📁'};
 document.getElementById('tabs').innerHTML = defs.map(d =>
-`<div class="tab${d.key === curTab? ' active': ''}" onclick="switchTab('${d.key}')">${d.label}</div>`).join('');
+`<div class="tab${d.key === curTab? ' active': ''}" onclick="switchTab('${d.key}')">${tabIcons[d.key] || ''} ${d.label}</div>`).join('');
 const isInst = curTab === 'instances';
 document.getElementById('createBtn').style.display = isInst? '': 'none';
 document.getElementById('snatchBtn').style.display =
@@ -435,7 +445,7 @@ return `<div style="margin:12px 0"><button class="btn sm" onclick="setEduExpires
 const color = b.edu_expired ? 'var(--red2)' : (b.edu_expiring_soon ? 'var(--yellow)' : 'var(--green)');
 const status = b.edu_expired ? '已过期' : `剩余 ${b.edu_days_left} 天`;
 const estTag = b.edu_estimated ? '（预估：按账号创建时间+12个月算）' : '';
-return `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:var(--card);border-radius:8px;flex-wrap:wrap;align-items:center">
+return `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:var(--card);border-radius:14px;box-shadow:var(--card-shadow);flex-wrap:wrap;align-items:center">
 <div><div style="color:var(--muted);font-size:12px">🎓 教育优惠到期日${estTag}</div>
 <div style="font-size:18px;color:${color}">${esc(b.edu_expires)}（${status}）</div></div>
 <div style="margin-left:auto;display:flex;gap:8px">
@@ -478,7 +488,7 @@ const apiRemain = b.credit_remaining || 0;
 const apiInit = b.credit_initial || 0;
 const manTotal = manualCredits.reduce((s, c) => s + c.initial, 0);
 const manRemain = b.manual_remaining != null? b.manual_remaining: manTotal;
-creditHtml = `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:var(--card);border-radius:8px;flex-wrap:wrap">
+creditHtml = `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:var(--card);border-radius:14px;box-shadow:var(--card-shadow);flex-wrap:wrap">
 <div><div style="color:var(--muted);font-size:12px">Credit 剩余（合计·自动更新）</div>
 <div style="font-size:18px;color:var(--green)">${money(apiRemain + manRemain)}</div></div>
 ${apiCredits.length? `<div><div style="color:var(--muted);font-size:12px">API 已用</div>
@@ -493,7 +503,7 @@ ${manualCredits.length? `<div><div style="color:var(--muted);font-size:12px">手
 <table><thead><tr><th>Credit</th><th style="width:110px">总额</th><th style="width:110px">剩余</th>
 <th style="width:120px">到期日</th><th style="width:90px">状态</th><th style="width:70px"></th></tr></thead><tbody>` +
 allCredits.map(cr => `<tr><td>${esc(cr.name)}</td><td class="mono">${money(cr.initial)}</td>
-<td class="mono" style="color:var(--green)">${money(cr.remaining)}</td>
+<td class="mono" style="color:var(--green)">${money(cr.remaining)}<br>${usageBar(cr.initial - cr.remaining, cr.initial)}</td>
 <td class="mono">${esc(cr.expires)}</td>
 <td>${esc(cr.status)}${cr.source === 'manual'? '（手动）': ''}</td>
 <td>${cr.source === 'manual'? `<button class="btn sm" onclick="editManualCredit(${cr.id})">编辑</button>
@@ -502,7 +512,7 @@ allCredits.map(cr => `<tr><td>${esc(cr.name)}</td><td class="mono">${money(cr.in
 creditHtml = `<div style="margin:12px 0"><button class="btn sm" onclick="addManualCredit()">+ 添加 Credit</button>
 <span style="color:var(--faint);font-size:12px;margin-left:8px">API 未返回 credit 明细（如教程奖励类），可手动添加</span></div>`;
 if (b.credit_used > 0) {
-creditHtml += `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:var(--card);border-radius:8px">
+creditHtml += `<div style="display:flex;gap:24px;margin:12px 0;padding:12px 16px;background:var(--card);border-radius:14px;box-shadow:var(--card-shadow)">
 <div><div style="color:var(--muted);font-size:12px">Credit 抵扣（本月）</div>
 <div style="font-size:18px;color:var(--green)">-${money(b.credit_used)}</div></div></div>`;
 }
@@ -656,7 +666,9 @@ ${FOUNDRY_REGIONS.map(r => `<option value="${r}"${r === foundryRegion? ' selecte
 ? `<div class="empty" style="color:var(--muted)">配额查询失败: ${esc(q.error)}</div>`
 : ((q.quotas || []).length
 ? `<table><thead><tr><th>配额项</th><th>已用</th><th>上限</th></tr></thead><tbody>` +
-(q.quotas || []).map(it => `<tr><td>${esc(it.name)}</td><td>${esc(String(it.used))}</td><td>${esc(String(it.limit))}</td></tr>`).join('') + '</tbody></table>'
+(q.quotas || []).map(it => `<tr><td>${esc(it.name)}</td>
+<td>${esc(String(it.used))}<br>${usageBar(Number(it.used) || 0, Number(it.limit) || 0)}</td>
+<td>${esc(String(it.limit))}</td></tr>`).join('') + '</tbody></table>'
 : '<div class="empty">该区域暂无配额数据</div>')) +
 `<h3 style="margin:18px 0 10px;font-size:14px;color:var(--text2)">部署模型</h3>
 <form id="foundryForm">
@@ -806,7 +818,7 @@ ${row({key: 'region', label: '区域', type: 'select', options: LS_REGIONS.map(l
 {key: 'zone', label: '可用区', type: 'select', options: []})}
 ${row({key: 'blueprint', label: '系统镜像', type: 'select', options: []},
 {key: 'bundle', label: '套餐', type: 'select', options: []})}
-${formField({key: 'key_pair', label: '密钥对（可选）', placeholder: '已有的 Lightsail 密钥对名，留空则不绑定'})}
+${formField({key: 'key_pair', label: '密钥对（可选）', placeholder: '已有的 Lightsail 密钥对名，留空则不绑定', help: '留空则不绑定密钥对'})}
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
 <button type="submit" class="btn primary">提交创建（后台执行）</button>
@@ -1301,7 +1313,7 @@ function startupScriptFields() {
 return `<div class="field"><label>开机脚本模板（可选）</label>
 <select id="scriptTplSel" onchange="applyScriptTemplate()"><option value="">（不使用模板，手填）</option></select>
 <div class="help">选择模板后填充到下方，可再手动修改；保留手填</div></div>
-${formField({key: 'startup_script', label: '开机脚本（可选）', type: 'textarea'})}`;
+${formField({key: 'startup_script', label: '开机脚本（可选）', type: 'textarea', help: '留空则不注入'})}`;
 }
 
 async function loadScriptTemplates() {
@@ -1408,7 +1420,7 @@ ${row({key: 'os', label: '操作系统', type: 'select', options: opts.os_option
 {key: 'boot_volume_gb', label: '引导卷 GB', type: 'number', value: '50'})}
 ${formField({key: 'ssh_key', label: 'SSH 公钥（可选）', type: 'textarea', help: '留空则使用账号的默认 SSH 公钥'})}
 ${row({key: 'login_user', label: '登录用户', value: 'ubuntu'},
-{key: 'password', label: '密码（可选）', placeholder: '留空自动生成 16 位随机密码'})}
+{key: 'password', label: '密码（可选）', placeholder: '留空自动生成 16 位随机密码', help: '留空自动生成 16 位随机密码'})}
 ${formField({key: 'assign_public_ip', label: '分配公网 IP', type: 'checkbox', value: true})}
 ${startupScriptFields()}`;
 if (p.id === 'aws') return `
@@ -1416,7 +1428,7 @@ ${formField({key: 'name', label: '实例名（Name 标签）', placeholder: '留
 ${row({key: 'region', label: '区域', type: 'select', options: opts.regions, value: opts.default_region || opts.regions[0]},
 {key: 'instance_type', label: '实例类型', type: 'select', options: opts.instance_types, value: 't2.micro'})}
 ${row({key: 'key_name', label: '密钥对', type: 'select', options: ['（自动创建新密钥对）',...(opts.key_pairs || [])]},
-{key: 'ami', label: 'AMI（可选）', placeholder: '留空自动使用最新 Ubuntu 22.04'})}
+{key: 'ami', label: 'AMI（可选）', placeholder: '留空自动使用最新 Ubuntu 22.04', help: '留空自动使用最新 Ubuntu 22.04'})}
 <div class="help" style="color:var(--muted);margin:-6px 0 14px">将在目标区域的默认 VPC 自动创建安全组（放行 SSH）。密钥对列表为账号默认区域的——若选择其他区域，将自动创建新密钥对。新密钥对的私钥只在任务结果中显示一次。</div>
 ${startupScriptFields()}`;
 if (p.id === 'azure') return `
@@ -1427,9 +1439,9 @@ ${row({key: 'location', label: '区域', type: 'select', options: opts.locations
 ${row({key: 'image', label: '镜像', type: 'select', options: opts.images},
 {key: 'disk_gb', label: '系统盘 GB', type: 'number', value: '30'})}
 ${row({key: 'admin_username', label: '管理员用户', value: 'azureuser'},
-{key: 'password', label: '密码（可选）', placeholder: '留空自动生成'})}
+{key: 'password', label: '密码（可选）', placeholder: '留空自动生成', help: '留空自动生成随机密码'})}
 ${formField({key: 'ssh_key', label: 'SSH 公钥（可选，Linux 有效）', type: 'textarea'})}
-${formField({key: 'startup_script', label: '开机脚本（可选）', type: 'textarea', help: 'cloud-init 格式（如 #cloud-config）'})}`;
+${formField({key: 'startup_script', label: '开机脚本（可选）', type: 'textarea', help: 'cloud-init 格式（如 #cloud-config），留空则不注入'})}`;
 return '';
 }
 
@@ -1625,7 +1637,7 @@ function openChangeIpModal(inst) {
 const box = document.getElementById('modalBox');
 box.innerHTML = `<h2>更换公网 IP · ${esc(inst.name)}</h2>
 <form id="changeIpForm">
-${formField({key: 'cidr', label: '目标网段（可选）', placeholder: '如 192.0.2.0/24', help: '留空则随机更换。可指定新 IP 必须落在的网段（如 192.0.2.0/24），或加 ! 前缀表示排除网段（如 !192.0.2.0/24）；换到的 IP 不符合时会自动重试，最多 5 次，用尽则任务失败。'})}
+${formField({key: 'cidr', label: '目标网段（可选）', placeholder: '如 192.0.2.0/24', help: 'CIDR 如 192.0.2.0/24，! 开头为排除，留空随机。可指定新 IP 必须落在的网段，或加 ! 前缀排除某网段；换到的 IP 不符合时会自动重试，最多 5 次，用尽则任务失败。'})}
 <div class="help" style="color:var(--yellow);margin-bottom:6px">更换公网 IP 后原 IP 会释放，确定继续吗？</div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeModal()">取消</button>
@@ -1755,7 +1767,7 @@ box.innerHTML = `<h2>设置</h2>
 ${s.tg_bot_token_set ? '当前状态：' + (s.tg_bot_running ? 'Bot 运行中 ✅' : 'Token 已保存，Bot 未运行') : '当前状态：未配置'}</div>
 <form id="tgForm">
 <div class="field"><label>Bot Token</label>
-<input name="tg_bot_token" type="password" placeholder="${s.tg_bot_token_set ? '已保存，留空不修改' : '如 123456:ABC-DEF…'}"></div>
+<input class="code" name="tg_bot_token" type="password" placeholder="${s.tg_bot_token_set ? '已保存，留空不修改' : '如 123456:ABC-DEF…'}"></div>
 <div class="field"><label>Chat ID</label>
 <input name="tg_chat_id" value="${esc(s.tg_chat_id || '')}" placeholder="如 123456789"></div>
 <h3 style="margin:18px 0 8px">Cloudflare DNS 联动</h3>
@@ -1764,7 +1776,7 @@ ${s.tg_bot_token_set ? '当前状态：' + (s.tg_bot_running ? 'Bot 运行中 �
 Token 权限：Zone:Zone:Read + Zone:DNS:Edit（创建 API Token，勾选这两个模板权限即可）。<br>
 ${s.cf_token_set ? '当前状态：已保存 ✅' : '当前状态：未配置'}</div>
 <div class="field"><label>API Token</label>
-<input name="cf_api_token" type="password" placeholder="${s.cf_token_set ? '已保存，留空不修改' : '如 6pxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}"></div>
+<input class="code" name="cf_api_token" type="password" placeholder="${s.cf_token_set ? '已保存，留空不修改' : '如 6pxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}"></div>
 <h3 style="margin:18px 0 8px">监控与每日报告</h3>
 <div class="check-row"><input type="checkbox" name="daily_report"${s.daily_report? ' checked': ''}>
 <span>每日账单报告（Telegram 推送全部账号当日费用汇总）</span></div>

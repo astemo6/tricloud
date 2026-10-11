@@ -12,7 +12,7 @@ from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.resource.resources import ResourceManagementClient
 from azure.mgmt.subscription import SubscriptionClient
 
-from .. import cf
+from .. import cf, db
 from .base import (AccountField, InstanceInfo, IP_CHANGE_MAX_ATTEMPTS,
                     Provider, ip_in_spec, parse_cidr_spec, proxy_settings,
                     spec_desc)
@@ -725,8 +725,12 @@ class AzureProvider(Provider):
             "network_profile": {"network_interfaces": [{"id": nic.id, "primary": True}]},
         }
         poller = compute.virtual_machines.begin_create_or_update(rg_name, vm_name, vm_params)
-        poller.result()
+        vm = poller.result()
         pip = network.public_ip_addresses.get(rg_name, pip_name)
+        try:
+            db.vault_add(vm.id, vm_name, params.get("_account_id"), password)
+        except Exception as e:  # noqa: BLE001 - 保险箱保存失败不影响创建
+            ctx.log(f"密码保险箱保存失败: {e}")
         text = (f"虚拟机创建成功: {vm_name}\n"
                 f"资源组: {rg_name}\n"
                 f"公网 IP: {pip.ip_address or '（分配中）'}\n"

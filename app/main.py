@@ -1,4 +1,5 @@
 """TriCloud 三合一云服务器管理面板：FastAPI 后端。"""
+import hashlib
 import io
 import logging
 import os
@@ -60,6 +61,39 @@ def _require_login(request: Request) -> None:
         raise HTTPException(status_code=401, detail="未登录")
 
 
+_WRITE_METHODS = ("POST", "PUT", "DELETE", "PATCH")
+
+
+def _auth_any(request: Request) -> None:
+    """会话优先；未登录时尝试 Authorization: Bearer <API token>。
+
+    Bearer 验证通过则把 token 的 scope 写入 request.state.token_scope
+    并刷新 last_used_at。Bearer 认证失败不在此抛 401，
+    留给后面的会话检查（_require_login）抛。
+    """
+    if db.session_valid(request.cookies.get(SESSION_COOKIE)):
+        return
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header[7:].strip()
+        if token:
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            rec = db.token_lookup_by_hash(token_hash)
+            if rec:
+                request.state.token_scope = rec["scope"]
+                db.token_touch(rec["id"])
+                return
+    _require_login(request)
+
+
+def _require_write(request: Request) -> None:
+    """写接口认证：会话或 Bearer token 均可；只读 token 禁止写操作。"""
+    _auth_any(request)
+    if (getattr(request.state, "token_scope", None) == "readonly"
+            and request.method.upper() in _WRITE_METHODS):
+        raise HTTPException(status_code=403, detail="只读 Token 禁止写操作")
+
+
 # ---------- 登录 ----------
 class LoginBody(BaseModel):
     password: str
@@ -72,9 +106,23 @@ def _client_ip(request: Request) -> str:
 @app.post("/api/login")
 def login(body: LoginBody, request: Request, response: Response):
     ip = _client_ip(request)
+    if db.is_ip_locked(ip):
+        raise HTTPException(status_code=429,
+                            detail="IP 已锁定，请 15 分钟后再试")
     if not auth.verify_password(body.password):
         db.audit_add(ip, "login_fail", "密码错误")
+        just_locked = db.record_login_fail(ip)
+        if just_locked:
+            db.audit_add(ip, "ip_locked", "连续 5 次密码错误，锁定 15 分钟")
+            # TG 推送爆破告警（未配置时 send_message 内部静默跳过）
+            tg.send_message(
+                "🚨 <b>TriCloud 登录爆破告警</b>\n"
+                f"IP：<code>{ip}</code>\n"
+                f"时间：{time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                "连续 5 次密码错误，该 IP 已锁定 15 分钟")
         raise HTTPException(status_code=403, detail="密码错误")
+    # 密码正确即算成功（含 TOTP 第一步），清零失败计数；TOTP 输错不计入
+    db.record_login_ok(ip)
     if auth.totp_enabled():
         # 两步登录第一步：密码对但启用了 TOTP，先不种 Cookie
         db.audit_add(ip, "login_totp_stage", "密码正确，等待 TOTP 验证码")
@@ -83,6 +131,23 @@ def login(body: LoginBody, request: Request, response: Response):
     response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax",
                         max_age=config.SESSION_TTL_SECONDS, path="/")
     db.audit_add(ip, "login_ok", "登录成功")
+    return {"ok": True}
+
+
+# ---------- 登录 IP 锁定管理 ----------
+@app.get("/api/locked-ips")
+def list_locked_ips(request: Request):
+    _require_login(request)
+    return {"items": db.locked_ip_list()}
+
+
+@app.delete("/api/locked-ips/{ip}")
+def unlock_locked_ip(request: Request, ip: str):
+    """手动解锁 IP（15 分钟到期也会自动解锁）。"""
+    _require_login(request)
+    if not db.unlock_ip(ip):
+        raise HTTPException(status_code=404, detail="IP 未在锁定列表中")
+    db.audit_add(_client_ip(request), "ip_unlock", f"手动解锁 IP {ip}")
     return {"ok": True}
 
 
@@ -111,13 +176,13 @@ def totp_verify(body: TotpVerifyBody, request: Request, response: Response):
 # ---------- TOTP 管理 ----------
 @app.get("/api/totp/status")
 def totp_status(request: Request):
-    _require_login(request)
+    _auth_any(request)
     return {"enabled": auth.totp_enabled()}
 
 
 @app.post("/api/totp/setup")
 def totp_setup(request: Request):
-    _require_login(request)
+    _require_write(request)
     if auth.totp_enabled():
         raise HTTPException(status_code=400, detail="TOTP 已启用，请先解绑")
     db.audit_add(_client_ip(request), "totp_setup", "生成 TOTP 密钥（待确认）")
@@ -130,7 +195,7 @@ class TotpConfirmBody(BaseModel):
 
 @app.post("/api/totp/confirm")
 def totp_confirm(request: Request, body: TotpConfirmBody):
-    _require_login(request)
+    _require_write(request)
     ip = _client_ip(request)
     if not auth.totp_confirm_enable(body.code):
         db.audit_add(ip, "totp_confirm_fail", "确认启用失败：验证码错误")
@@ -146,7 +211,7 @@ class TotpDisableBody(BaseModel):
 
 @app.post("/api/totp/disable")
 def totp_disable(request: Request, body: TotpDisableBody):
-    _require_login(request)
+    _require_write(request)
     ip = _client_ip(request)
     if not auth.verify_password(body.password):
         db.audit_add(ip, "totp_disable_fail", "解绑失败：密码错误")
@@ -162,7 +227,7 @@ def totp_disable(request: Request, body: TotpDisableBody):
 # ---------- 审计日志 ----------
 @app.get("/api/audit-log")
 def audit_log(request: Request, limit: int = 200):
-    _require_login(request)
+    _auth_any(request)
     limit = max(1, min(limit, 1000))
     return db.audit_list(limit)
 
@@ -186,7 +251,7 @@ class ChangePasswordBody(BaseModel):
 
 @app.post("/api/change-password")
 def change_password(request: Request, body: ChangePasswordBody):
-    _require_login(request)
+    _require_write(request)
     if not auth.verify_password(body.old_password):
         db.audit_add(_client_ip(request), "change_password_fail", "原密码错误")
         raise HTTPException(status_code=403, detail="原密码错误")
@@ -197,10 +262,47 @@ def change_password(request: Request, body: ChangePasswordBody):
     return {"ok": True}
 
 
+# ---------- API Token 管理（仅面板会话可管理，token 不能管理 token） ----------
+class ApiTokenCreateBody(BaseModel):
+    name: str
+    scope: str = "readonly"
+
+
+@app.get("/api/api-tokens")
+def list_api_tokens(request: Request):
+    _require_login(request)
+    return db.token_list()
+
+
+@app.post("/api/api-tokens")
+def create_api_token(request: Request, body: ApiTokenCreateBody):
+    """创建 API token：明文只在此响应中返回一次，库内只存 sha256 hash。"""
+    _require_login(request)
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Token 名称不能为空")
+    if body.scope not in ("readonly", "full"):
+        raise HTTPException(status_code=400, detail="scope 只能是 readonly 或 full")
+    token_id, plaintext = db.token_create(name, body.scope)
+    db.audit_add(_client_ip(request), "api_token_create",
+                 f"#{token_id} {name}（{body.scope}）")
+    return {"ok": True, "id": token_id, "name": name,
+            "scope": body.scope, "token": plaintext}
+
+
+@app.delete("/api/api-tokens/{token_id}")
+def delete_api_token(request: Request, token_id: int):
+    _require_login(request)
+    if not db.token_delete(token_id):
+        raise HTTPException(status_code=404, detail="Token 不存在")
+    db.audit_add(_client_ip(request), "api_token_delete", f"#{token_id}")
+    return {"ok": True}
+
+
 # ---------- 云厂商元信息 ----------
 @app.get("/api/providers")
 def providers(request: Request):
-    _require_login(request)
+    _auth_any(request)
     return [
         {
             "id": p.id, "name": p.name,
@@ -263,13 +365,13 @@ def _proxy_update_of(body: AccountUpdateBody) -> dict | None:
 
 @app.get("/api/accounts")
 def list_accounts(request: Request, provider: str = ""):
-    _require_login(request)
+    _auth_any(request)
     return db.account_list(provider or None)
 
 
 @app.post("/api/accounts")
 def create_account(request: Request, body: AccountBody):
-    _require_login(request)
+    _require_write(request)
     provider = get_provider(body.provider)
     proxy = _proxy_of(body)
     # 连通性校验走代理（若有配置）
@@ -291,7 +393,7 @@ class BatchAccountBody(BaseModel):
 
 @app.post("/api/accounts/batch")
 def create_accounts_batch(request: Request, body: BatchAccountBody):
-    _require_login(request)
+    _require_write(request)
     provider = get_provider(body.provider)
     results = []
     for item in body.accounts:
@@ -319,7 +421,7 @@ def create_accounts_batch(request: Request, body: BatchAccountBody):
 
 @app.get("/api/create-defaults/{provider}")
 def get_create_defaults(request: Request, provider: str):
-    _require_login(request)
+    _auth_any(request)
     import json as _json
     raw = db.meta_get(f"create_defaults_{provider}") or "{}"
     try:
@@ -334,7 +436,7 @@ class CreateDefaultsBody(BaseModel):
 
 @app.put("/api/create-defaults")
 def set_create_defaults(request: Request, body: CreateDefaultsBody):
-    _require_login(request)
+    _require_write(request)
     import json as _json
     get_provider(body.provider)  # 校验 provider 有效
     db.meta_set(f"create_defaults_{body.provider}", _json.dumps(body.defaults))
@@ -358,12 +460,12 @@ class TrafficRuleBody(BaseModel):
 
 @app.get("/api/traffic-rules")
 def list_traffic_rules(request: Request, account_id: int | None = None):
-    _require_login(request)
+    _auth_any(request)
     return db.traffic_rule_list(account_id)
 
 @app.post("/api/traffic-rules")
 def add_traffic_rule(request: Request, body: TrafficRuleBody):
-    _require_login(request)
+    _require_write(request)
     if body.metric not in ("in", "out", "both"):
         raise HTTPException(status_code=400, detail="metric 只能是 in/out/both")
     rid = db.traffic_rule_add(body.dict())
@@ -371,14 +473,14 @@ def add_traffic_rule(request: Request, body: TrafficRuleBody):
 
 @app.put("/api/traffic-rules/{rule_id}")
 def update_traffic_rule(request: Request, rule_id: int, body: dict):
-    _require_login(request)
+    _require_write(request)
     if not db.traffic_rule_update(rule_id, body):
         raise HTTPException(status_code=404, detail="规则不存在")
     return {"ok": True}
 
 @app.delete("/api/traffic-rules/{rule_id}")
 def delete_traffic_rule(request: Request, rule_id: int):
-    _require_login(request)
+    _require_write(request)
     db.traffic_rule_delete(rule_id)
     return {"ok": True}
 
@@ -399,7 +501,7 @@ class DnsMappingUpdateBody(BaseModel):
 
 @app.get("/api/dns-mappings")
 def list_dns_mappings(request: Request, account_id: int | None = None):
-    _require_login(request)
+    _auth_any(request)
     if account_id:
         _get_account(account_id)
     return db.dns_mapping_list(account_id)
@@ -407,7 +509,7 @@ def list_dns_mappings(request: Request, account_id: int | None = None):
 
 @app.post("/api/dns-mappings")
 def add_dns_mapping(request: Request, body: DnsMappingBody):
-    _require_login(request)
+    _require_write(request)
     _get_account(body.account_id)
     instance_id = body.instance_id.strip()
     zone_name = body.zone_name.strip()
@@ -421,7 +523,7 @@ def add_dns_mapping(request: Request, body: DnsMappingBody):
 @app.put("/api/dns-mappings/{mapping_id}")
 def update_dns_mapping(request: Request, mapping_id: int,
                        body: DnsMappingUpdateBody):
-    _require_login(request)
+    _require_write(request)
     fields = {k: v.strip() for k, v in body.dict().items()
               if v is not None and v.strip()}
     if not fields:
@@ -433,7 +535,7 @@ def update_dns_mapping(request: Request, mapping_id: int,
 
 @app.delete("/api/dns-mappings/{mapping_id}")
 def delete_dns_mapping(request: Request, mapping_id: int):
-    _require_login(request)
+    _require_write(request)
     if not db.dns_mapping_delete(mapping_id):
         raise HTTPException(status_code=404, detail="映射不存在")
     return {"ok": True}
@@ -443,13 +545,13 @@ def delete_dns_mapping(request: Request, mapping_id: int):
 
 @app.get("/api/recycle-bin")
 def list_recycle_bin(request: Request):
-    _require_login(request)
+    _auth_any(request)
     return {"items": db.recycle_list(), "stats": db.recycle_stats()}
 
 
 @app.put("/api/accounts/{account_id}")
 def update_account(request: Request, account_id: int, body: AccountUpdateBody):
-    _require_login(request)
+    _require_write(request)
     acc = db.account_get(account_id)
     if not acc:
         raise HTTPException(status_code=404, detail="账号不存在")
@@ -470,7 +572,7 @@ def update_account(request: Request, account_id: int, body: AccountUpdateBody):
 
 @app.delete("/api/accounts/{account_id}")
 def delete_account(request: Request, account_id: int):
-    _require_login(request)
+    _require_write(request)
     acc = db.account_get(account_id)
     if not acc:
         raise HTTPException(status_code=404, detail="账号不存在")
@@ -502,7 +604,7 @@ def delete_account(request: Request, account_id: int):
 
 @app.post("/api/accounts/{account_id}/test")
 def test_account(request: Request, account_id: int):
-    _require_login(request)
+    _require_write(request)
     acc = db.account_get(account_id)
     if not acc:
         raise HTTPException(status_code=404, detail="账号不存在")
@@ -531,7 +633,7 @@ def _get_account(account_id: int) -> dict:
 
 @app.get("/api/accounts/{account_id}/instances")
 def list_instances(request: Request, account_id: int):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     provider = get_provider(acc["provider"])
     try:
@@ -562,7 +664,7 @@ _ACTION_PARAMS: dict[str, list[tuple[str, str, str]]] = {
 
 @app.get("/api/accounts/{account_id}/actions")
 def list_actions(request: Request, account_id: int):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     provider = get_provider(acc["provider"])
     out = []
@@ -581,7 +683,7 @@ def list_actions(request: Request, account_id: int):
 
 @app.post("/api/accounts/{account_id}/action")
 def instance_action(request: Request, account_id: int, body: ActionBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     provider = get_provider(acc["provider"])
     if body.action not in [a["key"] for a in provider.actions]:
@@ -602,7 +704,7 @@ class BootVolumeVpusBody(BaseModel):
 @app.post("/api/accounts/{account_id}/boot-volume-vpus")
 def boot_volume_vpus(request: Request, account_id: int, body: BootVolumeVpusBody):
     """调整 OCI 实例引导卷 VPU（只能调大，同步执行非后台任务）。"""
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     if acc["provider"] != "oci":
         raise HTTPException(status_code=400, detail="仅支持 OCI 账号")
@@ -627,7 +729,7 @@ def boot_volume_vpus(request: Request, account_id: int, body: BootVolumeVpusBody
 
 @app.get("/api/accounts/{account_id}/create-options")
 def create_options(request: Request, account_id: int):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     provider = get_provider(acc["provider"])
     try:
@@ -638,7 +740,7 @@ def create_options(request: Request, account_id: int):
 
 @app.post("/api/accounts/{account_id}/create")
 def create_instance(request: Request, account_id: int, params: dict):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     job_id = jobs.submit("create", acc["provider"], account_id,
                          f"创建实例 / {params.get('name', '')}",
@@ -648,7 +750,7 @@ def create_instance(request: Request, account_id: int, params: dict):
 
 @app.post("/api/accounts/{account_id}/snatch")
 def snatch_instance(request: Request, account_id: int, params: dict):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     provider = get_provider(acc["provider"])
     if not provider.supports_snatch:
@@ -672,7 +774,7 @@ def _require_oci(acc: dict):
 
 @app.get("/api/accounts/{account_id}/security-rules")
 def list_security_rules(request: Request, account_id: int, instance_id: str):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     _require_oci(acc)
     try:
@@ -684,7 +786,7 @@ def list_security_rules(request: Request, account_id: int, instance_id: str):
 
 @app.post("/api/accounts/{account_id}/security-rules")
 def add_security_rule(request: Request, account_id: int, body: SecurityRuleBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     _require_oci(acc)
     try:
@@ -699,7 +801,7 @@ def add_security_rule(request: Request, account_id: int, body: SecurityRuleBody)
 
 @app.delete("/api/accounts/{account_id}/security-rules")
 def delete_security_rule(request: Request, account_id: int, body: SecurityRuleBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     _require_oci(acc)
     try:
@@ -715,7 +817,7 @@ def delete_security_rule(request: Request, account_id: int, body: SecurityRuleBo
 # ---------- 账单 ----------
 @app.get("/api/accounts/{account_id}/billing")
 def get_billing(request: Request, account_id: int):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     provider = get_provider(acc["provider"])
     if not provider.supports_billing:
@@ -798,7 +900,7 @@ class CreditTotalBody(BaseModel):
 
 @app.put("/api/accounts/{account_id}/credit-total")
 def set_credit_total(request: Request, account_id: int, body: CreditTotalBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     if acc["provider"] != "aws":
         raise HTTPException(status_code=400, detail="只有 AWS 账号支持设置 Credit 总额")
@@ -815,7 +917,7 @@ class CloudCreatedAtBody(BaseModel):
 
 @app.put("/api/accounts/{account_id}/cloud-created-at")
 def set_cloud_created_at(request: Request, account_id: int, body: CloudCreatedAtBody):
-    _require_login(request)
+    _require_write(request)
     _get_account(account_id)
     ts = body.timestamp
     if ts is not None and ts <= 0:
@@ -831,7 +933,7 @@ class EduExpiresAtBody(BaseModel):
 @app.put("/api/accounts/{account_id}/edu-expires-at")
 def set_edu_expires_at(request: Request, account_id: int, body: EduExpiresAtBody):
     """设置 Azure 教育优惠到期日。"""
-    _require_login(request)
+    _require_write(request)
     _get_account(account_id)
     ts = body.timestamp
     if ts is not None and ts <= 0:
@@ -849,7 +951,7 @@ class ManualCreditBody(BaseModel):
 
 @app.get("/api/accounts/{account_id}/credits-manual")
 def list_manual_credits(request: Request, account_id: int):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     if acc["provider"] != "aws":
         raise HTTPException(status_code=400, detail="只有 AWS 账号支持维护 Credit")
@@ -858,7 +960,7 @@ def list_manual_credits(request: Request, account_id: int):
 
 @app.post("/api/accounts/{account_id}/credits-manual")
 def add_manual_credit(request: Request, account_id: int, body: ManualCreditBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     if acc["provider"] != "aws":
         raise HTTPException(status_code=400, detail="只有 AWS 账号支持维护 Credit")
@@ -884,7 +986,7 @@ def add_manual_credit(request: Request, account_id: int, body: ManualCreditBody)
 
 @app.delete("/api/accounts/{account_id}/credits-manual/{credit_id}")
 def del_manual_credit(request: Request, account_id: int, credit_id: int):
-    _require_login(request)
+    _require_write(request)
     _get_account(account_id)
     if not db.credit_delete(credit_id, account_id):
         raise HTTPException(status_code=404, detail="记录不存在")
@@ -894,7 +996,7 @@ def del_manual_credit(request: Request, account_id: int, credit_id: int):
 @app.put("/api/accounts/{account_id}/credits-manual/{credit_id}")
 def edit_manual_credit(request: Request, account_id: int, credit_id: int,
                        body: ManualCreditBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     if acc["provider"] != "aws":
         raise HTTPException(status_code=400, detail="只有 AWS 账号支持维护 Credit")
@@ -927,7 +1029,7 @@ def edit_manual_credit(request: Request, account_id: int, credit_id: int,
 # ---------- 配额 / 订阅 ----------
 @app.get("/api/accounts/{account_id}/quotas")
 def get_quotas(request: Request, account_id: int):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     provider = get_provider(acc["provider"])
     if not provider.supports_quotas:
@@ -941,7 +1043,7 @@ def get_quotas(request: Request, account_id: int):
 # ---------- Azure Foundry ----------
 @app.get("/api/accounts/{account_id}/foundry-quotas")
 def get_foundry_quotas(request: Request, account_id: int, region: str = ""):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     provider = get_provider(acc["provider"])
     if acc["provider"] != "azure":
@@ -963,7 +1065,7 @@ class FoundryDeployBody(BaseModel):
 
 @app.post("/api/accounts/{account_id}/foundry-deploy")
 def foundry_deploy(request: Request, account_id: int, body: FoundryDeployBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     if acc["provider"] != "azure":
         raise HTTPException(status_code=400, detail="仅 Azure 账号支持此功能")
@@ -998,7 +1100,7 @@ class _LogCtx:
 # ---------- Azure 资源组 ----------
 @app.get("/api/accounts/{account_id}/resource-groups")
 def list_resource_groups(request: Request, account_id: int):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     if acc["provider"] != "azure":
         raise HTTPException(status_code=400, detail="仅 Azure 账号支持此功能")
@@ -1009,7 +1111,7 @@ def list_resource_groups(request: Request, account_id: int):
 
 @app.delete("/api/accounts/{account_id}/resource-groups/{rg_name}")
 def delete_resource_group(request: Request, account_id: int, rg_name: str):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     if acc["provider"] != "azure":
         raise HTTPException(status_code=400, detail="仅 Azure 账号支持此功能")
@@ -1023,7 +1125,7 @@ def delete_resource_group(request: Request, account_id: int, rg_name: str):
 
 @app.get("/api/accounts/{account_id}/subscription")
 def get_subscription(request: Request, account_id: int):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     provider = get_provider(acc["provider"])
     if not provider.supports_subscription:
@@ -1037,7 +1139,7 @@ def get_subscription(request: Request, account_id: int):
 # ---------- 一键测活 ----------
 @app.post("/api/accounts/test-all")
 def test_all_accounts(request: Request, provider: str = ""):
-    _require_login(request)
+    _require_write(request)
     result = []
     for acc in db.account_list(provider or None):
         p = get_provider(acc["provider"])
@@ -1062,7 +1164,7 @@ class MonitorBody(BaseModel):
 
 @app.get("/api/accounts/{account_id}/monitor")
 def get_monitor(request: Request, account_id: int):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     import datetime as _dt
     today = _dt.date.today().isoformat()
@@ -1077,7 +1179,7 @@ def get_monitor(request: Request, account_id: int):
 
 @app.put("/api/accounts/{account_id}/monitor")
 def set_monitor(request: Request, account_id: int, body: MonitorBody):
-    _require_login(request)
+    _require_write(request)
     _get_account(account_id)
     db.account_set_monitor(account_id, body.monitor_alert, body.monitor_restart)
     if body.monitor_ip_check is not None or body.auto_change_ip is not None:
@@ -1090,7 +1192,7 @@ def set_monitor(request: Request, account_id: int, body: MonitorBody):
 @app.get("/api/accounts/{account_id}/ip-change-usage")
 def get_ip_change_usage(request: Request, account_id: int):
     """当日自动换 IP 次数（前端监控页展示用）。"""
-    _require_login(request)
+    _auth_any(request)
     _get_account(account_id)
     import datetime as _dt
     today = _dt.date.today().isoformat()
@@ -1109,7 +1211,7 @@ def _require_aws(acc: dict):
 
 @app.get("/api/accounts/{account_id}/lightsail")
 def list_lightsail(request: Request, account_id: int, region: str = ""):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     provider = _require_aws(acc)
     try:
@@ -1126,7 +1228,7 @@ class LightsailActionBody(BaseModel):
 
 @app.post("/api/accounts/{account_id}/lightsail/action")
 def lightsail_action(request: Request, account_id: int, body: LightsailActionBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     provider = _require_aws(acc)
     if body.action not in ("start", "stop", "reboot"):
@@ -1140,7 +1242,7 @@ def lightsail_action(request: Request, account_id: int, body: LightsailActionBod
 
 @app.get("/api/accounts/{account_id}/lightsail/options")
 def lightsail_options(request: Request, account_id: int, region: str = ""):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     provider = _require_aws(acc)
     try:
@@ -1161,7 +1263,7 @@ class LightsailCreateBody(BaseModel):
 
 @app.post("/api/accounts/{account_id}/lightsail/create")
 def lightsail_create(request: Request, account_id: int, body: LightsailCreateBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     _require_aws(acc)
     params = body.dict()
@@ -1173,7 +1275,7 @@ def lightsail_create(request: Request, account_id: int, body: LightsailCreateBod
 
 @app.post("/api/accounts/{account_id}/lightsail/change-ip")
 def lightsail_change_ip(request: Request, account_id: int, body: LightsailActionBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     _require_aws(acc)
     if not body.name or not body.region:
@@ -1188,7 +1290,7 @@ def lightsail_change_ip(request: Request, account_id: int, body: LightsailAction
 # ---------- AWS CloudFront ----------
 @app.get("/api/accounts/{account_id}/cloudfront")
 def list_cloudfront(request: Request, account_id: int):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     provider = _require_aws(acc)
     try:
@@ -1204,7 +1306,7 @@ class InvalidateBody(BaseModel):
 
 @app.post("/api/accounts/{account_id}/cloudfront/invalidate")
 def cloudfront_invalidate(request: Request, account_id: int, body: InvalidateBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     provider = _require_aws(acc)
     try:
@@ -1221,7 +1323,7 @@ class CloudFrontToggleBody(BaseModel):
 
 @app.post("/api/accounts/{account_id}/cloudfront/toggle")
 def cloudfront_toggle(request: Request, account_id: int, body: CloudFrontToggleBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     provider = _require_aws(acc)
     try:
@@ -1233,7 +1335,7 @@ def cloudfront_toggle(request: Request, account_id: int, body: CloudFrontToggleB
 
 @app.get("/api/accounts/{account_id}/cloudfront/{dist_id}/config")
 def cloudfront_config(request: Request, account_id: int, dist_id: str):
-    _require_login(request)
+    _auth_any(request)
     acc = _get_account(account_id)
     provider = _require_aws(acc)
     try:
@@ -1256,7 +1358,7 @@ class CloudFrontPlanBody(BaseModel):
 
 @app.post("/api/accounts/{account_id}/cloudfront/plan")
 def cloudfront_set_plan(request: Request, account_id: int, body: CloudFrontPlanBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     provider = _require_aws(acc)
     # 分发 ARN 需要账号 ID，用 STS 获取
@@ -1285,7 +1387,7 @@ def cloudfront_set_plan(request: Request, account_id: int, body: CloudFrontPlanB
 
 @app.put("/api/accounts/{account_id}/cloudfront/{dist_id}")
 def cloudfront_update(request: Request, account_id: int, dist_id: str, body: CloudFrontUpdateBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     provider = _require_aws(acc)
     params = {k: v for k, v in body.dict().items() if v is not None}
@@ -1298,7 +1400,7 @@ def cloudfront_update(request: Request, account_id: int, dist_id: str, body: Clo
 
 @app.delete("/api/accounts/{account_id}/cloudfront/{dist_id}")
 def cloudfront_delete(request: Request, account_id: int, dist_id: str):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     provider = _require_aws(acc)
     try:
@@ -1319,7 +1421,7 @@ class CloudFrontCreateBody(BaseModel):
 
 @app.post("/api/accounts/{account_id}/cloudfront/create")
 def cloudfront_create(request: Request, account_id: int, body: CloudFrontCreateBody):
-    _require_login(request)
+    _require_write(request)
     acc = _get_account(account_id)
     provider = _require_aws(acc)
     try:
@@ -1343,7 +1445,7 @@ class SettingsBody(BaseModel):
 
 @app.get("/api/settings")
 def get_settings(request: Request):
-    _require_login(request)
+    _auth_any(request)
     token, chat_id = tg.get_tg_config()
     return {
         "tg_bot_token_set": bool(token),
@@ -1358,7 +1460,7 @@ def get_settings(request: Request):
 
 @app.put("/api/settings")
 def update_settings(request: Request, body: SettingsBody):
-    _require_login(request)
+    _require_write(request)
     token = body.tg_bot_token.strip()
     chat_id = body.tg_chat_id.strip()
     if token:
@@ -1381,7 +1483,7 @@ def update_settings(request: Request, body: SettingsBody):
 
 @app.post("/api/settings/tg-test")
 def tg_test(request: Request):
-    _require_login(request)
+    _require_write(request)
     if tg.send_message("✅ TriCloud Telegram 联动测试成功"):
         return {"ok": True}
     raise HTTPException(status_code=400, detail="发送失败，请检查 Bot Token 和 Chat ID")
@@ -1399,7 +1501,7 @@ class BackupBody(BaseModel):
 @app.post("/api/backup")
 def backup(request: Request, body: BackupBody):
     """导出整个 SQLite 库的加密备份。备份密码不存服务器、不记日志。"""
-    _require_login(request)
+    _require_write(request)
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="备份密码至少 8 位")
     db_path = _db_path()
@@ -1422,7 +1524,7 @@ async def restore(request: Request, file: UploadFile = File(...),
 
     覆盖前把当前库重命名为 .bak 保留；恢复后清空 sessions 要求重新登录。
     """
-    _require_login(request)
+    _require_write(request)
     ip = _client_ip(request)
     blob = await file.read()
     try:
@@ -1462,13 +1564,13 @@ class ScriptTemplateBody(BaseModel):
 
 @app.get("/api/script-templates")
 def script_template_list(request: Request, os_type: str | None = None):
-    _require_login(request)
+    _auth_any(request)
     return db.script_template_list(os_type)
 
 
 @app.post("/api/script-templates")
 def script_template_add(request: Request, body: ScriptTemplateBody):
-    _require_login(request)
+    _require_write(request)
     if not body.name.strip():
         raise HTTPException(status_code=400, detail="模板名称不能为空")
     try:
@@ -1482,7 +1584,7 @@ def script_template_add(request: Request, body: ScriptTemplateBody):
 
 @app.put("/api/script-templates/{tpl_id}")
 def script_template_update(request: Request, tpl_id: int, body: ScriptTemplateBody):
-    _require_login(request)
+    _require_write(request)
     try:
         ok = db.script_template_update(tpl_id, {
             "name": body.name, "os_type": body.os_type,
@@ -1498,23 +1600,69 @@ def script_template_update(request: Request, tpl_id: int, body: ScriptTemplateBo
 
 @app.delete("/api/script-templates/{tpl_id}")
 def script_template_delete(request: Request, tpl_id: int):
-    _require_login(request)
+    _require_write(request)
     if not db.script_template_delete(tpl_id):
         raise HTTPException(status_code=404, detail="模板不存在")
     db.audit_add(_client_ip(request), "script_template_delete", f"#{tpl_id}")
     return {"ok": True}
 
 
+# ---------- 开机密码保险箱 ----------
+class VaultRevealBody(BaseModel):
+    password: str
+
+
+@app.get("/api/password-vault")
+def list_password_vault(request: Request):
+    _auth_any(request)
+    return db.vault_list()
+
+
+@app.post("/api/password-vault/{vault_id}/reveal")
+def reveal_vault_password(request: Request, vault_id: int,
+                          body: VaultRevealBody):
+    """查看实例开机密码：先验证面板密码，成功后审计记录查看行为。"""
+    _require_write(request)
+    ip = _client_ip(request)
+    rec = db.vault_get(vault_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="记录不存在")
+    if not auth.verify_password(body.password):
+        db.audit_add(ip, "vault_reveal_fail",
+                     f"实例 {rec['instance_name']}（{rec['instance_id']}"
+                     "）查看密码失败：面板密码错误")
+        raise HTTPException(status_code=403, detail="面板密码错误")
+    db.audit_add(ip, "vault_reveal",
+                 f"实例 {rec['instance_name']}（{rec['instance_id']}）"
+                 "查看了开机密码")
+    return {"id": rec["id"], "instance_id": rec["instance_id"],
+            "instance_name": rec["instance_name"],
+            "password": db.vault_get_password(vault_id) or ""}
+
+
+@app.delete("/api/password-vault/{vault_id}")
+def delete_vault_entry(request: Request, vault_id: int):
+    _require_write(request)
+    rec = db.vault_get(vault_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="记录不存在")
+    db.vault_delete(vault_id)
+    db.audit_add(_client_ip(request), "vault_delete",
+                 f"实例 {rec['instance_name']}（{rec['instance_id']}）"
+                 "的密码记录已删除")
+    return {"ok": True}
+
+
 # ---------- 任务 ----------
 @app.get("/api/jobs")
 def list_jobs(request: Request, limit: int = 100):
-    _require_login(request)
+    _auth_any(request)
     return db.job_list(limit)
 
 
 @app.get("/api/jobs/{job_id}")
 def get_job(request: Request, job_id: str):
-    _require_login(request)
+    _auth_any(request)
     job = db.job_get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -1523,7 +1671,7 @@ def get_job(request: Request, job_id: str):
 
 @app.post("/api/jobs/{job_id}/stop")
 def stop_job(request: Request, job_id: str):
-    _require_login(request)
+    _require_write(request)
     if not jobs.request_stop(job_id):
         raise HTTPException(status_code=400, detail="任务已结束或不存在")
     return {"ok": True}
@@ -1531,7 +1679,7 @@ def stop_job(request: Request, job_id: str):
 
 @app.delete("/api/jobs/{job_id}")
 def delete_job(request: Request, job_id: str):
-    _require_login(request)
+    _require_write(request)
     if not db.job_delete(job_id):
         raise HTTPException(status_code=400, detail="只能删除已结束的任务")
     return {"ok": True}

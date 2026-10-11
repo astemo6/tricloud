@@ -34,7 +34,7 @@ from oci.core.models import (
 )
 from oci.exceptions import ServiceError
 
-from .. import cf
+from .. import cf, db
 from .base import (AccountField, InstanceInfo, IP_CHANGE_MAX_ATTEMPTS,
                     Provider, ip_in_spec, parse_cidr_spec, proxy_settings,
                     spec_desc)
@@ -922,6 +922,11 @@ class OciProvider(Provider):
                 f"公网 IP: {public_ip or '（未分配）'}\n"
                 f"登录用户: {login_user}\n"
                 f"密码: {password}（仅显示一次，请妥善保存）")
+        try:
+            db.vault_add(instance.id, details.display_name,
+                         account_id, password)
+        except Exception as e:  # noqa: BLE001 - 保险箱保存失败不影响创建
+            ctx.log(f"密码保险箱保存失败: {e}")
         return instance.id, text
 
     def create_instance(self, creds: dict, params: dict, ctx) -> str:

@@ -1144,6 +1144,100 @@ placeholder="代理无需认证时留空"></div>
 placeholder="${hasProxy? '已保存，留空保持不变': '代理需要认证时填写'}"></div>`;
 }
 
+/* ---- OCI 粘贴识别：config INI（[DEFAULT] / 自定义 profile 段）+ PEM 私钥 ---- */
+function parseOciPaste() {
+const form = document.getElementById('accForm');
+if (!form) return;
+const ta = form.querySelector('textarea[name="oci_paste"]');
+if (!ta) return;
+
+// 逐行解析：PEM 块与 INI 键值混合粘贴时各自识别，行号以原始粘贴内容为准
+const sections = {};   // 段名 -> {键: 值}
+const order = [];      // 段名出现顺序
+const ensure = name => { if (!sections[name]) { sections[name] = {}; order.push(name);} };
+ensure('DEFAULT');
+let cur = 'DEFAULT';
+let pem = null, inPem = false, keepPem = false;
+let invalidLine = 0;
+const lines = (ta.value || '').split('\n');
+for (let i = 0; i < lines.length; i++) {
+  const line = lines[i].trim();
+  if (inPem) {
+    if (keepPem) pem += '\n' + line;
+    if (line.includes('-----END') && line.includes('PRIVATE KEY-----')) inPem = false;
+    continue;
+  }
+  if (line.includes('-----BEGIN') && line.includes('PRIVATE KEY-----')) {
+    inPem = true; keepPem = !pem;   // 只保留第一个 PEM 块
+    if (keepPem) pem = line;
+    continue;
+  }
+  if (!line) continue;
+  if (line.startsWith('[') && line.endsWith(']')) {
+    cur = line.slice(1, -1).trim() || 'DEFAULT';
+    ensure(cur);
+    continue;
+  }
+  const eq = line.indexOf('=');
+  if (eq < 0) { invalidLine = i + 1; break; }
+  sections[cur][line.slice(0, eq).trim().toLowerCase()] = line.slice(eq + 1).trim();
+}
+
+// 多个 profile 段时显示下拉框（默认 DEFAULT），并保留用户已选段
+const sel = document.getElementById('ociProfileSel');
+const prev = sel? sel.value : null;
+let secName = order.includes('DEFAULT')? 'DEFAULT': order[0];
+if (order.length > 1 && sel) {
+  sel.innerHTML = order.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  if (prev && order.includes(prev)) secName = prev;
+  sel.value = secName;
+  sel.style.display = '';
+} else if (sel) {
+  sel.style.display = 'none';
+}
+const sec = sections[secName] || {};
+
+// 按段填充：user→user_ocid、tenancy→tenancy_ocid、fingerprint、region（config 无则保留不动）
+const keyMap = {user: 'user_ocid', tenancy: 'tenancy_ocid', fingerprint: 'fingerprint', region: 'region'};
+let count = 0;
+Object.keys(keyMap).forEach(k => {
+  const v = (sec[k] || '').trim();
+  if (!v) return;
+  const el = form.querySelector(`[name="${keyMap[k]}"]`);
+  if (el) { el.value = v; count++; }
+});
+// PEM 私钥原文直接填入 private_key
+if (pem) {
+  const el = form.querySelector('textarea[name="private_key"]');
+  if (el) { el.value = pem; count++; }
+}
+// key_file 只是路径不是内容：仅在无私钥内容时在 private_key 框旁提示
+const keyFile = (sec.key_file || '').trim();
+const pkBox = form.querySelector('textarea[name="private_key"]');
+const fieldBox = pkBox? pkBox.closest('.field'): null;
+let hint = fieldBox? fieldBox.querySelector('#ociKeyFileHint'): null;
+if (keyFile && !pem && fieldBox) {
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.id = 'ociKeyFileHint';
+    hint.className = 'help';
+    fieldBox.appendChild(hint);
+  }
+  hint.textContent = `检测到 key_file 路径：${keyFile}，但未检测到私钥内容，请手动粘贴 PEM 或确认路径在服务器可读`;
+  count++;
+} else if (hint) {
+  hint.textContent = '';
+}
+
+if (invalidLine)
+  toast(`第 ${invalidLine} 行格式无效：既不是空行、[段头]，也不是 键=值 格式（已跳过）${count? `，已识别 ${count} 个字段`: ''}`, true);
+else if (!count)
+  toast('未识别到有效的 OCI config 或 PEM 内容', true);
+else
+  toast(`已识别 ${count} 个字段`);
+}
+window.parseOciPaste = parseOciPaste;
+
 function openAccountModal() {
 const p = curProvider;
 const box = document.getElementById('modalBox');
@@ -1164,6 +1258,27 @@ d != null? `存活 ${d} 天（${fmtDate(a.cloud_created_at)}创建） <a href="j
 <button class="btn sm" style="margin-left:8px" onclick="toggleBatchAdd()">批量添加</button></h2>
 <div id="singleAddForm">
 <form id="accForm">
+${p.id === 'oci'? `
+<div style="margin:0 0 16px;padding:12px;border:1px dashed var(--border2);border-radius:12px;background:var(--bg)">
+<div class="field" style="margin-bottom:0"><label>粘贴 OCI config 自动识别</label>
+<textarea name="oci_paste" class="code" rows="6" placeholder="[DEFAULT]
+user=ocid1.user.oc1..xxxx
+fingerprint=aa:bb:cc:dd:ee:ff:…
+tenancy=ocid1.tenancy.oc1..xxxx
+region=ap-tokyo-1
+key_file=~/.oci/oci_api_key.pem
+
+-----BEGIN PRIVATE KEY-----
+……
+-----END PRIVATE KEY-----"></textarea>
+<div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+<button type="button" class="btn sm" onclick="parseOciPaste()">🔍 自动识别填充</button>
+<select id="ociProfileSel" class="code" style="display:none;width:auto;max-width:180px;padding:5px 8px;font-size:12px" onchange="parseOciPaste()" title="选择 profile 段"></select>
+</div>
+<div class="help">支持 OCI config 文件（INI，[DEFAULT] 或自定义 profile 段：user / fingerprint / tenancy / region / key_file）与 PEM 私钥原文（-----BEGIN PRIVATE KEY----- …），两者可混合粘贴；多个 profile 段时用下拉框选择填充。</div>
+</div>
+</div>
+`: ''}
 <div class="field"><label>账号别名 <span class="req">*</span></label>
 <input name="name" required placeholder="如：甲骨文-东京"></div>
 ${p.fields.map(f => `<div class="field"><label>${esc(f.label)}${f.required? ' <span class="req">*</span>': ''}</label>

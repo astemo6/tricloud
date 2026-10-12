@@ -190,7 +190,7 @@ public abstract class BaseActivity extends AppCompatActivity {
             for (int i = 0; i < accs.length(); i++) {
                 JSONObject a = accs.optJSONObject(i);
                 if (!MainActivity.PROVS[p].equals(a.optString("provider"))) continue;
-                if (sm == null) sm = m.addSubMenu(0, nid[0]++, nid[0], MainActivity.PNAMES[p]);
+                if (sm == null) sm = m.addSubMenu(0, nid[0]++, nid[0], provHeader(p));
                 android.view.MenuItem it = add.apply(sm, new String[]{"acc_" + a.optInt("id"), dots[p] + "  " + a.optString("name") + (a.optInt("disabled") == 1 ? "（已停用）" : "")});
                 navAccs.put(it.getItemId(), a);
             }
@@ -199,6 +199,20 @@ public abstract class BaseActivity extends AppCompatActivity {
         for (String[] kv : NAV_PAGES) add.apply(mg, kv);
         android.view.SubMenu out = m.addSubMenu(0, nid[0]++, nid[0], "账户");
         add.apply(out, new String[]{"logout", "🚪 退出登录"}).setCheckable(false);
+    }
+
+    private static final int[] PROV_LOGOS = {R.drawable.logo_oci, R.drawable.logo_aws, R.drawable.logo_azure};
+
+    /** 侧栏云厂商分组标题：官方 Logo + 名称（保持原大小写）。 */
+    private CharSequence provHeader(int p) {
+        android.text.SpannableString ss = new android.text.SpannableString("\u00A0 " + MainActivity.PNAMES[p]);
+        android.graphics.drawable.Drawable d = androidx.core.content.ContextCompat.getDrawable(this, PROV_LOGOS[p]);
+        if (d == null) return MainActivity.PNAMES[p];
+        int h = Math.round(getResources().getDisplayMetrics().density * (p == 1 ? 15 : 13));
+        int w = Math.round((float) d.getIntrinsicWidth() * h / Math.max(1, d.getIntrinsicHeight()));
+        d.setBounds(0, 0, w, h);
+        ss.setSpan(new android.text.style.ImageSpan(d, android.text.style.DynamicDrawableSpan.ALIGN_BASELINE), 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return ss;
     }
 
     private void onNav(android.view.MenuItem it) {

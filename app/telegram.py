@@ -6,6 +6,7 @@ import time
 import httpx
 
 from . import core, extras, services
+from .providers import greencloud_provider as gcp  # greencloud
 
 _cb = {}   # 短 key -> payload（callback_data 限 64 字节）
 STATE_ICON = {"running": "🟢", "stopped": "🔴", "deallocated": "🔴", "stopping": "🟡", "starting": "🟡",
@@ -94,7 +95,7 @@ async def _reply(bot, chat_id, text, markup=None):
     await bot.call("sendMessage", body)
 
 
-PROV_NAME = {"oci": "Oracle Cloud", "aws": "AWS", "azure": "Azure"}
+PROV_NAME = {"oci": "Oracle Cloud", "aws": "AWS", "azure": "Azure", "greencloud": "GreenCloud"}  # greencloud
 # 危险操作：确认页加醒目警告（所有实例操作都要点「确认」按钮才执行）
 DANGER = {"terminate": "⚠️ 终止后实例和引导卷/磁盘一并删除，不可恢复！",
           "stop": "⚠️ 停机后服务中断（Azure 为释放，动态公网 IP 会变）。",
@@ -107,7 +108,9 @@ HOME = ("« 主菜单", {"t": "home"})
 def _home_kb():
     accs = core.list_accounts()
     cnt = {p: sum(1 for a in accs if a["provider"] == p) for p in PROV_NAME}
-    return _kb([[(f"☁️ {n}（{cnt[p]}）", {"t": "prov", "p": p}) for p, n in PROV_NAME.items()],
+    provs = [(f"☁️ {n}（{cnt[p]}）", {"t": "prov", "p": p}) for p, n in PROV_NAME.items()
+             if not gcp.is_gc(p) or cnt[p]]  # greencloud：有（启用中的）绿云账号才显示
+    return _kb([provs[i:i + 3] for i in range(0, len(provs), 3)] + [
                 [("⚡ 一键测活", {"t": "testall"}), ("📋 最近任务", {"t": "tasks"})],
                 [("💰 账单汇总", {"t": "bill"}), ("💳 Credit", {"t": "credits"})]])
 
@@ -123,7 +126,7 @@ def _acc_kb(acc):
     rows = [[("🖥 实例", {"t": "list", "a": acc["id"], "k": "vm"})]]
     if acc["provider"] == "aws":
         rows[0].append(("💡 Lightsail", {"t": "list", "a": acc["id"], "k": "lightsail"}))
-    rows.append([("💰 账单", {"t": "abill", "a": acc["id"]}), ("⚡ 测活", {"t": "test", "a": acc["id"]})])
+    rows.append([("💰 账单", {"t": "abill", "a": acc["id"]}), ("⚡ 测活", {"t": "test", "a": acc["id"]})][gcp.is_gc(acc):])  # greencloud：无账单
     rows.append([(f"« {PROV_NAME[acc['provider']]}", {"t": "prov", "p": acc["provider"]}), HOME])
     return _kb(rows)
 
@@ -134,6 +137,8 @@ def _acc_text(acc):
 
 
 def _inst_ops(provider, kind):
+    if gcp.is_gc(provider):  # greencloud：只有开机 / 关机 / 重启
+        return list(gcp.TG_OPS)  # greencloud
     ops = ["start", "stop", "reboot", "changeip"]
     if kind == "vm":
         ops.append("openport")
@@ -171,7 +176,7 @@ def _inst_view(d):
         rows.append([(ACTION_NAME[o], dict(d, t="ask", op=o)) for o in ops[i:i + 3]])
     rows.append([("🔄 刷新状态", dict(d, t="inst", fresh=1)), ("« 实例列表", {"t": "list", "a": d["a"], "k": d["k"]})])
     text = (f"<b>{esc(d['n'])}</b>{' [Lightsail]' if d['k'] == 'lightsail' else ''}\n状态：{STATE_ICON.get(d['s'], '⚪')} {esc(d['s'])}\n"
-            f"IP：<code>{esc(d.get('ip') or '-')}</code>")
+            f"IP：<code>{esc(d.get('ip') or '-')}</code>") + gcp.tg_bw_line(d)  # greencloud：流量
     return text, _kb(rows)
 
 
@@ -215,16 +220,18 @@ async def handle_callback(bot, chat_id, cq):
         except Exception as e:
             await _edit(bot, chat_id, msg_id, f"查询失败：{esc(str(e)[:300])}", _kb([[("« 返回", {"t": "acc", "a": acc["id"]})]]))
             return
-        rows = [[(f"{STATE_ICON.get(i['state'], '⚪')} {i['name']}" + (f" · {i['public_ip']}" if i.get("public_ip") else ""),
+        rows = [[(f"{STATE_ICON.get(i['state'], '⚪')} {i['name']}" + (f" · {i['public_ip']}" if i.get("public_ip") else "") + gcp.tg_label(i),  # greencloud
                   {"t": "inst", "a": acc["id"], "p": acc["provider"], "i": i["id"], "k": kind, "n": i["name"], "s": i["state"],
-                   "ip": i.get("public_ip"), "r": i.get("region")})] for i in items]
+                   "ip": i.get("public_ip"), "r": i.get("region"), **gcp.tg_extra(i)})] for i in items]  # greencloud
         rows.append([("« 返回", {"t": "acc", "a": acc["id"]}), HOME])
         await _edit(bot, chat_id, msg_id, f"<b>{esc(acc['name'])}</b> 的{'Lightsail ' if kind == 'lightsail' else ''}实例（{len(items)} 台）：",
                     _kb(rows))
     elif t == "inst":
         _await_port.pop(chat_id, None)
         d = dict(data)
-        if d.get("fresh"):
+        if d.get("fresh") and gcp.is_gc(d.get("p")):  # greencloud：状态 + IP + 流量一起刷新
+            d = await asyncio.to_thread(gcp.tg_refresh, d)  # greencloud
+        elif d.get("fresh"):
             try:
                 d["s"] = await asyncio.to_thread(services.get_state, d["a"], d["i"], d.get("r"), d["k"])
             except Exception as e:
@@ -317,6 +324,8 @@ def _test_one(acc_id):
 def billing_report(accounts=None):
     lines = [f"💰 <b>账单汇总</b>（{services.now_local():%Y-%m-%d}）"]
     for a in (core.list_accounts() if accounts is None else accounts):
+        if gcp.is_gc(a):  # greencloud：没有账单
+            continue
         try:
             b = services.billing(a["id"])  # AWS 自动走缓存
             extra = ""
@@ -438,7 +447,8 @@ async def handle_message(bot, chat_id, m):
         rows = core.q("SELECT h.score, a.name FROM account_health h JOIN accounts a ON a.id=h.account_id ORDER BY h.score")
         await _reply(bot, chat_id, "🩺 账号健康度：\n" + ("\n".join(f"{r['score']:>3}  {esc(r['name'])}" for r in rows) or "还没有检测记录"))
     elif txt.startswith("/traffic"):
-        rows = core.q("SELECT * FROM traffic_guards ORDER BY last_pct DESC")
+        rows = [g for g in core.q("SELECT * FROM traffic_guards ORDER BY last_pct DESC")
+                if not gcp.hidden((core.get_account(g["account_id"]) or {}).get("provider"))]  # greencloud
         await _reply(bot, chat_id, "📈 本月流量：\n" + ("\n".join(f"{esc(g['name'])}：{g['last_gb'] or 0:.1f}/{g['limit_gb']:g} GB（{g['last_pct'] or 0:.0f}%）"
                                                                + (" 超限停机" if g["action"] == "stop" else "") for g in rows) or "未设置流量守护"))
     elif txt.startswith("/tasks"):

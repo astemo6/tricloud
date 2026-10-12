@@ -11,6 +11,7 @@
     { id: 2, provider: "oci", name: "首尔备用", region: "ap-seoul-1", created: now - 86400 * 12, cloud_created_at: ymd(-26), last_test_ok: 1, last_test_ms: 1203, last_test_at: now - 3600 },
     { id: 3, provider: "aws", name: "AWS 学习号", region: "ap-northeast-1", proxy: "proxy.example.com:3128", proxy_user: "tc-demo", proxy_pass_set: true, created: now - 86400 * 20, cloud_created_at: ymd(-190), last_test_ok: 1, last_test_ms: 311, last_test_at: now - 3600 },
     { id: 4, provider: "azure", name: "Azure 学生", region: null, created: now - 86400 * 8, cloud_created_at: ymd(-342), edu_expires_at: null, last_test_ok: 0, last_test_ms: 2210, last_test_at: now - 3600, last_test_error: "ClientAuthenticationError: AADSTS7000222 client secret expired（演示）" },
+    { id: 5, provider: "greencloud", name: "绿云 洛杉矶", region: null, created: now - 86400 * 5, cloud_created_at: null, last_test_ok: 1, last_test_ms: 486, last_test_at: now - 3600 },
   ];
   var inst = {
     1: [
@@ -23,6 +24,11 @@
       { id: "i-0demo5678efgh", name: "test-box", state: "stopped", public_ip: null, private_ip: "172.31.8.2", ipv6: [], shape: "t2.micro", zone: "ap-northeast-1c", created: "2026-09-27 09:02" },
     ],
     4: [{ id: "/subscriptions/demo/resourceGroups/rg-demo/providers/Microsoft.Compute/virtualMachines/az-b1s", name: "az-b1s", state: "running", public_ip: "192.0.2.44", private_ip: "10.2.0.4", ipv6: [], shape: "Standard_B1s", zone: "-", resource_group: "rg-demo", created: "2026-04-09 15:26" }],
+    // 绿云（SolusVM）：id = "gc-" + sha1(key)[:12]，流量为本计费周期字节数（假数据）
+    5: [{ id: "gc-3f9a1c0d2b7e", name: "LA-KVM-1", state: "running", public_ip: "203.0.113.61", ipv6: ["2001:db8:61::1"], ips: ["203.0.113.61", "2001:db8:61::1"], shape: "-", region: "-", zone: "-", hostname: "la-kvm-1.example.com",
+         bw: { total: 1099511627776, used: 412316860416, percent: 37.5 }, created: "" },
+        { id: "gc-8e21b47fa093", name: "LA-KVM-2", state: "stopped", public_ip: "203.0.113.62", ipv6: [], ips: ["203.0.113.62", "203.0.113.63"], shape: "-", region: "-", zone: "-", hostname: "la-kvm-2.example.com",
+         bw: { total: 536870912000, used: 483183820800, percent: 90 }, created: "" }],
   };
   var lightsail = [{ id: "ls-debian", name: "ls-debian", state: "running", public_ip: "198.51.100.30", private_ip: "172.26.1.4", ipv6: ["2001:db8:1::30"], shape: "nano_3_0", blueprint: "debian_12", static_ip: true, zone: "ap-northeast-1a" }];
   var tasks = [
@@ -49,7 +55,7 @@
                  { id: 4, account_id: 4, name: "Azure for Students", amount: 100, start_date: ymd(-342), expire_date: ymd(23), used_manual: 61.4 }];
   var billMonths = { 2: 37.85, 4: 0 };    // 演示：OCI / Azure 按月账单累计（估算 Credit 已用额度）
   var creditTotal = {};
-  var settings = { tg_chat_id: "123456789", daily_report: true, report_time: "09:00", monitor_interval: 5, timezone: "Asia/Shanghai", default_create: null, tg_token_set: true, tg_token_hint: "7000000000:***", cf_token_set: true, totp_enabled: false, free_guard: true, auto_ip_daily_limit: 3, version: "1.6.0" };
+  var settings = { tg_chat_id: "123456789", daily_report: true, report_time: "09:00", monitor_interval: 5, timezone: "Asia/Shanghai", default_create: null, tg_token_set: true, tg_token_hint: "7000000000:***", cf_token_set: true, totp_enabled: false, free_guard: true, auto_ip_daily_limit: 3, enable_greencloud: true, version: "1.6.0" };
 
 
   // ---------- v1.1 数据 ----------
@@ -136,6 +142,7 @@
   var tguards = [{ id: 1, account_id: 1, account_name: "东京主力", provider: "oci", instance_id: "ocid1.instance.oc1.ap-tokyo-1.demo1", name: "arm-main", limit_gb: 10240, warn_pct: 80, action: "notify", count_in: 0, last_gb: 1834.2, last_pct: 17.9, checked_at: now - 900, mode: "monthly", direction: "out", window_hours: 24, enabled: 1, shutdown_hours: 0, state: "ok" },
                  { id: 2, account_id: 3, account_name: "AWS 学生号", provider: "aws", instance_id: "i-0demo1234abcd", name: "tokyo-t3", limit_gb: 100, warn_pct: 80, action: "stop", count_in: 0, last_gb: 83.6, last_pct: 83.6, checked_at: now - 1200, mode: "monthly", direction: "out", window_hours: 24, enabled: 1, shutdown_hours: 0, state: "ok" },
                  { id: 3, account_id: 2, account_name: "首尔备用", provider: "oci", instance_id: "ocid1.instance.oc1.ap-seoul-1.demo3", name: "seoul-arm", limit_gb: 20, warn_pct: 80, action: "stop", count_in: 1, last_gb: 21.7, last_pct: 108.5, checked_at: now - 2400, mode: "rolling", direction: "both", window_hours: 6, enabled: 1, shutdown_hours: 3, state: "tripped", resume_at: now + 3600 * 2 + 600, state_msg: "超限停机，预计自动开机" },
+                 { id: 5, account_id: 5, account_name: "绿云 洛杉矶", provider: "greencloud", instance_id: "gc-8e21b47fa093", name: "LA-KVM-2", limit_gb: 500, warn_pct: 80, action: "stop", count_in: 1, last_gb: 450, last_pct: 90, checked_at: now - 1500, mode: "monthly", direction: "both", window_hours: 24, enabled: 1, shutdown_hours: 0, state: "ok" },
                  { id: 4, account_id: 4, account_name: "Azure 学生", provider: "azure", instance_id: "/subscriptions/demo/resourceGroups/rg-demo/providers/Microsoft.Compute/virtualMachines/az-b1s", name: "az-b1s", limit_gb: 15, warn_pct: 80, action: "notify", count_in: 0, last_gb: 2.1, last_pct: 14, checked_at: now - 600, mode: "rolling", direction: "in", window_hours: 24, enabled: 0, shutdown_hours: 0, state: "ok" }];
   var DIRT = { out: "出站", in: "入站", both: "双向" }, GSTT = { ok: "正常", warn: "已到预警", over: "已超限", tripped: "已触发关机", resume_failed: "自动开机失败", disabled: "已停用" };
   function fmtTs(ts) { var t = new Date(ts * 1000); return ("0" + (t.getMonth() + 1)).slice(-2) + "-" + ("0" + t.getDate()).slice(-2) + " " + ("0" + t.getHours()).slice(-2) + ":" + ("0" + t.getMinutes()).slice(-2); }
@@ -143,7 +150,7 @@
     var a = accounts.find(function (x) { return x.id == g.account_id; });
     var st = g.state === "tripped" ? "tripped" : g.state === "resume_failed" ? "resume_failed" : !g.enabled ? "disabled" : g.last_pct >= 100 ? "over" : g.last_pct >= g.warn_pct ? "warn" : "ok";
     return Object.assign({}, g, { account_name: a ? a.name : g.account_name, provider: a ? a.provider : g.provider, status: st, status_text: GSTT[st],
-      scope: g.mode === "rolling" ? "最近 " + g.window_hours + " 小时" + DIRT[g.direction] : "本月" + DIRT[g.direction], resume_at_text: g.resume_at ? fmtTs(g.resume_at) : null });
+      scope: (a ? a.provider : g.provider) === "greencloud" ? "本计费周期（出入合计）" : g.mode === "rolling" ? "最近 " + g.window_hours + " 小时" + DIRT[g.direction] : "本月" + DIRT[g.direction], resume_at_text: g.resume_at ? fmtTs(g.resume_at) : null });
   }
   function fakeTraffic(acc) { var o = acc.provider === "oci" ? 1834.2 : acc.provider === "aws" ? 83.6 : 12.4; var d = new Date(); return { out_gb: o, in_gb: +(o * 0.31).toFixed(1), period: d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-01 ~ 今天" }; }
   // ---------- v1.5 数据与路由：已删账号 / 默认创建参数 / 账号编辑 / 代理账密 / OCI 安全组 / 删 IPv6 / CloudFront ----------
@@ -615,8 +622,63 @@
     return undefined;
   }
 
+  // ---------- 绿云 GreenCloud（SolusVM）：只能开机 / 关机 / 重启、查流量 ----------
+  function gcParse(text) {
+    var servers = [], bad = [];
+    String(text || "").split("\n").forEach(function (line, i) { var t = line.trim(); if (!t || t[0] === "#") return; var ps = t.split(/[\s,，;；]+/).filter(Boolean);
+      if (ps.length < 3) bad.push("第 " + (i + 1) + " 行需要「名称 key hash」三段"); else servers.push({ name: ps.slice(0, -2).join(" "), key: ps[ps.length - 2], hash: ps[ps.length - 1] }); });
+    return { servers: servers, error: bad.join("；") };
+  }
+  function gcId(key) { var h = 0; for (var i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0; return "gc-" + ("000000000000" + h.toString(16)).slice(-12); }
+  function routeGc(method, p, q, body) {
+    var a = accOf(p), m;
+    if (p === "/accounts" && method === "POST" && body && body.provider === "greencloud") {
+      if (settings.enable_greencloud === false) return { __status: 400, detail: "provider 无效" };
+      var url = String(body.api_url || (body.cred || {}).api_url || "").trim() || "https://cp.greencloudvps.com";
+      if (!/^https:\/\//i.test(url)) return { __status: 400, detail: "面板地址必须以 https:// 开头（key / hash 不能明文传输）" };
+      var ps = gcParse(body.servers_text || (body.cred || {}).servers_text);
+      if (ps.error) return { __status: 400, detail: ps.error };
+      if (!String(body.name || "").trim() || !ps.servers.length) return { __status: 400, detail: "缺少字段：" + (!String(body.name || "").trim() ? "name" : "servers") };
+      var na = { id: Date.now() % 100000, provider: "greencloud", name: body.name, region: null, created: Math.floor(Date.now() / 1000), last_test_ok: 1, last_test_ms: 512, last_test_at: Math.floor(Date.now() / 1000) };
+      accounts.push(na);
+      inst[na.id] = ps.servers.map(function (sv, k) { return { id: gcId(sv.key), name: sv.name, state: "running", public_ip: "203.0.113." + (70 + k), ipv6: [], ips: ["203.0.113." + (70 + k)], shape: "-", region: "-", zone: "-", hostname: "", bw: { total: 1099511627776, used: 0, percent: 0 }, created: "" }; });
+      audit1("POST /accounts", "greencloud " + body.name); return { id: na.id, test: { ok: true, servers: ps.servers.length } };
+    }
+    if (p === "/accounts/parse" && body && /greencloud|绿云|solusvm|[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}/i.test(body.text || "")) {
+      var t = String(body.text), um = t.match(/https?:\/\/[^\s,;"'<>]+/i), lines = t.split("\n").filter(function (l) { var x = l.trim().split(/[\s,，;；]+/).filter(Boolean); return x.length >= 3 && /^[A-Za-z0-9\-_]{8,}$/.test(x[x.length - 2]) && /^[A-Za-z0-9\-_]{16,}$/.test(x[x.length - 1]); });
+      if (lines.length) return { items: [{ provider: "greencloud", name: "", cred: { api_url: um ? um[0] : "https://cp.greencloudvps.com", servers_text: lines.map(function (l) { return l.trim(); }).join("\n") }, missing: [], error: null }] };
+    }
+    if (!a || a.provider !== "greencloud") return undefined;
+    if (p.match(/\/regions$/)) return ["-"];
+    if ((m = p.match(/\/detail$/))) { var list = inst[a.id] || [];
+      return { id: a.id, name: a.name, provider: a.provider, region: null, proxy: a.proxy || "", proxy_user: a.proxy_user || "", proxy_pass_set: !!a.proxy_pass_set,
+        fields: { api_url: "https://cp.greencloudvps.com", servers_text: list.map(function (i, k) { return i.name + " ****" + ["LMNO", "1234", "9F3A"][k % 3] + " ****" + ["4567", "cdef", "77b0"][k % 3]; }).join("\n") },
+        servers: list.map(function (i) { return { id: i.id, name: i.name }; }) }; }
+    if (p.match(/\/traffic$/)) { var ti = (inst[a.id] || []).find(function (i) { return i.id === q.get("instance_id"); }); if (!ti) return { __status: 404, detail: "实例不存在" }; var G = Math.pow(1024, 3);
+      return { out_gb: +(ti.bw.used / G).toFixed(3), in_gb: 0, used_gb: +(ti.bw.used / G).toFixed(3), total_gb: +(ti.bw.total / G).toFixed(3), percent: ti.bw.percent, used: ti.bw.used, total: ti.bw.total, period: "本计费周期（绿云面板统计，出入合计）" }; }
+    if (p.match(/\/instances\/action$/) && ["start", "stop", "reboot"].indexOf(body.action) < 0) return { __status: 400, detail: "绿云 API 不支持" + (body.action === "terminate" ? "终止 / 删除" : "该操作") + "（只能开机、关机、重启、查流量）" };
+    if (p.match(/\/instances\/(change-ip|resize|rename|reinstall)$|\/open-port$/)) return { __status: 400, detail: "绿云 API 不支持该操作（只能开机、关机、重启、查流量）" };
+    if (p.match(/\/billing$/)) return { period: "-", currency: "USD", total: null, services: [], unsupported: true, note: "绿云 API 不提供账单", cached: false, updated_at: ymd(0) };
+    if (p.match(/\/account-type$/)) return { label: "绿云 KVM", plan_type: null, hint: "SolusVM 客户 API 不提供账号类型 / 开户日期，可在「信息」里手动填写创建日期", checked_at: Math.floor(Date.now() / 1000) };
+    if (p === "/traffic-guards" && method === "POST") return undefined;
+    return undefined;
+  }
+
   function route(method, path, body) {
     var u = new URL(path, "http://x"); var p = u.pathname.replace(/^\/api/, ""); var q = u.searchParams; var m;
+    if (p === "/traffic-guards" && method === "POST" && body && (accounts.find(function (a) { return a.id == body.account_id; }) || {}).provider === "greencloud") {
+      if (body.mode && body.mode !== "monthly") return { __status: 400, detail: "绿云只提供本计费周期累计流量，不支持滚动窗口" };
+      var gi = (inst[body.account_id] || []).find(function (i) { return i.id === body.instance_id; }) || { bw: { total: 0, used: 0, percent: 0 } }, GB = Math.pow(1024, 3);
+      var gl = +(gi.bw.total / GB).toFixed(3) || +body.limit_gb || 1000, gu = +(gi.bw.used / GB).toFixed(3);
+      tguards = tguards.filter(function (g) { return !(g.account_id == body.account_id && g.instance_id === body.instance_id); });
+      var gg = { id: Date.now(), account_id: +body.account_id, instance_id: body.instance_id, name: body.name, limit_gb: gl, warn_pct: +body.warn_pct || 80, action: body.action, count_in: 1, last_gb: gu, last_pct: +(gu / gl * 100).toFixed(1), checked_at: Math.floor(Date.now() / 1000),
+        mode: "monthly", window_hours: 24, direction: "both", shutdown_hours: body.action === "stop" ? +body.shutdown_hours || 0 : 0, enabled: body.enabled === false ? 0 : 1, state: "ok" };
+      tguards.push(gg); audit1("POST /traffic-guards", body.name); return { ok: true, last_gb: gg.last_gb, last_pct: gg.last_pct };
+    }
+    var rgc = routeGc(method, p, q, body); if (rgc !== undefined) return rgc;
+    if (p === "/meta") return { providers: ["oci", "aws", "azure"].concat(settings.enable_greencloud === false ? [] : ["greencloud"]) };
+    if (p === "/accounts" && method === "GET" && settings.enable_greencloud === false) return accounts.filter(function (a) { return a.provider !== "greencloud"; });
+    if (p === "/traffic-guards" && method === "GET" && settings.enable_greencloud === false) return tguards.filter(function (g) { var a = accounts.find(function (x) { return x.id == g.account_id; }); return !a || a.provider !== "greencloud"; }).map(guardView);
     var r16 = route16(method, p, q, body); if (r16 !== undefined) return r16;
     var r15 = route15(method, p, q, body); if (r15 !== undefined) return r15;
     var r14 = route14(method, p, q, body); if (r14 !== undefined) return r14;

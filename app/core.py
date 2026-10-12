@@ -358,7 +358,8 @@ def list_accounts():
     rows = q("SELECT id, provider, name, region, created, cloud_created_at, credit_total, edu_expires_at, "
              "last_test_ok, last_test_ms, last_test_at, last_test_error, COALESCE(disabled,0) AS disabled, disabled_reason, acct_type "
              "FROM accounts ORDER BY provider, id")
-    return rows
+    from .providers import greencloud_provider as gcp  # greencloud
+    return [r for r in rows if not gcp.hidden(r["provider"])]  # greencloud：开关关闭时隐藏绿云账号（数据保留）
 
 
 # ---------------- OCI Ampere A1 免费额度 ----------------

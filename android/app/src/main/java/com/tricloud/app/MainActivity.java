@@ -12,8 +12,11 @@ import java.util.Arrays;
 
 /** 总览（同 Web pageHome）：到期提醒、账号健康度、各账号实例数，抽屉导航到各账号与管理页。 */
 public class MainActivity extends BaseActivity {
-    static final String[] PROVS = {"oci", "aws", "azure"};
-    static final String[] PNAMES = {"Oracle Cloud", "AWS", "Azure"};
+    static final String[] PROVS = {"oci", "aws", "azure", "greencloud"};
+    static final String[] PNAMES = {"Oracle Cloud", "AWS", "Azure", "GreenCloud"};
+
+    /** 没有区域概念的云厂商（Azure 用资源组位置，GreenCloud 无区域）。 */
+    static boolean noRegion(String p) { return "azure".equals(p) || "greencloud".equals(p); }
     private boolean first = true;
 
     @Override
@@ -42,13 +45,14 @@ public class MainActivity extends BaseActivity {
 
     @Override
     protected void refresh() {
+        Api.meta(null);
         Api.get(this, "/accounts", r -> {
             clear();
             JSONArray a = Api.arr(r);
             Api.accounts = a;
             buildNav();
             if (a.length() == 0) {
-                muted(card("还没有云账号"), "添加 OCI / AWS / Azure 账号后，这里会显示各账号的实例数、健康度和到期提醒。");
+                muted(card("还没有云账号"), "添加 OCI / AWS / Azure / GreenCloud 账号后，这里会显示各账号的实例数、健康度和到期提醒。");
                 bigButton("＋ 添加云账号", v -> startActivity(new Intent(this, AccountsActivity.class).putExtra("add", true)));
                 return;
             }
@@ -86,10 +90,10 @@ public class MainActivity extends BaseActivity {
             for (int i = 0; i < a.length(); i++) {
                 JSONObject acc = a.optJSONObject(i);
                 LinearLayout c = card(acc.optString("name") + (acc.optInt("disabled") == 1 ? "  [已停用]" : ""));
-                String reg = "azure".equals(acc.optString("provider")) ? "" : regionOf(acc);
+                String reg = noRegion(acc.optString("provider")) ? "" : regionOf(acc);
                 muted(c, pname(acc.optString("provider")) + (reg.isEmpty() ? "" : " · " + reg) + ageOf(acc));
                 TextView cnt = text(c, "实例：查询中…", 13, false);
-                String rq = "azure".equals(acc.optString("provider")) ? "" : "?region=" + Api.enc(reg);
+                String rq = noRegion(acc.optString("provider")) ? "" : "?region=" + Api.enc(reg);
                 if (acc.optInt("disabled") == 1) cnt.setText("实例：账号已停用");
                 else Api.job(this, () -> {
                     try { return Api.call("GET", "/accounts/" + acc.optInt("id") + "/instances" + rq, null); }

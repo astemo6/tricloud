@@ -8,9 +8,11 @@ from zoneinfo import ZoneInfo
 from . import core
 from .providers.aws_provider import AWSProvider
 from .providers.azure_provider import AzureProvider
+from .providers import greencloud_provider as gcp  # greencloud
 from .providers.oci_provider import OCIProvider
 
 PROVIDERS = {"oci": OCIProvider, "aws": AWSProvider, "azure": AzureProvider}
+gcp.register(PROVIDERS, gcp.GreenCloudProvider)  # greencloud（设置 enable_greencloud 关闭时自动移除）
 _cache = {}
 
 
@@ -103,6 +105,8 @@ def billing(acc_id, force=False):
     acc = core.get_account(acc_id)
     if acc["provider"] == "aws":
         return aws_billing(acc_id, force=force)
+    if gcp.is_gc(acc):  # greencloud：SolusVM 没有账单接口
+        return gcp.billing_stub(now_local())  # greencloud
     # OCI / Azure 免费，实时查询
     data = provider(acc_id).billing()
     try:   # v1.4：记录本月累计，供 Credit 已用额度估算

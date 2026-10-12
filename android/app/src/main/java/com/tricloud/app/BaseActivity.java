@@ -140,7 +140,7 @@ public abstract class BaseActivity extends AppCompatActivity {
         logo.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_HeadlineSmall);
         head.addView(logo);
         TextView sub = new TextView(this);
-        sub.setText("OCI · AWS · Azure 多云面板");
+        sub.setText("OCI · AWS · Azure · GreenCloud 多云面板");
         sub.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodySmall);
         head.addView(sub);
         nav.addHeaderView(head);
@@ -184,7 +184,7 @@ public abstract class BaseActivity extends AppCompatActivity {
         };
         add.apply(m, new String[]{"home", "🏠 总览"});
         JSONArray accs = Api.accounts == null ? new JSONArray() : Api.accounts;
-        String[] dots = {"🟥", "🟧", "🟦"};
+        String[] dots = {"🟥", "🟧", "🟦", "🟩"};
         for (int p = 0; p < MainActivity.PROVS.length; p++) {
             android.view.SubMenu sm = null;
             for (int i = 0; i < accs.length(); i++) {
@@ -201,7 +201,7 @@ public abstract class BaseActivity extends AppCompatActivity {
         add.apply(out, new String[]{"logout", "🚪 退出登录"}).setCheckable(false);
     }
 
-    private static final int[] PROV_LOGOS = {R.drawable.logo_oci, R.drawable.logo_aws, R.drawable.logo_azure};
+    private static final int[] PROV_LOGOS = {R.drawable.logo_oci, R.drawable.logo_aws, R.drawable.logo_azure, R.drawable.logo_greencloud};
 
     /** 侧栏云厂商分组标题：官方 Logo + 名称（保持原大小写）。 */
     private CharSequence provHeader(int p) {
@@ -279,7 +279,7 @@ public abstract class BaseActivity extends AppCompatActivity {
                 if (x.optInt("account_id") == accId && instId.equals(x.optString("instance_id"))) g = x;
             }
             JSONObject gg = g;
-            String rgq = "azure".equals(prov) ? "" : "&region=" + Api.enc(region);
+            String rgq = MainActivity.noRegion(prov) ? "" : "&region=" + Api.enc(region);
             Api.job(this, () -> {
                 try { return Api.call("GET", "/accounts/" + accId + "/traffic?instance_id=" + Api.enc(instId) + "&kind=" + kind + rgq, null); }
                 catch (Exception e) { return new JSONObject().put("error", e.getMessage()); }
@@ -299,7 +299,7 @@ public abstract class BaseActivity extends AppCompatActivity {
                 form("流量守护 · " + name, use + "\n月度模式每 30 分钟、滚动窗口每 10 分钟查一次平台指标（免费，有 5~15 分钟延迟）。到预警比例推送 Telegram；自动开机失败只告警、不重试。", f, "保存", v -> {
                     try {
                         v.put("account_id", accId).put("instance_id", instId).put("kind", kind).put("name", name);
-                        if (region != null && !region.isEmpty() && !"azure".equals(prov)) v.put("region", region);
+                        if (region != null && !region.isEmpty() && !MainActivity.noRegion(prov)) v.put("region", region);
                         Api.post(this, "/traffic-guards", v, x -> {
                             JSONObject o = Api.obj(x);
                             toast(o.has("warning") && !o.isNull("warning") ? o.optString("warning") : "已保存，当前已用 " + str(o, "last_gb", "-") + " GB（" + str(o, "last_pct", "-") + "%）");

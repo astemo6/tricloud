@@ -14,6 +14,7 @@ import html
 import time
 
 from . import core, services
+from .providers import greencloud_provider as gcp  # greencloud
 
 # 各家每月免费出站流量（GB），作为新建守护时的默认上限
 DEFAULT_LIMIT = {"oci": 10240, "aws": 100, "azure": 100}
@@ -51,6 +52,8 @@ def usage_window(g, hours):
 
 def measure(g):
     """按规则的模式和方向算出已用 GB。"""
+    if gcp.is_gc(core.get_account(g["account_id"]) or {}):  # greencloud：bw.used，额度同步为 bw.total
+        return gcp.guard_measure(g)  # greencloud
     rolling = g.get("mode") == "rolling"
     u = usage_window(g, int(g.get("window_hours") or 24)) if rolling else usage(g)
     out, inn = float(u.get("out_gb") or 0), float(u.get("in_gb") or 0)
@@ -70,16 +73,18 @@ def fmt_ts(ts):
 
 def check(g, act=True):
     """检查一条守护规则。返回需要推送的文本（或 None）。act=False 时只刷新用量不触发停机。"""
+    g = dict(g)
+    gc = gcp.is_gc(core.get_account(g["account_id"]) or {})  # greencloud：按自己的计费周期清零，跨月不重置提醒等级
     rolling = g.get("mode") == "rolling"
     month = services.now_local().strftime("%Y-%m")
-    notified = g["notified"] if (rolling or g.get("month") == month) else 0
+    notified = g["notified"] if (rolling or gc or g.get("month") == month) else 0  # greencloud
     used = measure(g)
     limit = float(g["limit_gb"] or 1)
     pct = used / limit * 100
     lvl = 2 if pct >= 100 else (1 if pct >= int(g.get("warn_pct") or 80) else 0)
     text = None
     name = html.escape(g.get("name") or g["instance_id"][-12:])
-    scope = scope_text(g)
+    scope = gcp.SCOPE_TEXT if gc else scope_text(g)  # greencloud
     extra = {}
     if act and lvl > notified:
         if lvl == 1:
@@ -100,7 +105,7 @@ def check(g, act=True):
                     else:
                         extra = {"state": "tripped", "tripped_at": now, "resume_at": None,
                                  "state_msg": "超限停机（不自动开机）"}
-                        text += ("\n已自动停机（不会自动开机，请手动启动）" if rolling
+                        text += ("\n已自动停机（不会自动开机，请手动启动）" if rolling or gc  # greencloud
                                  else "\n已自动停机（下月 1 日不会自动开机，请手动启动）")
                 except Exception as e:
                     text += f"\n自动停机失败：{html.escape(str(e)[:200])}"
@@ -119,7 +124,9 @@ def due():
     """到了检查时间、已启用、且没有在等待自动开机的规则。"""
     now = int(time.time())
     out = []
-    for g in core.q("SELECT g.* FROM traffic_guards g JOIN accounts a ON a.id=g.account_id WHERE COALESCE(a.disabled,0)=0"):
+    for g in core.q("SELECT g.*, a.provider AS _prov FROM traffic_guards g JOIN accounts a ON a.id=g.account_id WHERE COALESCE(a.disabled,0)=0"):
+        if gcp.hidden(g.pop("_prov")):  # greencloud
+            continue
         if g.get("enabled") == 0 or (g.get("state") == "tripped" and g.get("resume_at")):
             continue   # 停用 / 等待自动开机期间不检查
         every = ROLLING_CHECK_EVERY if g.get("mode") == "rolling" else CHECK_EVERY
@@ -131,7 +138,8 @@ def due():
 def resume_due():
     """关机 M 小时到期、需要自动开机的规则。"""
     now = int(time.time())
-    return [g for g in core.q("SELECT * FROM traffic_guards WHERE state='tripped' AND resume_at IS NOT NULL AND resume_at<=?", (now,))]
+    return [g for g in core.q("SELECT * FROM traffic_guards WHERE state='tripped' AND resume_at IS NOT NULL AND resume_at<=?", (now,))
+            if not gcp.hidden((core.get_account(g["account_id"]) or {}).get("provider"))]  # greencloud
 
 
 def resume(g):

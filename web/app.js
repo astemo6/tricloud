@@ -85,6 +85,17 @@ const TABS = {
   azure: [["vms", "虚拟机"], ["azcreate", "创建 VM"], ["rgs", "资源组"], ["azquota", "配额"], ["foundry", "Foundry"], ["subscription", "订阅"], ["billing", "账单"]],
 };
 const PNAME = { oci: "Oracle Cloud", aws: "AWS", azure: "Azure" };
+// 扩展点（附加云厂商在自己的代码块里登记，见文件末尾的 GC 块）
+const PROVS = ["oci", "aws", "azure"];          // 侧栏 / 切换器 / 下拉的顺序
+let META = { providers: PROVS.slice() };         // GET /api/meta：当前可添加的云厂商
+const NO_REGION = new Set(["azure"]);            // 没有区域概念的云
+const NO_CHANGE_IP = new Set();                  // 不能换 IP 的云（监控里不显示「不通自动换 IP」）
+const NO_CREATE = new Set();                     // 不能创建实例的云（不能作为迁移目标）
+const TAB_FNS_EXTRA = {}, OP_NAMES = {}, TRAFFIC_DIALOG = {}, ADD_BODY = {}, PROV_HINT = {};
+const TEXTAREA_FIELDS = new Set(["key_content"]);
+const SETTINGS_CARDS = [];                       // [{ html(settings), bind(root) }]
+const NOREG = (acc) => NO_REGION.has(acc.provider);
+const provOpts = (blank) => (blank ? `<option value="">${esc(blank)}</option>` : "") + PROVS.filter((p) => META.providers.includes(p)).map((p) => `<option value="${p}">${esc(PNAME[p])}</option>`).join("");
 // 三家官方 Logo（内联 SVG；AWS 文字随主题用 currentColor）
 const PLOGO = {"oci": "<svg class=\"plogo\" aria-hidden=\"true\" viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\"><path fill=\"#C74634\" d=\"M16.412 4.412h-8.82a7.588 7.588 0 0 0-.008 15.176h8.828a7.588 7.588 0 0 0 0-15.176zm-.193 12.502H7.786a4.915 4.915 0 0 1 0-9.828h8.433a4.914 4.914 0 1 1 0 9.828z\"/></svg>", "aws": "<svg class=\"plogo aws\" aria-hidden=\"true\" viewBox=\"0 0 304 182\" xmlns=\"http://www.w3.org/2000/svg\"><g><path fill=\"currentColor\" d=\"M86.4,66.4c0,3.7,0.4,6.7,1.1,8.9c0.8,2.2,1.8,4.6,3.2,7.2c0.5,0.8,0.7,1.6,0.7,2.3c0,1-0.6,2-1.9,3l-6.3,4.2 c-0.9,0.6-1.8,0.9-2.6,0.9c-1,0-2-0.5-3-1.4C76.2,90,75,88.4,74,86.8c-1-1.7-2-3.6-3.1-5.9c-7.8,9.2-17.6,13.8-29.4,13.8 c-8.4,0-15.1-2.4-20-7.2c-4.9-4.8-7.4-11.2-7.4-19.2c0-8.5,3-15.4,9.1-20.6c6.1-5.2,14.2-7.8,24.5-7.8c3.4,0,6.9,0.3,10.6,0.8 c3.7,0.5,7.5,1.3,11.5,2.2v-7.3c0-7.6-1.6-12.9-4.7-16c-3.2-3.1-8.6-4.6-16.3-4.6c-3.5,0-7.1,0.4-10.8,1.3c-3.7,0.9-7.3,2-10.8,3.4 c-1.6,0.7-2.8,1.1-3.5,1.3c-0.7,0.2-1.2,0.3-1.6,0.3c-1.4,0-2.1-1-2.1-3.1v-4.9c0-1.6,0.2-2.8,0.7-3.5c0.5-0.7,1.4-1.4,2.8-2.1 c3.5-1.8,7.7-3.3,12.6-4.5c4.9-1.3,10.1-1.9,15.6-1.9c11.9,0,20.6,2.7,26.2,8.1c5.5,5.4,8.3,13.6,8.3,24.6V66.4z M45.8,81.6 c3.3,0,6.7-0.6,10.3-1.8c3.6-1.2,6.8-3.4,9.5-6.4c1.6-1.9,2.8-4,3.4-6.4c0.6-2.4,1-5.3,1-8.7v-4.2c-2.9-0.7-6-1.3-9.2-1.7 c-3.2-0.4-6.3-0.6-9.4-0.6c-6.7,0-11.6,1.3-14.9,4c-3.3,2.7-4.9,6.5-4.9,11.5c0,4.7,1.2,8.2,3.7,10.6 C37.7,80.4,41.2,81.6,45.8,81.6z M126.1,92.4c-1.8,0-3-0.3-3.8-1c-0.8-0.6-1.5-2-2.1-3.9L96.7,10.2c-0.6-2-0.9-3.3-0.9-4 c0-1.6,0.8-2.5,2.4-2.5h9.8c1.9,0,3.2,0.3,3.9,1c0.8,0.6,1.4,2,2,3.9l16.8,66.2l15.6-66.2c0.5-2,1.1-3.3,1.9-3.9c0.8-0.6,2.2-1,4-1 h8c1.9,0,3.2,0.3,4,1c0.8,0.6,1.5,2,1.9,3.9l15.8,67l17.3-67c0.6-2,1.3-3.3,2-3.9c0.8-0.6,2.1-1,3.9-1h9.3c1.6,0,2.5,0.8,2.5,2.5 c0,0.5-0.1,1-0.2,1.6c-0.1,0.6-0.3,1.4-0.7,2.5l-24.1,77.3c-0.6,2-1.3,3.3-2.1,3.9c-0.8,0.6-2.1,1-3.8,1h-8.6c-1.9,0-3.2-0.3-4-1 c-0.8-0.7-1.5-2-1.9-4L156,23l-15.4,64.4c-0.5,2-1.1,3.3-1.9,4c-0.8,0.7-2.2,1-4,1H126.1z M254.6,95.1c-5.2,0-10.4-0.6-15.4-1.8 c-5-1.2-8.9-2.5-11.5-4c-1.6-0.9-2.7-1.9-3.1-2.8c-0.4-0.9-0.6-1.9-0.6-2.8v-5.1c0-2.1,0.8-3.1,2.3-3.1c0.6,0,1.2,0.1,1.8,0.3 c0.6,0.2,1.5,0.6,2.5,1c3.4,1.5,7.1,2.7,11,3.5c4,0.8,7.9,1.2,11.9,1.2c6.3,0,11.2-1.1,14.6-3.3c3.4-2.2,5.2-5.4,5.2-9.5 c0-2.8-0.9-5.1-2.7-7c-1.8-1.9-5.2-3.6-10.1-5.2L246,52c-7.3-2.3-12.7-5.7-16-10.2c-3.3-4.4-5-9.3-5-14.5c0-4.2,0.9-7.9,2.7-11.1 c1.8-3.2,4.2-6,7.2-8.2c3-2.3,6.4-4,10.4-5.2c4-1.2,8.2-1.7,12.6-1.7c2.2,0,4.5,0.1,6.7,0.4c2.3,0.3,4.4,0.7,6.5,1.1 c2,0.5,3.9,1,5.7,1.6c1.8,0.6,3.2,1.2,4.2,1.8c1.4,0.8,2.4,1.6,3,2.5c0.6,0.8,0.9,1.9,0.9,3.3v4.7c0,2.1-0.8,3.2-2.3,3.2 c-0.8,0-2.1-0.4-3.8-1.2c-5.7-2.6-12.1-3.9-19.2-3.9c-5.7,0-10.2,0.9-13.3,2.8c-3.1,1.9-4.7,4.8-4.7,8.9c0,2.8,1,5.2,3,7.1 c2,1.9,5.7,3.8,11,5.5l14.2,4.5c7.2,2.3,12.4,5.5,15.5,9.6c3.1,4.1,4.6,8.8,4.6,14c0,4.3-0.9,8.2-2.6,11.6 c-1.8,3.4-4.2,6.4-7.3,8.8c-3.1,2.5-6.8,4.3-11.1,5.6C264.4,94.4,259.7,95.1,254.6,95.1z\"/><g><path fill=\"#FF9900\" fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M273.5,143.7c-32.9,24.3-80.7,37.2-121.8,37.2c-57.6,0-109.5-21.3-148.7-56.7c-3.1-2.8-0.3-6.6,3.4-4.4 c42.4,24.6,94.7,39.5,148.8,39.5c36.5,0,76.6-7.6,113.5-23.2C274.2,133.6,278.9,139.7,273.5,143.7z\"/><path fill=\"#FF9900\" fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M287.2,128.1c-4.2-5.4-27.8-2.6-38.5-1.3c-3.2,0.4-3.7-2.4-0.8-4.5c18.8-13.2,49.7-9.4,53.3-5 c3.6,4.5-1,35.4-18.6,50.2c-2.7,2.3-5.3,1.1-4.1-1.9C282.5,155.7,291.4,133.4,287.2,128.1z\"/></g></g></svg>", "azure": "<svg class=\"plogo\" aria-hidden=\"true\" viewBox=\"0 0 96 96\" xmlns=\"http://www.w3.org/2000/svg\"><defs><linearGradient id=\"tcaz0\" x1=\"-1032.172\" x2=\"-1059.213\" y1=\"145.312\" y2=\"65.426\" gradientTransform=\"matrix(1 0 0 -1 1075 158)\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#114a8b\"/><stop offset=\"1\" stop-color=\"#0669bc\"/></linearGradient><linearGradient id=\"tcaz1\" x1=\"-1023.725\" x2=\"-1029.98\" y1=\"108.083\" y2=\"105.968\" gradientTransform=\"matrix(1 0 0 -1 1075 158)\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-opacity=\".3\"/><stop offset=\".071\" stop-opacity=\".2\"/><stop offset=\".321\" stop-opacity=\".1\"/><stop offset=\".623\" stop-opacity=\".05\"/><stop offset=\"1\" stop-opacity=\"0\"/></linearGradient><linearGradient id=\"tcaz2\" x1=\"-1027.165\" x2=\"-997.482\" y1=\"147.642\" y2=\"68.561\" gradientTransform=\"matrix(1 0 0 -1 1075 158)\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#3ccbf4\"/><stop offset=\"1\" stop-color=\"#2892df\"/></linearGradient></defs><path fill=\"url(#tcaz0)\" d=\"M33.338 6.544h26.038l-27.03 80.087a4.152 4.152 0 0 1-3.933 2.824H8.149a4.145 4.145 0 0 1-3.928-5.47L29.404 9.368a4.152 4.152 0 0 1 3.934-2.825z\"/><path fill=\"#0078d4\" d=\"M71.175 60.261h-41.29a1.911 1.911 0 0 0-1.305 3.309l26.532 24.764a4.171 4.171 0 0 0 2.846 1.121h23.38z\"/><path fill=\"url(#tcaz1)\" d=\"M33.338 6.544a4.118 4.118 0 0 0-3.943 2.879L4.252 83.917a4.14 4.14 0 0 0 3.908 5.538h20.787a4.443 4.443 0 0 0 3.41-2.9l5.014-14.777 17.91 16.705a4.237 4.237 0 0 0 2.666.972H81.24L71.024 60.261l-29.781.007L59.47 6.544z\"/><path fill=\"url(#tcaz2)\" d=\"M66.595 9.364a4.145 4.145 0 0 0-3.928-2.82H33.648a4.146 4.146 0 0 1 3.928 2.82l25.184 74.62a4.146 4.146 0 0 1-3.928 5.472h29.02a4.146 4.146 0 0 0 3.927-5.472z\"/></svg>"};
 
@@ -128,7 +139,7 @@ function renderSide(p) {
   const cur = "#/" + (p[0] === "deleted" ? "accounts" : p.slice(0, 2).join("/"));
   const link = (h, label, cls = "") => `<a href="${h}" class="${(cur === h || (h === "#/" && !p.length)) ? "on" : ""}">${cls}${label}</a>`;
   let html = `<div class="logo">Tri<span>Cloud</span></div>` + link("#/", "🏠 总览");
-  for (const prov of ["oci", "aws", "azure"]) {
+  for (const prov of PROVS) {
     const list = ACCOUNTS.filter((a) => a.provider === prov);
     if (!list.length) continue;
     html += `<div class="grp prov">${PLOGO[prov]}${PNAME[prov]}</div>`;
@@ -148,7 +159,7 @@ function renderSide(p) {
 // ---------------- 区域 ----------------
 const regionOf = (acc) => localStorage.getItem("tc_region_" + acc.id) || acc.region || "";
 async function regionSelect(acc, onChange) {
-  if (acc.provider === "azure") return "";
+  if (NOREG(acc)) return "";
   const id = "rg" + acc.id;
   setTimeout(async () => {
     const sel = document.getElementById(id);
@@ -163,7 +174,7 @@ async function regionSelect(acc, onChange) {
   });
   return `<select id="${id}" title="区域"><option>${esc(regionOf(acc))}</option></select>`;
 }
-const rq = (acc) => (acc.provider === "azure" ? "" : `region=${encodeURIComponent(regionOf(acc))}`);
+const rq = (acc) => (NOREG(acc) ? "" : `region=${encodeURIComponent(regionOf(acc))}`);
 
 // ---------------- 总览 ----------------
 async function pageHome() {
@@ -219,7 +230,7 @@ async function pageAccount(acc, tab) {
     create: tabOciCreate, snatch: tabOciSnatch, cloudfront: tabCloudFront, quota: tabQuota, recycle: tabRecycle, billing: tabBilling,
     limits: tabOciLimits, regions: tabAwsRegions, azcreate: tabAzCreate, rgs: tabAzRgs, azquota: tabAzQuota,
     subscription: tabAzSubscription, secgroup: tabOciSecGroup, foundry: tabAzFoundry,
-  }[tab];
+  }[tab] || TAB_FNS_EXTRA[tab];
   await fn(acc, box);
 }
 
@@ -305,7 +316,7 @@ async function tabInstances(acc, box, kind = "vm") {
 
 async function instOp(acc, inst, op, kind, btn, reload) {
   const base = { instance_id: inst.id, region: regionOf(acc) || undefined, kind, name: inst.name };
-  const names = { start: "启动", stop: "停止", reboot: "重启", terminate: "终止" };
+  const names = OP_NAMES[acc.provider] || { start: "启动", stop: "停止", reboot: "重启", terminate: "终止" };
   if (V16_OPS[op]) return V16_OPS[op](acc, inst, base, kind, btn, reload);
   if (names[op]) {
     const danger = op === "terminate";
@@ -386,7 +397,7 @@ async function instOp(acc, inst, op, kind, btn, reload) {
     const r = await modal("加入监控", `<p>监控「${esc(inst.name)}」，发现非面板操作导致的停止/终止时推送 Telegram 告警。</p>
       <label><input type="checkbox" name="auto_start" style="width:auto"> 异常停止时自动启动</label>
       <label>IP 连通检测端口（0=不检测，常用 22）</label><input name="check_port" type="number" min="0" max="65535" value="0">
-      <label><input type="checkbox" name="auto_change_ip" style="width:auto"> 连续 3 次连不上时自动换 IP（并更新已绑定域名）</label>
+      ${NO_CHANGE_IP.has(acc.provider) ? `<p class="muted">该云不支持换 IP：连不上时只推送告警。</p>` : `<label><input type="checkbox" name="auto_change_ip" style="width:auto"> 连续 3 次连不上时自动换 IP（并更新已绑定域名）</label>`}
       <p class="muted">检测从面板所在服务器发起；若面板与实例跨境，结果反映的是这条线路的连通性。</p>`,
       (bg) => post(`/monitors`, { account_id: acc.id, instance_id: inst.id, region: regionOf(acc) || null, kind, name: inst.name, state: inst.state, public_ip: inst.public_ip, ...form(bg) }), "保存");
     if (r) toast("已加入监控");
@@ -579,7 +590,7 @@ const CRED_FIELDS = {
 async function pageAccounts() {
   const prov = (p) => ACCOUNTS.filter((a) => a.provider === p).length;
   view.innerHTML = `<div class="bar"><button class="btn primary" id="add">添加云账号</button><button class="btn" id="batch">批量添加</button>
-    <select id="tprov" title="测活范围"><option value="">全部账号</option>${["oci", "aws", "azure"].filter(prov).map((p) => `<option value="${p}">${PNAME[p]}</option>`).join("")}</select>
+    <select id="tprov" title="测活范围"><option value="">全部账号</option>${PROVS.filter(prov).map((p) => `<option value="${p}">${PNAME[p]}</option>`).join("")}</select>
     <button class="btn" id="testAll">⚡ 一键测活</button><a class="btn" href="#/deleted">🗑 已删账号</a><span class="grow"></span><span class="muted" id="tsum">凭证经 Fernet 加密保存在本机 SQLite，不经过任何第三方</span></div>
     <div class="card"><table><tr><th>名称</th><th>云</th><th>默认区域</th><th>云上创建 / 存活</th><th>连通</th><th>出口代理</th><th>添加时间</th><th></th></tr>
     ${ACCOUNTS.map((a) => `<tr data-acc="${a.id}" class="${a.disabled ? "acc-off" : ""}"><td><a href="#/${a.provider}/${a.id}">${esc(a.name)}</a>${a.disabled ? ` <span class="badge failed" title="${esc(a.disabled_reason || "")}">已停用</span>` : ""}${acctTypeTag(a)}</td><td><span class="dot ${a.provider}"></span> ${PNAME[a.provider]}</td>
@@ -631,10 +642,11 @@ async function pageAccounts() {
     if (r) { toast("已保存"); await loadAccounts(); route(); }
   }));
 }
+const credInput = ([k, l, ph, t]) => `<label>${l}</label>` + (t === "textarea" ? `<textarea name="c_${k}" placeholder="${esc(ph || (k === "key_content" ? "-----BEGIN PRIVATE KEY-----" : ""))}"></textarea>`
+  : `<input name="c_${k}" type="${t || "text"}" placeholder="${esc(ph || "")}" autocomplete="off">`);
 async function addAccount() {
-  const fields = (p) => CRED_FIELDS[p].map(([k, l, ph, t]) => `<label>${l}</label>` +
-    (t === "textarea" ? `<textarea name="c_${k}" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>` : `<input name="c_${k}" type="${t || "text"}" placeholder="${ph || ""}" autocomplete="off">`)).join("");
-  const r = await modal("添加云账号", `<label>云厂商</label><select name="provider" id="np"><option value="oci">Oracle Cloud</option><option value="aws">AWS</option><option value="azure">Azure</option></select>
+  const fields = (p) => CRED_FIELDS[p].map(credInput).join("");
+  const r = await modal("添加云账号", `<label>云厂商</label><select name="provider" id="np">${provOpts()}</select>
     <label>备注名称</label><input name="name" placeholder="例如 东京主号">
     <details id="smartpaste" open><summary class="muted">粘贴内容自动识别（控制台复制、环境变量、AWS CSV、Azure 门户、OCI config 都行）</summary>
     <textarea id="smarttext" placeholder="把复制的一堆内容直接贴进来，例如：&#10;Access key ID: AKIA...&#10;Secret access key: ...&#10;或 Azure 应用注册页的 应用程序(客户端) ID / 目录(租户) ID / 值 / 订阅 ID&#10;或 OCI 配置文件预览 + 私钥 PEM"></textarea>
@@ -644,16 +656,15 @@ async function addAccount() {
     const f = form(bg); const cred = {};
     for (const k in f) if (k.startsWith("c_")) cred[k.slice(2)] = f[k];
     toast("正在校验凭证…");
-    return post("/accounts", { provider: f.provider, name: f.name, cred });
+    return post("/accounts", ADD_BODY[f.provider] ? ADD_BODY[f.provider](f, cred, bg) : { provider: f.provider, name: f.name, cred });
   }, "校验并保存");
   if (r) { toast("账号已添加"); await loadAccounts(); go("#/accounts"); }
 }
 document.addEventListener("change", (e) => {
   if (e.target.id !== "np") return;
   const p = e.target.value;
-  const hint = { oci: "在 OCI 控制台「我的概要信息 → API 密钥」生成。", aws: "建议使用仅含 EC2/Lightsail/CloudFront/Service Quotas/CE 权限的 IAM 用户。", azure: "az ad sp create-for-rbac --role Contributor --scopes /subscriptions/<id> 生成。" }[p];
-  $("#cf").innerHTML = CRED_FIELDS[p].map(([k, l, ph, t]) => `<label>${l}</label>` +
-    (t === "textarea" ? `<textarea name="c_${k}"></textarea>` : `<input name="c_${k}" type="${t || "text"}" placeholder="${ph || ""}" autocomplete="off">`)).join("");
+  const hint = { oci: "在 OCI 控制台「我的概要信息 → API 密钥」生成。", aws: "建议使用仅含 EC2/Lightsail/CloudFront/Service Quotas/CE 权限的 IAM 用户。", azure: "az ad sp create-for-rbac --role Contributor --scopes /subscriptions/<id> 生成。", ...PROV_HINT }[p];
+  $("#cf").innerHTML = CRED_FIELDS[p].map(credInput).join("");
   $("#hint").textContent = hint;
 });
 
@@ -732,7 +743,8 @@ async function pageSettings() {
     <label><input type="checkbox" id="compact" ${document.documentElement.classList.contains("compact") ? "checked" : ""}> 紧凑模式（缩小行高和留白，只对本设备生效）</label></div>
   <div class="card" id="pw"><h3>修改面板密码</h3><label>原密码</label><input name="old" type="password">
     <label>新密码（≥10 位）</label><input name="new" type="password"><div class="bar" style="margin-top:12px"><button class="btn primary" id="savePw">修改</button></div>
-    <p class="muted">修改后所有设备需要重新登录。登录连续失败 5 次将锁定该 IP 15 分钟。</p></div></div>`;
+    <p class="muted">修改后所有设备需要重新登录。登录连续失败 5 次将锁定该 IP 15 分钟。</p></div>${SETTINGS_CARDS.map((c) => c.html(s)).join("")}</div>`;
+  SETTINGS_CARDS.forEach((c) => c.bind(view));
   $("#save").onclick = (e) => { const f = form($("#tg")); if (!f.tg_token) delete f.tg_token; act(e.target, () => post("/settings", f), "已保存").then(pageSettings); };
   $("#test").onclick = (e) => act(e.target, () => post("/settings/tg-test"), "测试消息已发送");
   $("#saveCf").onclick = (e) => { const f = form($("#cfc")); if (!f.cf_token) return toast("请输入 Token", true); act(e.target, () => post("/settings", f), "已保存").then(pageSettings); };
@@ -1124,7 +1136,7 @@ const migSpec = (p) => ({
       <div><label>系统盘 GB</label><input name="disk_gb" type="number" min="30" value="64"></div><div><label>额外端口</label><input name="ports" placeholder="80,443"></div></div>`,
   }[p]);
 async function migrateDialog(acc, inst) {
-  const targets = ACCOUNTS.filter((a) => a.id !== acc.id);
+  const targets = ACCOUNTS.filter((a) => a.id !== acc.id && !NO_CREATE.has(a.provider));
   if (!targets.length) return toast("至少需要两个云账号才能迁移", true);
   const lf = await loginFields();
 
@@ -1155,9 +1167,10 @@ async function trafficDialog(acc, inst, kind, onSaved) {
   let gs = [];
   try { gs = await api("/traffic-guards"); } catch (_) { /* ignore */ }
   const g = gs.find((x) => x.account_id === acc.id && x.instance_id === inst.id) || {};
+  if (TRAFFIC_DIALOG[acc.provider]) return TRAFFIC_DIALOG[acc.provider](acc, inst, g, onSaved);
   let use = "";
   try {
-    const rgq = acc.provider === "azure" ? "" : `region=${encodeURIComponent(inst.region || regionOf(acc))}`;
+    const rgq = NOREG(acc) ? "" : `region=${encodeURIComponent(inst.region || regionOf(acc))}`;
     const t = await api(`/accounts/${acc.id}/traffic?instance_id=${encodeURIComponent(inst.id)}&kind=${kind}&${rgq}`);
     use = `<p>本月（${esc(t.period)}）出站 <b>${t.out_gb} GB</b>，入站 ${t.in_gb} GB。</p>`;
   } catch (e) { use = `<p class="muted">读取流量失败：${esc(e.message)}</p>`; }
@@ -1334,7 +1347,7 @@ function openAccMenu() {
   const draw = () => {
     const q = $("#accq").value.trim().toLowerCase();
     let html = "";
-    for (const prov of ["oci", "aws", "azure"]) {
+    for (const prov of PROVS) {
       const l = ACCOUNTS.filter((a) => a.provider === prov && (!q || (a.name + " " + (a.region || "") + " " + PNAME[prov]).toLowerCase().includes(q)));
       if (!l.length) continue;
       html += `<div class="accg">${PNAME[prov]}</div>` + l.map((a) => `<button class="acci ${a.id == p[1] && a.provider === p[0] ? "on" : ""}" data-go="#/${prov}/${a.id}/${mapTab(curTab, prov)}">
@@ -1406,7 +1419,7 @@ function testCell(a, r) {
 async function accountInfoDialog(a) {
   const r = await modal(`账号信息 · ${a.name}`, `<label>云账号创建日期（用于计算存活天数${a.provider === "azure" ? "、估算教育优惠到期日" : ""}）</label>
     <input name="cloud_created_at" type="date" value="${esc(a.cloud_created_at || "")}">
-    <p class="muted">${a.provider === "oci" ? `OCI 可自动读取租户创建时间。 <button type="button" class="btn sm" id="ccDetect">从 OCI 读取</button> <span id="ccMsg"></span>` : "AWS / Azure 没有免费接口能读到账号创建日期，请按控制台或注册邮件填写。"}</p>
+    <p class="muted">${a.provider === "oci" ? `OCI 可自动读取租户创建时间。 <button type="button" class="btn sm" id="ccDetect">从 OCI 读取</button> <span id="ccMsg"></span>` : "该云没有免费接口能读到账号创建日期，请按控制台或注册邮件填写。"}</p>
     ${a.provider === "azure" ? `<label>Azure 教育优惠到期日（留空 = 按创建日期 + 12 个月估算）</label><input name="edu_expires_at" type="date" value="${esc(a.edu_expires_at || "")}">` : ""}`,
     (bg) => api(`/accounts/${a.id}`, { method: "PATCH", body: form(bg) }), "保存", false, (bg) => {
       const b = bg.querySelector("#ccDetect");
@@ -1434,7 +1447,7 @@ region=ap-tokyo-1
 -----END PRIVATE KEY-----`;
   const r = await modal("批量添加云账号", `<p class="muted">直接粘贴复制来的一堆内容：控制台页面、环境变量、AWS accessKeys.csv、Azure 应用注册页、OCI config + 私钥，或 JSON，混在一起也能自动识别、自动拆分成多个账号。每条都会在线校验凭证，结果逐条显示。</p>
     <textarea name="text" style="min-height:260px" placeholder="${esc(sample)}">${esc(prefill || "")}</textarea>
-    <div class="row2"><div><label>无法判断云厂商时按</label><select name="provider"><option value="">不猜测（报错）</option><option value="oci">Oracle Cloud</option><option value="aws">AWS</option><option value="azure">Azure</option></select></div>
+    <div class="row2"><div><label>无法判断云厂商时按</label><select name="provider">${provOpts("不猜测（报错）")}</select></div>
     <div><label>&nbsp;</label><label><input type="checkbox" name="dry_run"> 只检查格式，不校验、不保存</label></div></div>`, (bg) => {
     const f = form(bg); if (!f.text) throw new Error("请粘贴内容");
     toast("正在逐条校验…");
@@ -1732,9 +1745,10 @@ async function editAccount(a) {
   try { d = await api(`/accounts/${a.id}/detail`); } catch (e) { return toast(e.message, true); }
   const fld = Object.entries(d.fields).map(([k, v]) => {
     const label = CRED_LABEL[k] || k;
-    if (typeof v === "string") return `<label>${label}</label><input name="c_${k}" value="${esc(v)}" autocomplete="off">`;
+    if (typeof v === "string") return TEXTAREA_FIELDS.has(k) ? `<label>${label}</label><textarea name="c_${k}" rows="4" class="mono">${esc(v)}</textarea>`
+      : `<label>${label}</label><input name="c_${k}" value="${esc(v)}" autocomplete="off">`;
     const ph = v.set ? `已设置${v.hint ? " " + v.hint : ""}，留空不改` : "未设置";
-    return k === "key_content" ? `<label>${label}</label><textarea name="c_${k}" placeholder="${esc(ph)}"></textarea>`
+    return TEXTAREA_FIELDS.has(k) ? `<label>${label}</label><textarea name="c_${k}" placeholder="${esc(ph)}"></textarea>`
       : `<label>${label}</label><input name="c_${k}" type="${/secret|pass_phrase/.test(k) ? "password" : "text"}" placeholder="${esc(ph)}" autocomplete="new-password">`;
   }).join("");
   const r = await modal(`编辑账号 · ${a.name}`, `<label>备注名称</label><input name="name" value="${esc(d.name)}">${fld}
@@ -1787,8 +1801,105 @@ async function smartParse() {
 document.addEventListener("input", (e) => { if (e.target.id === "smarttext") { clearTimeout(SMART_T); SMART_T = setTimeout(smartParse, 350); } });
 document.addEventListener("change", (e) => { if (e.target.id === "smartpick") smartFill(); });
 
+
+// ================= GC 块 BEGIN：绿云 GreenCloud（SolusVM 客户 API，只能开机 / 关机 / 重启、查流量）=================
+// 可拆卸：删掉 BEGIN 到 END 之间的全部代码即可移除 Web 端的绿云（其余地方只用上面的通用扩展点）。
+PROVS.push("greencloud");
+PNAME.greencloud = "GreenCloud";
+PLOGO.greencloud = "<svg class=\"plogo\" aria-hidden=\"true\" viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\"><path fill=\"#2fb344\" d=\"M18.5 19H7a5 5 0 0 1-.9-9.92A6.5 6.5 0 0 1 18.66 8.5 5.25 5.25 0 0 1 18.5 19z\"/><path fill=\"#fff\" d=\"M9 15.6c3.6.3 6.1-1.6 6.6-5.6-3.9-.2-6.4 1.4-6.6 5.6zm.2.4c1-1.8 2.4-3 4.2-3.9-1.9.6-3.4 1.7-4.6 3.4z\"/></svg>";
+TABS.greencloud = [["gcvps", "实例"]];
+NO_REGION.add("greencloud"); NO_CHANGE_IP.add("greencloud"); NO_CREATE.add("greencloud"); TEXTAREA_FIELDS.add("servers_text");
+OP_NAMES.greencloud = { start: "开机", stop: "关机", reboot: "重启" };
+CRED_FIELDS.greencloud = [["api_url", "面板地址", "https://cp.greencloudvps.com（可带端口，或填到 /api/client）"],
+  ["servers_text", "VPS 列表（每行一台：名称 key hash，空格或逗号分隔）", "洛杉矶 ABCDE-FGHIJ-KLMNO 0123456789abcdef0123456789abcdef01234567", "textarea"],
+  ["proxy", "出口代理（可选）", "http://host:port"], ["proxy_user", "代理用户名（可选）"], ["proxy_pass", "代理密码（可选）", "", "password"]];
+Object.assign(CRED_LABEL, { api_url: "面板地址（留空 = https://cp.greencloudvps.com）",
+  servers_text: "VPS 列表（每行：名称 key hash；****xxxx 为打码值，保持不动即沿用原值）" });
+PROV_HINT.greencloud = "在绿云 VPS 控制面板（SolusVM）每台机器的「API」页生成 key 和 hash。绿云 API 只支持开机、关机、重启和查看流量。";
+// 约定：POST /accounts 收 {provider, name, api_url, servers_text}，由后端拆成 servers
+ADD_BODY.greencloud = (f, cred, bg) => { const { api_url, servers_text, ...rest } = cred; const raw = bg.querySelector('[name="c_servers_text"]');
+  return { provider: "greencloud", name: f.name, api_url, servers_text: raw ? raw.value : servers_text, cred: rest }; };
+TAB_FNS_EXTRA.gcvps = tabGcInstances;
+TRAFFIC_DIALOG.greencloud = (acc, inst, g, onSaved) => gcTrafficDialog(acc, inst, g, onSaved);
+SETTINGS_CARDS.push({
+  html: (s) => `<div class="card" id="gcSet"><h3>绿云 GreenCloud</h3><p class="muted">关闭后：不能再添加绿云账号；已有绿云账号在列表、总览、侧栏、Telegram、流量守护、监控里全部隐藏，数据保留，重新打开即恢复。</p>
+    <label><input type="checkbox" name="enable_greencloud" ${s.enable_greencloud === false ? "" : "checked"}> 启用绿云</label>
+    <div class="bar" style="margin-top:12px"><button class="btn primary" id="saveGc">保存</button></div></div>`,
+  bind: (root) => { const b = root.querySelector("#saveGc"); if (b) b.onclick = async (e) => {
+    const on = root.querySelector('[name="enable_greencloud"]').checked;
+    if (await act(e.target, () => post("/settings", { enable_greencloud: on }), on ? "已启用绿云" : "已关闭绿云（数据保留）")) { await loadAccounts(); renderSide(parseHash()); }
+  }; },
+});
+const GC_OPS = [["start", "开机"], ["stop", "关机"], ["reboot", "重启"]];
+const GC_MORE = [["traffic", "流量守护"], ["monitor", "监控"]];
+const gcBytes = (b) => { const g = (+b || 0) / 1024 ** 3; return g >= 1024 ? `${(g / 1024).toFixed(2)} TB` : `${g.toFixed(g >= 100 ? 0 : 1)} GB`; };
+function gcBw(i) {
+  if (!i.bw) return `<span class="muted">-</span>`;
+  const p = +i.bw.percent || 0;
+  return `<div class="meter gcbw" title="本计费周期已用 ${p.toFixed(1)}%"><i style="width:${Math.min(100, p)}%" class="${p >= 100 ? "bad" : p >= 80 ? "warn" : ""}"></i></div>
+    <span class="nowrap">${gcBytes(i.bw.used)} / ${gcBytes(i.bw.total)} · ${p.toFixed(1)}%</span>`;
+}
+function gcCard(i) {
+  const other = (i.ips || []).filter((x) => x !== i.public_ip);
+  return `<div class="card inst" data-id="${esc(i.id)}"><div class="hd"><b title="${esc(i.id)}">${esc(i.name)}</b>
+    <span class="badge ${esc(i.state)}">${esc(i.state)}</span></div>
+    <div class="kv kv2"><span>公网</span><span class="mono">${esc(i.public_ip || "-")}</span>
+    ${other.length ? `<span>其他 IP</span><span class="mono wide">${other.map(esc).join("<br>")}</span>` : ""}
+    ${i.hostname ? `<span>主机名</span><span class="mono">${esc(i.hostname)}</span>` : ""}
+    <span>流量</span><span class="wide">${gcBw(i)}</span></div>
+    ${i.error ? `<p class="muted bad">❌ ${esc(i.error)}</p>` : ""}
+    <div class="ops">${GC_OPS.map(([o, l]) => opBtn(o, l, i)).join("")}<button class="btn sm" data-more aria-label="更多操作">更多 ▾</button></div></div>`;
+}
+function gcTable(list) {
+  return `<table class="inst-table"><tr><th>名称</th><th>状态</th><th>公网 IP</th><th>流量（本计费周期）</th><th>操作</th></tr>
+    ${list.map((i) => `<tr data-id="${esc(i.id)}"><td><b title="${esc(i.id)}">${esc(i.name)}</b>${i.hostname ? `<div class="muted mono">${esc(i.hostname)}</div>` : ""}${i.error ? `<div class="muted bad">❌ ${esc(i.error)}</div>` : ""}</td>
+    <td><span class="badge ${esc(i.state)}">${esc(i.state)}</span></td><td class="mono nowrap">${esc(i.public_ip || "-")}${(i.ips || []).length > 1 ? ` <span class="muted">+${i.ips.length - 1}</span>` : ""}</td>
+    <td style="min-width:180px">${gcBw(i)}</td>
+    <td class="row-ops"><div class="row-ops-in">${GC_OPS.map(([o, l]) => opBtn(o, l, i)).join("")}<button class="btn sm" data-more aria-label="更多操作">更多 ▾</button></div></td></tr>`).join("")}</table>`;
+}
+async function tabGcInstances(acc, box) {
+  const reload = () => tabGcInstances(acc, box);
+  box.innerHTML = `<div class="bar"><button class="btn" id="rf">刷新</button><span class="grow"></span><span class="muted" id="info"></span>
+    <div class="seg desk-only" id="ivw" title="视图（桌面宽度可用，选择会记住）"><button class="${instView() === "card" ? "on" : ""}" data-v="card">▦ 卡片</button><button class="${instView() === "table" ? "on" : ""}" data-v="table">☰ 表格</button></div></div>
+    <p class="muted">绿云（SolusVM 客户 API）只支持开机、关机、重启和查看流量；换 IP、重装、改配置等请到绿云面板操作。流量守护与监控在「更多」里设置。</p>
+    <div class="grid" id="list"><div class="empty"><span class="spin"></span></div></div>`;
+  $("#rf", box).onclick = reload;
+  box.querySelectorAll("#ivw [data-v]").forEach((b) => (b.onclick = () => { localStorage.setItem("tc_inst_view", b.dataset.v); reload(); }));
+  let list;
+  try { list = await api(`/accounts/${acc.id}/instances`); }
+  catch (e) { $("#list", box).innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
+  $("#info", box).textContent = `${list.length} 台`;
+  const useTable = instView() === "table" && isDesktop() && list.length;
+  const lb = $("#list", box);
+  lb.className = useTable ? "card itable" : "grid";
+  lb.innerHTML = !list.length ? `<div class="empty">该账号还没有 VPS（在「云账号 → 编辑」里填写 VPS 列表）</div>` : useTable ? gcTable(list) : list.map(gcCard).join("");
+  const instOf = (el) => list.find((x) => x.id === el.closest("[data-id]").dataset.id);
+  box.querySelectorAll("[data-op]").forEach((b) => (b.onclick = () => instOp(acc, instOf(b), b.dataset.op, "vm", b, reload)));
+  box.querySelectorAll("[data-more]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); const inst = instOf(b); opsMenu(b, GC_MORE, (op) => instOp(acc, inst, op, "vm", b, reload)); }));
+}
+async function gcTrafficDialog(acc, inst, g, onSaved) {
+  let t = null, use;
+  try {
+    t = await api(`/accounts/${acc.id}/traffic?instance_id=${encodeURIComponent(inst.id)}&kind=vm`);
+    use = `<p>本计费周期已用 <b>${t.used_gb} GB</b> / ${t.total_gb} GB（${(+t.percent || 0).toFixed(1)}%，出入合计）。</p>`;
+  } catch (e) { use = `<p class="muted">读取流量失败：${esc(e.message)}</p>`; }
+  const r = await modal(`流量守护 · ${inst.name}`, `${use}
+    <p class="muted">用量和额度都取自绿云面板（本计费周期的 bw），每 30 分钟检查一次。到预警比例推送 Telegram；到额度推送，可选自动关机。</p>
+    <div class="row2"><div><label>预警比例 %</label><input name="warn_pct" type="number" min="10" max="99" value="${g.warn_pct || 80}"></div>
+    <div><label>到达额度后</label><select name="action"><option value="notify">只推送</option><option value="stop" ${g.action === "stop" ? "selected" : ""}>推送并自动关机</option></select></div>
+    <div data-show-when="action=stop"><label>关机多少小时后自动开机（0 = 不自动开机）</label><input name="shutdown_hours" type="number" min="0" max="720" step="0.5" value="${g.shutdown_hours || 0}"></div></div>
+    <label><input type="checkbox" name="enabled" ${g.enabled === 0 ? "" : "checked"}> 启用这条规则</label>`,
+    (bg) => post("/traffic-guards", { account_id: acc.id, instance_id: inst.id, kind: "vm", name: inst.name, mode: "monthly",
+      limit_gb: (t && t.total_gb) || g.limit_gb || FREE_OUT.greencloud, ...form(bg) }), "保存");
+  if (r) { toast(r.warning || `已保存，当前已用 ${r.last_gb ?? "-"} GB（${r.last_pct ?? "-"}%）`, !!r.warning); if (onSaved) onSaved(); }
+}
+// ================= GC 块 END =================
+
 // ---------------- 启动 ----------------
-async function loadAccounts() { ACCOUNTS = await api("/accounts"); }
+async function loadAccounts() {
+  ACCOUNTS = await api("/accounts");
+  try { const m = await api("/meta"); if (m && Array.isArray(m.providers)) META = m; } catch (_) { /* 旧后端没有 /meta：按默认 */ }
+}
 (async function init() {
   const th = $("#theme"); th.value = TCTheme.get(); th.onchange = () => TCTheme.set(th.value);
   // 手机（≤600px）顶栏配色下拉只显示图标，避免「🖥 跟」被截断

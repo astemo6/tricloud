@@ -66,6 +66,27 @@
 - **Android 1.5.0**：CloudFront 全套、OCI 安全组、实例「开放端口」（输入框 + 公网警告确认）、删除 IPv6、EC2 / Azure 创建、账号编辑与单账号测活、代理字段、批量添加、已删账号回收站、`interrupted` 状态。
 - 文档：旧版调研文档已脱敏后放到 `docs/`。
 
+## 绿云 GreenCloud（v1.6，可选、可拆卸）
+- 绿云 KVM 用 SolusVM v1 客户 API（`POST {面板地址}/api/client/command.php`，参数 key / hash / action）。**只能开机（boot）、关机（shutdown）、重启（reboot）、查状态和流量**；终止、换 IP、改配置、改名、开放端口、重装、创建、迁移到绿云都返回 400「绿云 API 不支持」。
+- 账号：面板地址（默认 `https://cp.greencloudvps.com`，可带端口或填到 `/api/client`，只接受 https）+ VPS 列表（每行「名称 key hash」，空格或逗号分隔；每台 VPS 一组 key/hash）。key/hash 用 Fernet 加密保存；编辑回显为「名称 ****末4位 ****末4位」，PATCH 时仍是打码值的沿用原值。粘贴识别 / 批量添加支持这种格式和 `{"provider": "greencloud", ...}` JSON。
+- 实例 id 为 `gc-` + sha1(key) 前 12 位；列表带 `bw: {total, used, percent}`（字节，本计费周期）。账号没有区域（`regions` 返回 `["-"]`）、没有账单。
+- 流量守护：只支持本计费周期累计（出入合计），用量 = `bw.used`，额度自动跟随 `bw.total`；到预警比例 / 额度推送 Telegram，可选自动关机（并可 M 小时后自动开机）。离线提醒走通用监控（不支持「不通自动换 IP」）。TG：账号 → 实例列表（显示流量百分比）→ 启动 / 停止 / 重启，状态里显示流量。
+- `GET /api/meta` → `{"providers": ["oci", "aws", "azure", "greencloud"]}`（绿云关闭时没有 `greencloud`），App / Web 用它决定添加账号时显示哪些云。
+
+## 移除绿云
+**临时关闭（不删数据）**：Web「设置 → 绿云 GreenCloud → 启用绿云」取消勾选并保存（或 `POST /api/settings {"enable_greencloud": false}`）。关闭后：
+- 后端不再注册 greencloud（`/api/meta` 不含它，`POST /api/accounts` 选绿云返回 400）；
+- 已有绿云账号在 `/api/accounts`、总览、侧栏、账号切换器、账号健康度、Telegram、流量守护（列表与定时检查 / 自动开机）、监控（列表与定时检查）里全部跳过，访问其接口返回 404；
+- 数据库里的账号、流量守护规则、监控都保留，重新勾选即恢复。
+
+**彻底删除代码**（不再续费、确定不用时）：
+1. 先在面板里删除所有绿云账号（或关闭开关后直接删代码，残留的绿云账号会被当作未知云隐藏 / 报错，建议先删账号）。
+2. 删除文件：`app/providers/greencloud_provider.py`、`tests/selftest10.py`。
+3. 删除钩子：`grep -rn "greencloud" app/` —— 除上面的文件外，每一处都是带 `# greencloud` 注释的单行或两行钩子（`core.py`、`services.py`、`main.py`、`routes_v16.py`、`telegram.py`、`traffic_guard.py`、`tasks.py`、`accounts_import.py`、`guard.py`），整行删掉即可（`if gcp...:` 的下一行也一并删）；`main.py` 的 `SETTING_KEYS` 里去掉 `"enable_greencloud"`。
+4. Web：`web/app.js` 删除 `// ================= GC 块 BEGIN` 到 `// ================= GC 块 END` 之间的全部代码（其余位置只用通用扩展点，不用改）；`web/style.css` 删除带 `/* greencloud */` 的两处。
+5. 演示：`demo/mock.js` 删除 `routeGc`、`gcParse`、`gcId` 和带 greencloud 的示例账号 / 实例 / 规则，然后 `python demo/build.py`。
+6. 跑 `pyflakes app tools` 与 `tests/selftest*.py` 确认，`/api/meta` 应只剩三家云。App 端按 `/api/meta` 自动不再显示绿云。
+
 ## 从旧版迁移
 ```
 python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-data <新 data> --dry-run

@@ -5,7 +5,7 @@
   --bg: #f8fafd; --surface: #ffffff; --s-low: #f8fafd; --s-c: #f0f4f9; --s-high: #e9eef6; --s-highest: #dde3ea;
   --text: #1f1f1f; --muted: #444746; --outline: #747775; --border: #c4c7c5; --border-soft: #e1e3e1;
   --ok: #146c2e; --ok-c: #c4eed0; --warn: #8a5100; --warn-c: #ffdeae; --bad: #b3261e; --bad-c: #f9dedc;
-  --oci: #c74634; --aws: #ff9900; --azure: #0078d4;
+  --oci: #c74634; --aws: #ff9900; --azure: #0078d4; --greencloud: #2fb344; /* greencloud */
   --e1: 0 1px 2px rgba(0,0,0,.3), 0 1px 3px 1px rgba(0,0,0,.15);
   --e2: 0 1px 2px rgba(0,0,0,.3), 0 2px 6px 2px rgba(0,0,0,.15);
   --e3: 0 4px 8px 3px rgba(0,0,0,.15), 0 1px 3px rgba(0,0,0,.3);
@@ -88,7 +88,7 @@ label:has(input[type=checkbox]) { display: flex; align-items: center; font-size:
 .side a:hover { background: var(--s-high); }
 .side a.on { background: var(--secondary-c); color: var(--on-secondary-c); }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
-.dot.oci { background: var(--oci); } .dot.aws { background: var(--aws); } .dot.azure { background: var(--azure); }
+.dot.oci { background: var(--oci); } .dot.aws { background: var(--aws); } .dot.azure { background: var(--azure); } .dot.greencloud { background: var(--greencloud); } /* greencloud */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .top { display: flex; align-items: center; gap: 8px; min-height: 64px; padding: 8px 24px; background: var(--bg);
   position: sticky; top: 0; z-index: 5; transition: box-shadow .2s, background .2s; }

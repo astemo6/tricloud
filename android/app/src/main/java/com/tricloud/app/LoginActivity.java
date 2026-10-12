@@ -31,7 +31,7 @@ public class LoginActivity extends BaseActivity {
     protected void refresh() {
         clear();
         LinearLayout c = card("☁️ TriCloud");
-        muted(c, "OCI · AWS · Azure 三合一管理。直连你自托管的面板，凭证不经过第三方。");
+        muted(c, "OCI · AWS · Azure · GreenCloud 多云管理。直连你自托管的面板，凭证不经过第三方。");
         com.google.android.material.textfield.TextInputLayout t1 = inputLayout("面板地址", "https://panel.example.com",
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         server = t1.getEditText();

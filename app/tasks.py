@@ -5,6 +5,7 @@ import time
 import traceback
 
 from . import core, credits, extras, health, services, telegram, traffic_guard
+from .providers import greencloud_provider as gcp  # greencloud
 
 RUNNING = set()
 LOG_KEEP = 500          # 每个任务最多保留的日志行数（抢机任务可能跑几千次）
@@ -475,7 +476,9 @@ async def _reachability(m, st):
 async def monitor_loop():
     while True:
         interval = max(1, int(core.get_setting("monitor_interval", 5) or 5)) * 60
-        for m in core.q("SELECT m.* FROM monitors m JOIN accounts a ON a.id=m.account_id WHERE COALESCE(a.disabled,0)=0"):
+        for m in core.q("SELECT m.*, a.provider AS _prov FROM monitors m JOIN accounts a ON a.id=m.account_id WHERE COALESCE(a.disabled,0)=0"):
+            if gcp.hidden(m.pop("_prov")):  # greencloud：开关关闭时不监控
+                continue
             try:
                 st = await asyncio.to_thread(services.get_state, m["account_id"], m["instance_id"], m["region"], m["kind"])
             except Exception as e:

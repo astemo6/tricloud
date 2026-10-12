@@ -48,12 +48,19 @@ public class AccountsActivity extends BaseActivity {
         CRED.put("azure", new String[][]{{"tenant_id", "Tenant ID", "", "text"}, {"client_id", "Client (App) ID", "", "text"}, {"client_secret", "Client Secret", "", "password"},
                 {"subscription_id", "Subscription ID", "", "text"},
                 {"proxy", "出口代理（可选）", "http://host:port", "text"}, {"proxy_user", "代理用户名（可选）", "", "text"}, {"proxy_pass", "代理密码（可选）", "", "password"}});
+        // GreenCloud：字段放在请求体顶层（api_url / servers_text），不放 cred
+        CRED.put("greencloud", new String[][]{{"api_url", "面板地址", "https://cp.greencloudvps.com", "text"}, {"servers_text", "服务器列表（每行：名称 key hash）", "HK-1 ABCDE-12345 0123456789abcdef", "multi"}});
     }
+    static final String GC_DEFAULT_URL = "https://cp.greencloudvps.com";
+    /** 添加账号页切换按钮用的短名（四个按钮一行放得下）。 */
+    static final String[] PSHORT = {"OCI", "AWS", "Azure", "绿云"};
     static final Map<String, String> PROV_HINT = new LinkedHashMap<>();
     static {
         PROV_HINT.put("oci", "在 OCI 控制台「我的概要信息 → API 密钥」生成。");
         PROV_HINT.put("aws", "建议使用仅含 EC2/Lightsail/CloudFront/Service Quotas/CE 权限的 IAM 用户。");
         PROV_HINT.put("azure", "用 az ad sp create-for-rbac --role Contributor --scopes /subscriptions/<订阅 ID> 生成。");
+        PROV_HINT.put("greencloud", "面板地址默认 " + "https://cp.greencloudvps.com" + "。服务器列表每行一台，格式「名称 key hash」，用空格分隔，"
+                + "key 和 hash 在 GreenCloud 客户区该 VPS 的 API 页面获取。例如：\nHK-1 ABCDE-12345 0123456789abcdef\nJP-2 FGHIJ-67890 fedcba9876543210");
     }
 
     static String credLabel(String k) {
@@ -126,6 +133,11 @@ public class AccountsActivity extends BaseActivity {
     private List<JSONObject> smartItems = new ArrayList<>();
 
     private void addAccount(String prefill) {
+        setBusy(true);
+        Api.meta(() -> { setBusy(false); if (!isFinishing()) showAddAccount(prefill); });
+    }
+
+    private void showAddAccount(String prefill) {
         ScrollView sv = new ScrollView(this);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -154,15 +166,19 @@ public class AccountsActivity extends BaseActivity {
         MaterialButtonToggleGroup grp = new MaterialButtonToggleGroup(this);
         grp.setSingleSelection(true);
         grp.setSelectionRequired(true);
-        int[] ids = new int[3];
-        for (int i = 0; i < 3; i++) {
+        int np = MainActivity.PROVS.length;
+        int[] ids = new int[np];
+        for (int i = 0; i < np; i++) {
             MaterialButton b = new MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle);
-            b.setText(MainActivity.PNAMES[i]);
+            b.setText(PSHORT[i]);
             b.setAllCaps(false);
             ids[i] = View.generateViewId();
             b.setId(ids[i]);
+            if (!Api.provEnabled(MainActivity.PROVS[i])) b.setVisibility(View.GONE);
             grp.addView(b, new LinearLayout.LayoutParams(0, -2, 1));
         }
+        int first = 0;
+        while (first < np - 1 && !Api.provEnabled(MainActivity.PROVS[first])) first++;
         box.addView(grp, new LinearLayout.LayoutParams(-1, -2));
         TextInputLayout nameL = inputLayout("备注名称", "例如 东京主号", InputType.TYPE_CLASS_TEXT);
         box.addView(nameL);
@@ -173,7 +189,7 @@ public class AccountsActivity extends BaseActivity {
         TextView provHint = muted(box, "");
 
         Map<String, EditText> inputs = new LinkedHashMap<>();
-        String[] prov = {"oci"};
+        String[] prov = {MainActivity.PROVS[first]};
         boolean[] filling = {false};
         String[] autoName = {""};
 
@@ -185,7 +201,9 @@ public class AccountsActivity extends BaseActivity {
                         : "multi".equals(f[3]) ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                         : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
                 TextInputLayout til = inputLayout(f[1], f[2].isEmpty() ? null : f[2], it);
-                if ("multi".equals(f[3])) til.getEditText().setMinLines(3);
+                if ("multi".equals(f[3])) { til.getEditText().setMinLines(3); til.getEditText().setGravity(android.view.Gravity.TOP); }
+                if ("greencloud".equals(prov[0]) && "api_url".equals(f[0])) til.getEditText().setText(GC_DEFAULT_URL);
+                if ("greencloud".equals(prov[0]) && "servers_text".equals(f[0])) til.setHelperText("每行一台：名称 key hash（空格分隔）");
                 credBox.addView(til);
                 inputs.put(f[0], til.getEditText());
             }
@@ -193,10 +211,10 @@ public class AccountsActivity extends BaseActivity {
         };
         grp.addOnButtonCheckedListener((g, id, checked) -> {
             if (!checked || filling[0]) return;
-            for (int i = 0; i < 3; i++) if (ids[i] == id) prov[0] = MainActivity.PROVS[i];
+            for (int i = 0; i < np; i++) if (ids[i] == id) prov[0] = MainActivity.PROVS[i];
             rebuild.run();
         });
-        grp.check(ids[0]);
+        grp.check(ids[first]);
         rebuild.run();
 
         AlertDialog dlg = new MaterialAlertDialogBuilder(this).setTitle("添加云账号").setView(sv)
@@ -208,7 +226,7 @@ public class AccountsActivity extends BaseActivity {
             JSONObject it = smartItems.get(idx);
             String p = it.optString("provider");
             int pi = Arrays.asList(MainActivity.PROVS).indexOf(p);
-            if (pi >= 0 && !p.equals(prov[0])) {
+            if (pi >= 0 && Api.provEnabled(p) && !p.equals(prov[0])) {
                 filling[0] = true;
                 prov[0] = p;
                 grp.check(ids[pi]);
@@ -292,7 +310,12 @@ public class AccountsActivity extends BaseActivity {
             try {
                 JSONObject cred = new JSONObject();
                 for (Map.Entry<String, EditText> e : inputs.entrySet()) cred.put(e.getKey(), e.getValue().getText().toString().trim());
-                JSONObject b = new JSONObject().put("provider", prov[0]).put("name", name.getText().toString().trim()).put("cred", cred);
+                JSONObject b = new JSONObject().put("provider", prov[0]).put("name", name.getText().toString().trim());
+                if ("greencloud".equals(prov[0])) {
+                    String url = cred.optString("api_url").isEmpty() ? GC_DEFAULT_URL : cred.optString("api_url");
+                    if (cred.optString("servers_text").isEmpty()) { toast("请填写服务器列表"); return; }
+                    b.put("api_url", url).put("servers_text", cred.optString("servers_text"));
+                } else b.put("cred", cred);
                 toast("正在校验凭证…");
                 Api.post(this, "/accounts", b, r -> { dlg.dismiss(); toast("账号已添加"); refresh(); });
             } catch (Exception e) { toast(e.getMessage()); }
@@ -482,11 +505,11 @@ public class AccountsActivity extends BaseActivity {
                 keys.add(k);
                 Object v = fields.opt(k);
                 String lab = credLabel(k);
-                if (v instanceof String) f.add(Field.text("c_" + k, lab, (String) v));
+                if (v instanceof String) f.add("servers_text".equals(k) ? Field.multi("c_" + k, lab, (String) v) : Field.text("c_" + k, lab, (String) v));
                 else {
                     JSONObject o = (JSONObject) v;
                     String l2 = lab + (o.optBoolean("set") ? "（已设置" + (o.optString("hint").isEmpty() ? "" : " " + o.optString("hint")) + "，留空不改）" : "（未设置）");
-                    f.add("key_content".equals(k) ? Field.multi("c_" + k, l2, "") : (k.contains("secret") || k.contains("pass") ? Field.pass("c_" + k, l2) : Field.text("c_" + k, l2, "")));
+                    f.add("key_content".equals(k) || "servers_text".equals(k) ? Field.multi("c_" + k, l2, "") : (k.contains("secret") || k.contains("pass") ? Field.pass("c_" + k, l2) : Field.text("c_" + k, l2, "")));
                 }
             }
             f.add(Field.text("proxy", "代理地址（当前 " + (d.optString("proxy").isEmpty() ? "直连" : d.optString("proxy")) + "；留空不改）", ""));

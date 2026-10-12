@@ -10,6 +10,7 @@ import time
 from fastapi import Body, HTTPException, Request
 
 from . import core, extras, services, tasks
+from .providers import greencloud_provider as gcp  # greencloud
 from .main import _public_guard, app, guarded, need_acc, run
 
 OBJ_MAX = 100 * 1024 * 1024   # 面板中转上传单个对象上限 100MB
@@ -36,6 +37,7 @@ def _req(body, *keys):
 @app.post("/api/accounts/{acc_id}/instances/reinstall")
 async def reinstall(acc_id: int, body: dict = Body(...)):
     acc = need_acc(acc_id)
+    gcp.check_op(acc, "reinstall")  # greencloud
     _req(body, "instance_id")
     if not body.get("confirm"):
         raise HTTPException(400, "重装会清空系统盘全部数据，需确认")
@@ -179,6 +181,8 @@ async def account_type(acc_id: int, refresh: bool = False):
         s = await call(P(acc_id).subscription_info)
         r = {"label": s.get("offer") or s.get("quota_id") or "未知", "plan_type": s.get("quota_id"), "state": s.get("state"),
              "spending_limit": s.get("spending_limit")}
+    elif gcp.is_gc(acc):  # greencloud
+        r = dict(gcp.ACCOUNT_TYPE)  # greencloud
     else:
         r = {"label": "AWS 账号", "plan_type": None,
              "hint": "AWS 没有公开的「试用 / 付费」类型接口；新账号的免费套餐期限请以控制台 Billing 为准"}

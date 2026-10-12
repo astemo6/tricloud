@@ -136,6 +136,30 @@ public final class Api {
         });
     }
 
+    /** 后端已启用的云厂商（GET /api/meta 的 providers）；null 表示未知 / 请求失败 → 全部显示。 */
+    public static java.util.List<String> providers;
+
+    /** 拉取 /api/meta；无论成功失败都会在主线程回调 done（失败时 providers 置 null，回退为全部厂商）。 */
+    public static void meta(Runnable done) {
+        POOL.execute(() -> {
+            java.util.List<String> l = null;
+            try {
+                Object r = call("GET", "/meta", null);
+                JSONArray a = r instanceof JSONObject ? ((JSONObject) r).optJSONArray("providers") : null;
+                if (a != null) {
+                    l = new java.util.ArrayList<>();
+                    for (int i = 0; i < a.length(); i++) l.add(a.optString(i));
+                    if (l.isEmpty()) l = null;
+                }
+            } catch (Exception ignored) { }
+            java.util.List<String> fin = l;
+            MAIN.post(() -> { providers = fin; if (done != null) done.run(); });
+        });
+    }
+
+    /** 某厂商是否在后端启用列表里（列表未知时视为启用）。 */
+    public static boolean provEnabled(String p) { return providers == null || providers.contains(p); }
+
     /** 静默 GET：不显示进度、不提示错误（抽屉刷新账号列表用）。 */
     public static void quiet(String path, Cb cb) {
         POOL.execute(() -> {

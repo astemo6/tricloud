@@ -55,6 +55,8 @@ final class AddAccountModel: ObservableObject {
         didSet { fill() }
     }
     @Published var hint = ""
+    /// 后端已启用的云厂商（GET /api/meta 的 providers）；请求失败时保持全部四家。
+    @Published var provs: [String] = MainPage.PROVS
     @Published var busy = false
     @Published var error = ""
     private var work: DispatchWorkItem?
@@ -62,6 +64,24 @@ final class AddAccountModel: ObservableObject {
     init() { resetFields() }
 
     var fields: [CredField] { AddAccountModel.CRED[prov] ?? [] }
+
+    /// 打开添加账号页时调用：按 GET /api/meta 的 providers 过滤分段选择器（如关掉「启用绿云」后不显示 GreenCloud）。
+    /// 失败、返回为空或无可识别厂商时，退回显示全部四家。
+    func loadMeta() {
+        Api.call("GET", "/meta", nil) { res in
+            guard case .success(let r) = res else {
+                self.provs = MainPage.PROVS
+                return
+            }
+            let a = jobj(r).optJSONArray("providers") ?? []
+            let got = Set((0..<a.count).map { a.string($0) })
+            let list = MainPage.PROVS.filter { got.contains($0) }
+            self.provs = list.isEmpty ? MainPage.PROVS : list
+            if !self.provs.contains(self.prov), let first = self.provs.first {
+                self.prov = first   // didSet 会重置字段
+            }
+        }
+    }
 
     func resetFields() {
         var v: [String: String] = [:]
@@ -97,7 +117,7 @@ final class AddAccountModel: ObservableObject {
             switch res {
             case .success(let r):
                 let a = jobj(r).optJSONArray("items") ?? []
-                self.items = (0..<a.count).map { a.obj($0) }.filter { MainPage.PROVS.contains($0.optString("provider")) }
+                self.items = (0..<a.count).map { a.obj($0) }.filter { self.provs.contains($0.optString("provider")) }
                 if self.items.isEmpty {
                     self.hint = "没有识别到云账号凭证"
                     return
@@ -183,7 +203,7 @@ final class AddAccountModel: ObservableObject {
 
 struct AddAccountView: View {
     /// 分段控件放四家时用短名，避免截断。
-    static let SHORT = ["OCI", "AWS", "Azure", "GreenCloud"]
+    static let SHORT: [String: String] = ["oci": "OCI", "aws": "AWS", "azure": "Azure", "greencloud": "GreenCloud"]
     @ObservedObject var m: AddAccountModel
     let onDone: () -> Void
     let onBatch: (String) -> Void
@@ -249,8 +269,8 @@ struct AddAccountView: View {
 
                 Section(header: Text("云厂商")) {
                     Picker("云厂商", selection: $m.prov) {
-                        ForEach(MainPage.PROVS.indices, id: \.self) { i in
-                            Text(AddAccountView.SHORT[i]).tag(MainPage.PROVS[i])
+                        ForEach(m.provs, id: \.self) { p in
+                            Text(AddAccountView.SHORT[p] ?? MainPage.pname(p)).tag(p)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -338,6 +358,7 @@ extension Page {
 
     func openAddAccount() {
         let m = AddAccountModel()
+        m.loadMeta()
         let v = AddAccountView(m: m, onDone: { [weak self] in
             self?.toast("✅ 账号已添加")
             self?.accountsChanged()

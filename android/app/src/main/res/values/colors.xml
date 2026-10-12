@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material 3 配色：以品牌蓝 #2F6FED 为种子生成；Android 12+ 优先用壁纸动态取色 -->
+<resources>
+    <color name="tc_primary">#2E5BD0</color>
+    <color name="tc_on_primary">#FFFFFF</color>
+    <color name="tc_primary_container">#DBE1FF</color>
+    <color name="tc_on_primary_container">#00174B</color>
+    <color name="tc_secondary">#585E71</color>
+    <color name="tc_on_secondary">#FFFFFF</color>
+    <color name="tc_secondary_container">#DDE1F9</color>
+    <color name="tc_on_secondary_container">#151B2C</color>
+    <color name="tc_tertiary">#735471</color>
+    <color name="tc_tertiary_container">#FFD7F6</color>
+    <color name="tc_error">#BA1A1A</color>
+    <color name="tc_on_error">#FFFFFF</color>
+    <color name="tc_error_container">#FFDAD6</color>
+    <color name="tc_on_error_container">#410002</color>
+    <color name="tc_surface">#FAF8FF</color>
+    <color name="tc_on_surface">#1A1B21</color>
+    <color name="tc_surface_variant">#E1E2EC</color>
+    <color name="tc_on_surface_variant">#44464F</color>
+    <color name="tc_outline">#757780</color>
+    <color name="tc_outline_variant">#C5C6D0</color>
+    <color name="tc_surface_container_lowest">#FFFFFF</color>
+    <color name="tc_surface_container_low">#F4F3FA</color>
+    <color name="tc_surface_container">#EEEDF4</color>
+    <color name="tc_surface_container_high">#E8E7EF</color>
+    <color name="tc_surface_container_highest">#E3E2E9</color>
+    <color name="tc_launcher_bg">#2F6FED</color>
+    <bool name="tc_light_bars">true</bool>
+</resources>

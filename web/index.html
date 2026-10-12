@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark">
+<title>TriCloud</title>
+<script src="/static/theme.js"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="layout">
+  <nav class="side" id="side"></nav>
+  <div class="drawer-scrim"></div>
+  <div class="main">
+    <div class="top">
+      <button class="btn" id="menuBtn">☰</button>
+      <div class="title" id="title">TriCloud</div>
+      <div class="accsw" id="accsw"></div>
+      <button class="btn" id="taskBtn" title="任务与实时日志">⏱<span class="tb-label"> 任务</span><span class="tcnt" id="taskCnt" style="display:none"></span></button>
+      <select id="theme" title="配色">
+        <option value="system">🖥 跟随系统</option><option value="light">☀️ 浅色</option><option value="dark">🌙 深色</option>
+      </select>
+      <button class="btn" id="logout">退出</button>
+    </div>
+    <div class="content" id="view"></div>
+  </div>
+</div>
+<div class="tdrawer-scrim" id="tdScrim"></div>
+<aside class="tdrawer" id="tdrawer" aria-hidden="true" aria-label="任务">
+  <div class="td-hd"><b>任务与实时日志</b><span class="grow"></span><a class="btn sm" href="#/tasks">全部任务</a><button class="btn sm" id="tdClose" aria-label="关闭">✕</button></div>
+  <div class="td-body"><div id="tdCur"></div><div class="td-lh">最近任务</div><div id="tdList"></div></div>
+</aside>
+<script src="/static/app.js"></script>
+</body>
+</html>

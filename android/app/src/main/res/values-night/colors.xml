@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="tc_primary">#B4C5FF</color>
+    <color name="tc_on_primary">#002A78</color>
+    <color name="tc_primary_container">#1A43AE</color>
+    <color name="tc_on_primary_container">#DBE1FF</color>
+    <color name="tc_secondary">#C1C5DD</color>
+    <color name="tc_on_secondary">#2A3042</color>
+    <color name="tc_secondary_container">#41465A</color>
+    <color name="tc_on_secondary_container">#DDE1F9</color>
+    <color name="tc_tertiary">#E2BBDC</color>
+    <color name="tc_tertiary_container">#5A3D58</color>
+    <color name="tc_error">#FFB4AB</color>
+    <color name="tc_on_error">#690005</color>
+    <color name="tc_error_container">#93000A</color>
+    <color name="tc_on_error_container">#FFDAD6</color>
+    <color name="tc_surface">#121318</color>
+    <color name="tc_on_surface">#E3E2E9</color>
+    <color name="tc_surface_variant">#44464F</color>
+    <color name="tc_on_surface_variant">#C5C6D0</color>
+    <color name="tc_outline">#8F909A</color>
+    <color name="tc_outline_variant">#44464F</color>
+    <color name="tc_surface_container_lowest">#0D0E13</color>
+    <color name="tc_surface_container_low">#1A1B21</color>
+    <color name="tc_surface_container">#1E1F25</color>
+    <color name="tc_surface_container_high">#292A2F</color>
+    <color name="tc_surface_container_highest">#34343A</color>
+    <bool name="tc_light_bars">false</bool>
+</resources>

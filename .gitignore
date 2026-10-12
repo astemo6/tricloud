@@ -1,0 +1,19 @@
+.env
+data/
+*.db
+*.key
+__pycache__/
+*.pyc
+.venv/
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore.properties
+*.jks
+*.keystore
+*.apk
+*.aab
+.idea/
+.install.conf

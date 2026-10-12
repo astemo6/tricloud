@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.TriCloud" parent="Theme.Material3.DayNight">
+        <item name="colorPrimary">@color/tc_primary</item>
+        <item name="colorOnPrimary">@color/tc_on_primary</item>
+        <item name="colorPrimaryContainer">@color/tc_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/tc_on_primary_container</item>
+        <item name="colorSecondary">@color/tc_secondary</item>
+        <item name="colorOnSecondary">@color/tc_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/tc_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/tc_on_secondary_container</item>
+        <item name="colorTertiary">@color/tc_tertiary</item>
+        <item name="colorTertiaryContainer">@color/tc_tertiary_container</item>
+        <item name="colorError">@color/tc_error</item>
+        <item name="colorOnError">@color/tc_on_error</item>
+        <item name="colorErrorContainer">@color/tc_error_container</item>
+        <item name="colorOnErrorContainer">@color/tc_on_error_container</item>
+        <item name="android:colorBackground">@color/tc_surface</item>
+        <item name="colorSurface">@color/tc_surface</item>
+        <item name="colorOnSurface">@color/tc_on_surface</item>
+        <item name="colorSurfaceVariant">@color/tc_surface_variant</item>
+        <item name="colorOnSurfaceVariant">@color/tc_on_surface_variant</item>
+        <item name="colorOutline">@color/tc_outline</item>
+        <item name="colorOutlineVariant">@color/tc_outline_variant</item>
+        <item name="colorSurfaceContainerLowest">@color/tc_surface_container_lowest</item>
+        <item name="colorSurfaceContainerLow">@color/tc_surface_container_low</item>
+        <item name="colorSurfaceContainer">@color/tc_surface_container</item>
+        <item name="colorSurfaceContainerHigh">@color/tc_surface_container_high</item>
+        <item name="colorSurfaceContainerHighest">@color/tc_surface_container_highest</item>
+        <!-- 顶栏与系统栏融入 surface（Material 3 风格） -->
+        <item name="actionBarStyle">@style/TriCloud.ActionBar</item>
+        <item name="android:statusBarColor">?attr/colorSurface</item>
+        <item name="android:navigationBarColor">?attr/colorSurface</item>
+        <item name="android:windowLightStatusBar">@bool/tc_light_bars</item>
+        <item name="android:windowLightNavigationBar">@bool/tc_light_bars</item>
+        <item name="android:windowAnimationStyle">@style/TriCloud.WindowAnim</item>
+        <item name="materialButtonStyle">@style/Widget.Material3.Button</item>
+    </style>
+
+    <style name="TriCloud.ActionBar" parent="Widget.Material3.ActionBar.Solid">
+        <item name="background">?attr/colorSurface</item>
+        <item name="elevation">0dp</item>
+    </style>
+
+    <!-- Material 3 共享轴（X）页面过渡 -->
+    <style name="TriCloud.WindowAnim" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/axis_open_enter</item>
+        <item name="android:activityOpenExitAnimation">@anim/axis_open_exit</item>
+        <item name="android:activityCloseEnterAnimation">@anim/axis_close_enter</item>
+        <item name="android:activityCloseExitAnimation">@anim/axis_close_exit</item>
+    </style>
+
+    <!-- 行内操作用 Tonal 按钮 -->
+    <style name="ThemeOverlay.TriCloud.Tonal" parent="">
+        <item name="materialButtonStyle">@style/Widget.Material3.Button.TonalButton</item>
+    </style>
+    <!-- 危险操作（删除 / 终止）用 error 配色的 Tonal 按钮 -->
+    <style name="ThemeOverlay.TriCloud.Danger" parent="">
+        <item name="materialButtonStyle">@style/TriCloud.DangerButton</item>
+    </style>
+    <style name="TriCloud.DangerButton" parent="Widget.Material3.Button.TonalButton">
+        <item name="backgroundTint">?attr/colorErrorContainer</item>
+        <item name="android:textColor">?attr/colorOnErrorContainer</item>
+        <item name="rippleColor">?attr/colorOnErrorContainer</item>
+    </style>
+</resources>

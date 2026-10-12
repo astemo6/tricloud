@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark">
+<title>TriCloud 登录</title>
+<script src="/static/theme.js"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <form class="card login" id="f">
+    <h3 class="brand">Tri<span>Cloud</span> 面板</h3>
+    <div class="muted">OCI · AWS · Azure 三合一管理</div>
+    <label>面板密码</label>
+    <div class="pw-wrap"><input type="password" class="pw-in" id="pw" autocomplete="current-password" autofocus required><button type="button" class="pw-eye" aria-label="显示密码" title="显示密码" onclick="var i=this.previousElementSibling,s=i.type==='password';i.type=s?'text':'password';this.textContent=s?'🙈':'👁';this.title=this.ariaLabel=s?'隐藏密码':'显示密码';i.focus()">👁</button></div>
+    <div id="otpBox" style="display:none"><label>二次验证码（6 位）</label>
+    <input id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="身份验证器 App 上的数字"></div>
+    <div id="msg" class="muted" style="color:var(--bad);min-height:20px;margin-top:8px"></div>
+    <button class="btn primary" style="width:100%">登录</button>
+    <div class="bar" style="margin-top:12px;justify-content:flex-end">
+      <select id="theme" style="width:auto">
+        <option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option>
+      </select>
+    </div>
+  </form>
+</div>
+<script>
+  var th = document.getElementById("theme");
+  th.value = TCTheme.get();
+  th.onchange = function () { TCTheme.set(th.value); };
+  document.getElementById("f").onsubmit = async function (e) {
+    e.preventDefault();
+    var r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: document.getElementById("pw").value, otp: document.getElementById("otp").value }) });
+    if (r.ok) { location.href = "/" + (sessionStorage.getItem("tc_back") || ""); }
+    else {
+      var j = await r.json().catch(function () { return {}; });
+      if (j.detail === "需要二次验证码") { document.getElementById("otpBox").style.display = ""; document.getElementById("otp").focus(); document.getElementById("msg").textContent = "请输入二次验证码"; return; }
+      document.getElementById("msg").textContent = j.detail || "登录失败";
+    }
+  };
+</script>
+</body>
+</html>

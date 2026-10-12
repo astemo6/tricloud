@@ -1,0 +1,73 @@
+# 打未签名 IPA（自签安装用）。ios/ 有改动推到 master 时自动构建，也可在 Actions 页手动运行。
+name: iOS IPA
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        working-directory: ios
+        run: xcodegen generate
+      - name: Build (unsigned)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -project TriCloud.xcodeproj -scheme TriCloud -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 | tee build.log | tail -n 40
+          rm -rf Payload && mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/TriCloud.app Payload/
+          V=$(awk -F'"' '/MARKETING_VERSION/{print $2; exit}' project.yml)
+          echo "V=$V" >> "$GITHUB_ENV"
+          zip -qry "TriCloud-$V-unsigned.ipa" Payload
+          ls -la *.ipa
+          # 自检：IPA 里必须有 Payload/TriCloud.app/TriCloud 和 Info.plist
+          { echo '```'; unzip -l "TriCloud-$V-unsigned.ipa" | head -n 40; echo; plutil -p Payload/TriCloud.app/Info.plist | head -n 30; file Payload/TriCloud.app/TriCloud; echo '```'; } > ipa-check.txt
+          test -f Payload/TriCloud.app/TriCloud && test -f Payload/TriCloud.app/Info.plist
+      - name: Publish build errors (on failure)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd ios
+          if [ -f build.log ]; then
+            grep -E "error:" build.log | sed -E 's#^.*/ios/##' | sort -u | head -n 120 > errors.txt || true
+            [ -s errors.txt ] || tail -n 120 build.log > errors.txt
+          else
+            echo "build.log 不存在（构建前的步骤失败）" > errors.txt
+          fi
+          echo "commit ${GITHUB_SHA}" >> errors.txt
+          gh release delete ios-build-log -y --cleanup-tag || true
+          gh release create ios-build-log --prerelease --title build-log --notes-file errors.txt --target "${GITHUB_SHA}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TriCloud-ipa
+          path: ios/*.ipa
+      - name: Push IPA to ipa-build branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf /tmp/ipab && mkdir /tmp/ipab && cp ios/*.ipa /tmp/ipab/
+          cd /tmp/ipab && git init -q && git checkout -q -b ipa-build && git add .
+          git -c user.name=ci -c user.email=ci@local commit -qm "ipa ${GITHUB_SHA}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ipa-build
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "ios-v$V" -y --cleanup-tag || true
+          gh release create "ios-v$V" ios/TriCloud-$V-unsigned.ipa --title "TriCloud iOS $V（未签名）" \
+            --notes "未签名 IPA，用爱思助手 / Sideloadly / AltStore / TrollStore 等工具自签安装。首次打开填你自己的面板地址。
+
+          $(cat ios/ipa-check.txt)"

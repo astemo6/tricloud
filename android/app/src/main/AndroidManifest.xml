@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application
+        android:allowBackup="false"
+        android:label="TriCloud"
+        android:name=".TriCloudApp"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:enableOnBackInvokedCallback="true"
+        android:theme="@style/Theme.TriCloud"
+        android:networkSecurityConfig="@xml/network_security_config">
+        <activity android:name=".LoginActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".MainActivity" />
+        <activity android:name=".AccountActivity" />
+        <activity android:name=".TasksActivity" />
+        <activity android:name=".MonitorsActivity" />
+        <activity android:name=".SettingsActivity" />
+        <activity android:name=".HealthActivity" />
+        <activity android:name=".TrafficActivity" />
+        <activity android:name=".TaskLogActivity" />
+        <activity android:name=".DeletedActivity" />
+        <activity android:name=".AccountsActivity" />
+        <activity android:name=".FreeCheckActivity" />
+        <activity android:name=".SecretsActivity" />
+        <activity android:name=".ScriptsActivity" />
+        <activity android:name=".DnsActivity" />
+        <activity android:name=".SecurityActivity" />
+    </application>
+</manifest>

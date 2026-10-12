@@ -1,0 +1,12 @@
+services:
+  tricloud:
+    build: .
+    image: tricloud:latest
+    container_name: tricloud
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data
+    # 默认只监听本机，经 Nginx/Caddy/Cloudflare Tunnel 反代暴露；直接暴露公网请改为 "8000:8000"
+    ports:
+      - "127.0.0.1:8000:8000"

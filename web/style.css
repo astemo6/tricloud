@@ -80,6 +80,9 @@ label:has(input[type=checkbox]) { display: flex; align-items: center; font-size:
 .side .logo { font-size: 22px; font-weight: 700; padding: 14px 16px 18px; letter-spacing: 0; }
 .side .logo span { color: var(--primary); }   /* 与旧版一致：Tri + 蓝色 Cloud */
 .side .grp { font-size: 12px; font-weight: 500; color: var(--muted); padding: 18px 16px 8px; letter-spacing: .06em; }
+.side .grp.prov { display: flex; align-items: center; gap: 7px; letter-spacing: .02em; }
+.side .grp .plogo { height: 13px; width: auto; flex: none; }
+.side .grp .plogo.aws { height: 15px; color: var(--text); }
 .side a { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 16px; margin: 1px 0; border-radius: 24px;
   color: var(--muted); font-weight: 500; transition: background .15s; }
 .side a:hover { background: var(--s-high); }

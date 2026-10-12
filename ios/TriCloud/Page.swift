@@ -372,7 +372,7 @@ struct PageView: View {
         List {
             ForEach(Page.groups(page.blocks)) { g in
                 if let h = g.header {
-                    Section(header: Text(h)) { rows(g) }
+                    Section(header: SectionHeader(title: h)) { rows(g) }
                 } else {
                     Section { rows(g) }
                 }

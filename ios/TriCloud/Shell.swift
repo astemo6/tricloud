@@ -12,6 +12,34 @@ enum Brand {
         }
     }
     static func icon(_ prov: String) -> String { "cloud.fill" }
+    /// 三家官方 Logo（Assets 里的 LogoOCI / LogoAWS / LogoAzure，AWS 有深色模式版本）。
+    static func logo(_ prov: String) -> String {
+        switch prov {
+        case "oci": return "LogoOCI"
+        case "aws": return "LogoAWS"
+        default: return "LogoAzure"
+        }
+    }
+    /// 分组标题以云厂商名开头时（如「Oracle Cloud · 1」）返回对应厂商。
+    static func prov(forTitle t: String) -> String? {
+        MainPage.PROVS.first { t.hasPrefix(MainPage.pname($0)) }
+    }
+}
+
+/// 列表分组标题：保留原大小写（不转全大写）；云厂商分组前加 Logo。
+struct SectionHeader: View {
+    let title: String
+    var body: some View {
+        HStack(spacing: 6) {
+            if let p = Brand.prov(forTitle: title) {
+                Image(Brand.logo(p)).resizable().scaledToFit()
+                    .frame(height: p == "aws" ? 15 : 13)
+                    .accessibilityHidden(true)
+            }
+            Text(title)
+        }
+        .textCase(nil)
+    }
 }
 
 struct MenuEntry {
@@ -134,7 +162,7 @@ struct SidebarRoot: View {
                 ForEach(MainPage.PROVS, id: \.self) { p in
                     let list = app.accounts.filter { $0.optString("provider") == p }
                     if !list.isEmpty {
-                        Section(header: Text(MainPage.pname(p))) {
+                        Section(header: SectionHeader(title: MainPage.pname(p))) {
                             ForEach(list.indices, id: \.self) { i in
                                 let acc = list[i]
                                 NavigationLink(destination: app.pages.account(acc).makeView(), tag: "acc\(acc.optInt("id"))", selection: $sel) {
@@ -148,7 +176,7 @@ struct SidebarRoot: View {
                         }
                     }
                 }
-                Section(header: Text("管理")) {
+                Section(header: SectionHeader(title: "管理")) {
                     ForEach(Menus.manage.indices, id: \.self) { i in
                         let m = Menus.manage[i]
                         NavigationLink(destination: app.pages.cached(m.key, m.make).makeView(), tag: m.key, selection: $sel) {

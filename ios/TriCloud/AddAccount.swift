@@ -28,6 +28,8 @@ final class AddAccountModel: ObservableObject {
                   CredField(key: "client_id", label: "Client (App) ID", def: "", type: "text"),
                   CredField(key: "client_secret", label: "Client Secret", def: "", type: "password"),
                   CredField(key: "subscription_id", label: "Subscription ID", def: "", type: "text")],
+        "greencloud": [CredField(key: "api_url", label: "面板地址", def: "https://cp.greencloudvps.com", type: "text"),
+                       CredField(key: "servers_text", label: "服务器列表（每行一台：名称 key hash）", def: "", type: "multi")],
     ]
     static let PROXY: [CredField] = [
         CredField(key: "proxy", label: "出口代理地址（http:// 或 socks5://，留空 = 直连）", def: "", type: "text"),
@@ -36,7 +38,8 @@ final class AddAccountModel: ObservableObject {
     static let HINT: [String: String] = [
         "oci": "在 OCI 控制台「我的概要信息 → API 密钥」生成。",
         "aws": "建议使用仅含 EC2 / Lightsail / CloudFront / Service Quotas / CE 权限的 IAM 用户。",
-        "azure": "用服务主体（应用注册）创建，并给订阅授予 Contributor 角色。"]
+        "azure": "用服务主体（应用注册）创建，并给订阅授予 Contributor 角色。",
+        "greencloud": "服务器列表每行一台，格式「名称 key hash」，用空格分隔，例如：\nhk-1 ABCDE-12345 0123456789abcdef\nkey 和 hash 在 SolusVM 面板该服务器的 API 设置里生成。"]
 
     @Published var prov = "oci" {
         didSet { if oldValue != prov { resetFields() } }
@@ -147,7 +150,15 @@ final class AddAccountModel: ObservableObject {
         }
         busy = true
         error = ""
-        let body: JObj = ["provider": prov, "name": name.trimmingCharacters(in: .whitespacesAndNewlines), "cred": cred]
+        let nm = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        var body: JObj = ["provider": prov, "name": nm, "cred": cred]
+        if prov == "greencloud" {
+            // 绿云：顶层字段 api_url + servers_text（多行「名称 key hash」），不走 cred / 代理
+            let url = (values["api_url"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            body = ["provider": prov, "name": nm,
+                    "api_url": url.isEmpty ? "https://cp.greencloudvps.com" : url,
+                    "servers_text": (values["servers_text"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
         Api.call("POST", "/accounts", body) { res in
             self.busy = false
             switch res {
@@ -171,6 +182,8 @@ final class AddAccountModel: ObservableObject {
 }
 
 struct AddAccountView: View {
+    /// 分段控件放四家时用短名，避免截断。
+    static let SHORT = ["OCI", "AWS", "Azure", "GreenCloud"]
     @ObservedObject var m: AddAccountModel
     let onDone: () -> Void
     let onBatch: (String) -> Void
@@ -237,7 +250,7 @@ struct AddAccountView: View {
                 Section(header: Text("云厂商")) {
                     Picker("云厂商", selection: $m.prov) {
                         ForEach(MainPage.PROVS.indices, id: \.self) { i in
-                            Text(MainPage.PNAMES[i]).tag(MainPage.PROVS[i])
+                            Text(AddAccountView.SHORT[i]).tag(MainPage.PROVS[i])
                         }
                     }
                     .pickerStyle(.segmented)
@@ -249,15 +262,18 @@ struct AddAccountView: View {
                     }
                 }
 
-                Section(header: Text("凭证"), footer: Text((AddAccountModel.HINT[m.prov] ?? "") + " 凭证经 Fernet 加密保存在你的面板服务器，不经过任何第三方。")) {
+                Section(header: Text(m.prov == "greencloud" ? "面板与服务器" : "凭证"),
+                        footer: Text((AddAccountModel.HINT[m.prov] ?? "") + (m.prov == "greencloud" ? "\n" : " ") + "凭证经 Fernet 加密保存在你的面板服务器，不经过任何第三方。")) {
                     ForEach(m.fields.indices, id: \.self) { i in
                         fieldView(m.fields[i])
                     }
                 }
 
-                Section(header: Text("出口代理（可选）")) {
-                    ForEach(AddAccountModel.PROXY.indices, id: \.self) { i in
-                        fieldView(AddAccountModel.PROXY[i])
+                if m.prov != "greencloud" {
+                    Section(header: Text("出口代理（可选）")) {
+                        ForEach(AddAccountModel.PROXY.indices, id: \.self) { i in
+                            fieldView(AddAccountModel.PROXY[i])
+                        }
                     }
                 }
 

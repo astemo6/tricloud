@@ -2,13 +2,14 @@ import SwiftUI
 
 /// 云账号管理（Web pageAccounts）：测活、信息、类型、编辑（含代理）、停用、删除。
 final class MainPage: Page {
-    static let PROVS = ["oci", "aws", "azure"]
-    static let PNAMES = ["Oracle Cloud", "AWS", "Azure"]
+    static let PROVS = ["oci", "aws", "azure", "greencloud"]
+    static let PNAMES = ["Oracle Cloud", "AWS", "Azure", "GreenCloud"]
 
     static let CRED_LABEL: [String: String] = [
         "user": "用户 OCID", "tenancy": "租户 OCID", "fingerprint": "API Key 指纹", "key_content": "私钥 (PEM)", "pass_phrase": "私钥密码", "region": "区域",
         "compartment": "区间 OCID（可选）", "home_region": "主区域（可选）", "access_key": "Access Key ID", "secret_key": "Secret Access Key",
-        "tenant_id": "Tenant ID", "client_id": "Client (App) ID", "client_secret": "Client Secret", "subscription_id": "Subscription ID"]
+        "tenant_id": "Tenant ID", "client_id": "Client (App) ID", "client_secret": "Client Secret", "subscription_id": "Subscription ID",
+        "api_url": "面板地址", "servers_text": "服务器列表（每行：名称 key hash）"]
 
     static func pname(_ p: String) -> String {
         if let i = PROVS.firstIndex(of: p) { return PNAMES[i] }
@@ -37,7 +38,7 @@ final class MainPage: Page {
                 top.button("到期提醒") { self.expiry() }
                 top.button("批量添加") { self.openBatchAdd() }
             }
-            if a.isEmpty { self.card("还没有云账号").muted("点击下方按钮添加 OCI / AWS / Azure 账号") }
+            if a.isEmpty { self.card("还没有云账号").muted("点击下方按钮添加 OCI / AWS / Azure / GreenCloud 账号") }
             for i in 0..<a.count {
                 let acc = a.obj(i)
                 let aid = acc.optInt("id")
@@ -56,7 +57,9 @@ final class MainPage: Page {
                 row.button("编辑") { self.editAccount(acc) }
                 // v1.6：账号类型 / 被封号一键停用（不测活、不监控、停止任务；凭证保留，可再启用）
                 row.button("信息") { self.editAccountInfo(acc) { self.accountsChanged() } }
-                row.button("类型") { self.showAccountType(aid, acc.optString("name"), false) }
+                if acc.optString("provider") != "greencloud" {
+                    row.button("类型") { self.showAccountType(aid, acc.optString("name"), false) }
+                }
                 let off = acc.optInt("disabled") == 1
                 row.button(off ? "启用" : "停用") {
                     if off {
@@ -149,7 +152,7 @@ final class MainPage: Page {
                 if let o = fields[k] as? JObj {
                     let hint = o.optString("hint")
                     let lab = (MainPage.CRED_LABEL[k] ?? k) + (o.optBoolean("set") ? "（已设置" + (hint.isEmpty ? "" : " " + hint) + "，留空不改）" : "（未设置）")
-                    if k == "key_content" { f.append(Field.multi("c_" + k, lab, "")) }
+                    if k == "key_content" || k == "servers_text" { f.append(Field.multi("c_" + k, lab, "")) }
                     else if k.contains("secret") || k.contains("pass") { f.append(Field.pass("c_" + k, lab)) }
                     else { f.append(Field.text("c_" + k, lab, "")) }
                 } else {

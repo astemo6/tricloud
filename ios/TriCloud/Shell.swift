@@ -8,15 +8,17 @@ enum Brand {
         switch prov {
         case "oci": return .red
         case "aws": return .orange
+        case "greencloud": return .green
         default: return .blue
         }
     }
     static func icon(_ prov: String) -> String { "cloud.fill" }
-    /// 三家官方 Logo（Assets 里的 LogoOCI / LogoAWS / LogoAzure，AWS 有深色模式版本）。
+    /// 各家官方 Logo（Assets 里的 LogoOCI / LogoAWS / LogoAzure / LogoGreenCloud，AWS 有深色模式版本）。
     static func logo(_ prov: String) -> String {
         switch prov {
         case "oci": return "LogoOCI"
         case "aws": return "LogoAWS"
+        case "greencloud": return "LogoGreenCloud"
         default: return "LogoAzure"
         }
     }

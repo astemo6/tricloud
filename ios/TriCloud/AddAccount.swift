@@ -36,7 +36,7 @@ final class AddAccountModel: ObservableObject {
     static let HINT: [String: String] = [
         "oci": "在 OCI 控制台「我的概要信息 → API 密钥」生成。",
         "aws": "建议使用仅含 EC2 / Lightsail / CloudFront / Service Quotas / CE 权限的 IAM 用户。",
-        "azure": "用服务主体（应用注册）创建，并给订阅授予 Contributor 角色。",
+        "azure": "用服务主体（应用注册）创建，并给订阅授予 Contributor 角色。"]
 
     @Published var prov = "oci" {
         didSet { if oldValue != prov { resetFields() } }

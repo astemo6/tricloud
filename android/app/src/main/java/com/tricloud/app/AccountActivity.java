@@ -741,6 +741,9 @@ public class AccountActivity extends BaseActivity {
             com.google.android.material.button.MaterialButton b = new com.google.android.material.button.MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle);
             b.setText(opts[i][1]);
             b.setAllCaps(false);
+            b.setPadding(dp(2), b.getPaddingTop(), dp(2), b.getPaddingBottom());
+            b.setMinWidth(0);
+            b.setMinimumWidth(0);
             ids[i] = android.view.View.generateViewId();
             b.setId(ids[i]);
             g.addView(b, new LinearLayout.LayoutParams(0, -2, 1));

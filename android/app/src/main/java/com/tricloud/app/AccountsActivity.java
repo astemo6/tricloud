@@ -172,6 +172,13 @@ public class AccountsActivity extends BaseActivity {
             MaterialButton b = new MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle);
             b.setText(PSHORT[i]);
             b.setAllCaps(false);
+            // 四个按钮平分宽度时，默认左右 24dp 内边距会把文字挤成「…」
+            b.setPadding(dp(2), b.getPaddingTop(), dp(2), b.getPaddingBottom());
+            b.setMinWidth(0);
+            b.setMinimumWidth(0);
+            b.setMaxLines(1);
+            b.setEllipsize(null);
+            b.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13);
             ids[i] = View.generateViewId();
             b.setId(ids[i]);
             if (!Api.provEnabled(MainActivity.PROVS[i])) b.setVisibility(View.GONE);

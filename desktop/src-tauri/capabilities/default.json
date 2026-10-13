@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "仅本地设置页可调用 get_url / open_panel；远程面板页没有任何 IPC 权限",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

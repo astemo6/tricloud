@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TriCloud</title>
+<style>
+  :root { --primary:#0b57d0; --bg:#f8fafd; --surface:#fff; --text:#1f1f1f; --muted:#444746; --border:#c4c7c5; --bad:#b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --primary:#a8c7fa; --bg:#131314; --surface:#1e1f20; --text:#e3e3e3; --muted:#c4c7c5; --border:#444746; --bad:#f2b8b5; } }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--bg); color:var(--text);
+         font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; }
+  .card { width:min(440px, 92vw); background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:32px 28px; }
+  .logo { display:flex; gap:6px; margin-bottom:18px; }
+  .logo i { width:14px; height:14px; border-radius:50%; display:block; }
+  h1 { font-size:22px; font-weight:600; margin:0 0 6px; }
+  p { margin:0 0 22px; color:var(--muted); font-size:14px; line-height:1.6; }
+  label { font-size:13px; color:var(--muted); }
+  input { width:100%; margin:6px 0 16px; padding:12px 14px; font-size:15px; border-radius:10px; border:1px solid var(--border);
+          background:transparent; color:var(--text); outline:none; }
+  input:focus { border-color:var(--primary); border-width:2px; padding:11px 13px; }
+  button { width:100%; padding:12px; border:0; border-radius:999px; background:var(--primary); color:var(--bg); font-size:15px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:default; }
+  .err { color:var(--bad); font-size:13px; min-height:18px; margin-top:12px; }
+</style>
+</head>
+<body>
+  <form class="card" id="f">
+    <div class="logo"><i style="background:#AA4034"></i><i style="background:#D98309"></i><i style="background:#046BBD"></i></div>
+    <h1>连接你的 TriCloud 面板</h1>
+    <p>填写你自己部署的面板地址。地址只保存在本机，之后打开会直接进入面板，可在菜单「面板 → 更换面板地址」修改。</p>
+    <label for="u">面板地址</label>
+    <input id="u" type="text" placeholder="https://panel.example.com" autocomplete="url" spellcheck="false" autofocus>
+    <button id="b" type="submit">连接</button>
+    <div class="err" id="e"></div>
+  </form>
+<script>
+  const invoke = window.__TAURI__.core.invoke;
+  const $ = (id) => document.getElementById(id);
+  invoke("get_url").then((u) => { if (u) $("u").value = u; });
+  $("f").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const v = $("u").value.trim();
+    if (!v) { $("e").textContent = "请填写面板地址"; return; }
+    $("b").disabled = true; $("e").textContent = "";
+    try { await invoke("open_panel", { url: v }); }
+    catch (err) { $("e").textContent = String(err); $("b").disabled = false; }
+  });
+</script>
+</body>
+</html>

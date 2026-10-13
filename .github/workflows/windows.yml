@@ -1,0 +1,65 @@
+# Windows 桌面客户端（Tauri + WebView2）。desktop/ 有改动推到 master 时自动构建，也可手动运行。
+name: Windows EXE
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths: ["desktop/**", ".github/workflows/windows.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: Icons
+        working-directory: desktop
+        run: npx -y @tauri-apps/cli@2 icon ../ios/TriCloud/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+      - name: Build
+        working-directory: desktop
+        run: |
+          set -o pipefail
+          npx -y @tauri-apps/cli@2 build 2>&1 | tee build.log
+          V=$(awk -F'"' '/MARKETING_VERSION/{print $2; exit}' ../ios/project.yml)
+          echo "V=$V" >> "$GITHUB_ENV"
+          mkdir -p ../out
+          cp src-tauri/target/release/tricloud.exe "../out/TriCloud-$V-windows-portable.exe"
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe "../out/TriCloud-$V-windows-setup.exe"
+          ls -la ../out
+      - name: Publish build errors (on failure)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f desktop/build.log ]; then
+            { grep -E -A6 "^error" desktop/build.log | head -n 200; echo; tail -n 60 desktop/build.log; } > errors.txt
+          else
+            echo "build.log 不存在（构建前的步骤失败）" > errors.txt
+          fi
+          echo "commit ${GITHUB_SHA}" >> errors.txt
+          gh release delete windows-build-log -y --cleanup-tag || true
+          gh release create windows-build-log --prerelease --title windows-build-log --notes-file errors.txt --target "${GITHUB_SHA}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TriCloud-windows
+          path: out/*.exe
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete windows-build-log -y --cleanup-tag || true
+          gh release view "v$V" >/dev/null 2>&1 || gh release create "v$V" --title "TriCloud $V" --notes-file .github/release-notes.md
+          gh release edit "v$V" --notes-file .github/release-notes.md
+          gh release upload "v$V" out/*.exe --clobber

@@ -1,0 +1,19 @@
+[package]
+name = "tricloud"
+version = "1.6.0"
+description = "TriCloud 桌面客户端"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde_json = "1"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "s"
+codegen-units = 1
+panic = "abort"

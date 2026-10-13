@@ -74,11 +74,12 @@ bash <(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercon
 
 ## App
 
-直接下载：[Releases](https://github.com/astemo6/tricloud/releases/latest) 里有 Android APK 和 iOS 未签名 IPA。首次打开填你自己的面板地址。
+直接下载：[Releases](https://github.com/astemo6/tricloud/releases/latest) 里有 Android APK、Windows 客户端（安装版和免安装版 exe）和 iOS 未签名 IPA。首次打开填你自己的面板地址。
 
 自行构建：
 
 - **Android**（Java，Material 3）：`cd android && ./gradlew assembleRelease`（JDK 17 + Android SDK 34，签名配置见 `keystore.properties.example`）。
+- **Windows**（Tauri 2 + WebView2）：推送 `desktop/` 改动或手动运行 Actions「Windows EXE」，自动发布到 Releases。本地：`cd desktop && npx @tauri-apps/cli@2 icon ../ios/TriCloud/Assets.xcassets/AppIcon.appiconset/icon-1024.png && npx @tauri-apps/cli@2 build`。
 - **iOS**（SwiftUI，iOS 15+）：推送 `ios/` 改动或手动运行 Actions「iOS IPA」，在 Releases 生成未签名 IPA，用 Sideloadly / AltStore / TrollStore 等自签安装。本地：`cd ios && xcodegen generate`。
 
 首次打开填写面板地址和密码（开了 2FA 再填验证码），只允许 HTTPS。

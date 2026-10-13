@@ -81,7 +81,7 @@ final class HomePage: Page {
             if list.isEmpty { continue }
             section(MainPage.pname(p))
             for acc in list {
-                let region = p == "azure" || p == "greencloud" ? "" : Prefs.get("region_\(acc.optInt("id"))", str(acc, "region", ""))
+                let region = p == "azure" ? "" : Prefs.get("region_\(acc.optInt("id"))", str(acc, "region", ""))
                 let age = HomePage.ageDays(acc)
                 let headDetail = (region.isEmpty ? "" : region + " · ") + (age.isEmpty ? "" : age + " · ")
                 let off = acc.optInt("disabled") == 1
@@ -156,7 +156,7 @@ final class AccountsPage: Page {
             AppState.shared.setAccounts(a)
             self.clear()
             if a.isEmpty {
-                self.card("还没有云账号").muted("点击下方按钮添加 OCI / AWS / Azure / GreenCloud 账号，支持粘贴控制台内容自动识别。")
+                self.card("还没有云账号").muted("点击下方按钮添加 OCI / AWS / Azure 账号，支持粘贴控制台内容自动识别。")
             }
             for p in MainPage.PROVS {
                 let list = (0..<a.count).map { a.obj($0) }.filter { $0.optString("provider") == p }
@@ -164,7 +164,7 @@ final class AccountsPage: Page {
                 self.section(MainPage.pname(p) + " · \(list.count)")
                 for acc in list {
                     let off = acc.optInt("disabled") == 1
-                    var d = p == "azure" || p == "greencloud" ? "" : str(acc, "region", "-")
+                    var d = p == "azure" ? "" : str(acc, "region", "-")
                     if off { d += (d.isEmpty ? "" : " · ") + "已停用" }
                     else if !acc.isNull("last_test_ok") {
                         d += (d.isEmpty ? "" : " · ") + (acc.optInt("last_test_ok") == 1 ? "连通 \(acc.optInt("last_test_ms")) ms" : "测活失败")

@@ -28,8 +28,6 @@ final class AddAccountModel: ObservableObject {
                   CredField(key: "client_id", label: "Client (App) ID", def: "", type: "text"),
                   CredField(key: "client_secret", label: "Client Secret", def: "", type: "password"),
                   CredField(key: "subscription_id", label: "Subscription ID", def: "", type: "text")],
-        "greencloud": [CredField(key: "api_url", label: "面板地址", def: "https://cp.greencloudvps.com", type: "text"),
-                       CredField(key: "servers_text", label: "服务器列表（每行一台：名称 key hash）", def: "", type: "multi")],
     ]
     static let PROXY: [CredField] = [
         CredField(key: "proxy", label: "出口代理地址（http:// 或 socks5://，留空 = 直连）", def: "", type: "text"),
@@ -39,7 +37,6 @@ final class AddAccountModel: ObservableObject {
         "oci": "在 OCI 控制台「我的概要信息 → API 密钥」生成。",
         "aws": "建议使用仅含 EC2 / Lightsail / CloudFront / Service Quotas / CE 权限的 IAM 用户。",
         "azure": "用服务主体（应用注册）创建，并给订阅授予 Contributor 角色。",
-        "greencloud": "服务器列表每行一台，格式「名称 key hash」，用空格分隔，例如：\nhk-1 ABCDE-12345 0123456789abcdef\nkey 和 hash 在 SolusVM 面板该服务器的 API 设置里生成。"]
 
     @Published var prov = "oci" {
         didSet { if oldValue != prov { resetFields() } }
@@ -55,7 +52,7 @@ final class AddAccountModel: ObservableObject {
         didSet { fill() }
     }
     @Published var hint = ""
-    /// 后端已启用的云厂商（GET /api/meta 的 providers）；请求失败时保持全部四家。
+    /// 后端已启用的云厂商（GET /api/meta 的 providers）；请求失败时保持全部三家。
     @Published var provs: [String] = MainPage.PROVS
     @Published var busy = false
     @Published var error = ""
@@ -65,8 +62,8 @@ final class AddAccountModel: ObservableObject {
 
     var fields: [CredField] { AddAccountModel.CRED[prov] ?? [] }
 
-    /// 打开添加账号页时调用：按 GET /api/meta 的 providers 过滤分段选择器（如关掉「启用绿云」后不显示 GreenCloud）。
-    /// 失败、返回为空或无可识别厂商时，退回显示全部四家。
+    /// 打开添加账号页时调用：按 GET /api/meta 的 providers 过滤分段选择器。
+    /// 失败、返回为空或无可识别厂商时，退回显示全部三家。
     func loadMeta() {
         Api.call("GET", "/meta", nil) { res in
             guard case .success(let r) = res else {
@@ -171,14 +168,7 @@ final class AddAccountModel: ObservableObject {
         busy = true
         error = ""
         let nm = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        var body: JObj = ["provider": prov, "name": nm, "cred": cred]
-        if prov == "greencloud" {
-            // 绿云：顶层字段 api_url + servers_text（多行「名称 key hash」），不走 cred / 代理
-            let url = (values["api_url"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            body = ["provider": prov, "name": nm,
-                    "api_url": url.isEmpty ? "https://cp.greencloudvps.com" : url,
-                    "servers_text": (values["servers_text"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)]
-        }
+        let body: JObj = ["provider": prov, "name": nm, "cred": cred]
         Api.call("POST", "/accounts", body) { res in
             self.busy = false
             switch res {
@@ -202,8 +192,8 @@ final class AddAccountModel: ObservableObject {
 }
 
 struct AddAccountView: View {
-    /// 分段控件放四家时用短名，避免截断。
-    static let SHORT: [String: String] = ["oci": "OCI", "aws": "AWS", "azure": "Azure", "greencloud": "GreenCloud"]
+    /// 分段控件用短名，避免截断。
+    static let SHORT: [String: String] = ["oci": "OCI", "aws": "AWS", "azure": "Azure"]
     @ObservedObject var m: AddAccountModel
     let onDone: () -> Void
     let onBatch: (String) -> Void
@@ -282,18 +272,16 @@ struct AddAccountView: View {
                     }
                 }
 
-                Section(header: Text(m.prov == "greencloud" ? "面板与服务器" : "凭证"),
-                        footer: Text((AddAccountModel.HINT[m.prov] ?? "") + (m.prov == "greencloud" ? "\n" : " ") + "凭证经 Fernet 加密保存在你的面板服务器，不经过任何第三方。")) {
+                Section(header: Text("凭证"),
+                        footer: Text((AddAccountModel.HINT[m.prov] ?? "") + " " + "凭证经 Fernet 加密保存在你的面板服务器，不经过任何第三方。")) {
                     ForEach(m.fields.indices, id: \.self) { i in
                         fieldView(m.fields[i])
                     }
                 }
 
-                if m.prov != "greencloud" {
-                    Section(header: Text("出口代理（可选）")) {
-                        ForEach(AddAccountModel.PROXY.indices, id: \.self) { i in
-                            fieldView(AddAccountModel.PROXY[i])
-                        }
+                Section(header: Text("出口代理（可选）")) {
+                    ForEach(AddAccountModel.PROXY.indices, id: \.self) { i in
+                        fieldView(AddAccountModel.PROXY[i])
                     }
                 }
 

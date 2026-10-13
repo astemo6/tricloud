@@ -25,14 +25,12 @@ final class AccountPage: Page {
                             ("objects", "对象存储"), ("traffic", "流量"), ("limits", "配额/网络"), ("regionsub", "区域订阅"), ("billing", "账单")]
         case "aws": return [("ec2", "EC2"), ("lightsail", "Lightsail"), ("regions", "区域"), ("cloudfront", "CloudFront"), ("quota", "配额"),
                             ("recycle", "闲置资源"), ("billing", "账单")]
-        case "greencloud": return [("instances", "实例")]
         default: return [("vms", "虚拟机"), ("azcreate", "创建 VM"), ("rgs", "资源组"), ("azquota", "配额"), ("foundry", "Foundry"),
                          ("subscription", "订阅"), ("billing", "账单")]
         }
     }
 
     override var menu: [(String, () -> Void)] {
-        if prov == "greencloud" { return [("测活", { self.testNow() }), ("账号信息 / 日期", { self.accountInfo() })] }
         return [("测活", { self.testNow() }),
          ("账号类型", { self.accountType(false) }),
          ("账号信息 / 日期", { self.accountInfo() })]
@@ -57,7 +55,7 @@ final class AccountPage: Page {
     }
 
     func region() -> String { Prefs.get("region_\(id)", str(acc, "region", "")) }
-    func rq() -> String { prov == "azure" || prov == "greencloud" ? "" : "region=" + enc(region()) }
+    func rq() -> String { prov == "azure" ? "" : "region=" + enc(region()) }
     func base(_ inst: JObj, _ kind: String) -> JObj {
         ["instance_id": inst.optString("id"), "region": region(), "kind": kind, "name": inst.optString("name")]
     }
@@ -70,7 +68,7 @@ final class AccountPage: Page {
             Prefs.set("tab_\(self.id)", t)
             self.refresh()
         }
-        if prov != "azure" && prov != "greencloud" && !["cloudfront", "quota", "billing", "subscription", "regionsub", "regions"].contains(tab) {
+        if prov != "azure" && !["cloudfront", "quota", "billing", "subscription", "regionsub", "regions"].contains(tab) {
             nav("globe.asia.australia.fill", "区域", region(), tint: .teal) { self.pickRegion() }
         }
     }
@@ -130,7 +128,6 @@ final class AccountPage: Page {
     // MARK: - 实例
 
     func instances(_ kind: String) {
-        if prov == "greencloud" { gcInstances(); return }
         if kind == "lightsail" { bigButton("＋ 创建 Lightsail") { self.lightsailCreate() } }
         if prov == "aws" && kind == "vm" { bigButton("＋ 创建 EC2") { self.ec2Create() } }
         if prov == "azure" { bigButton("＋ 创建 Azure VM") { self.azureCreate() } }

@@ -44,7 +44,7 @@ def check(acc_id, op, body, region=None):
     except Exception:
         return []
     fn = {"oci": _oci, "aws": _aws, "azure": _azure}.get(acc["provider"])
-    if fn is None:  # greencloud 等没有免费额度概念的云
+    if fn is None:
         return []
     try:
         return fn(acc, prov, op, body, region)

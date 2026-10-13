@@ -7,7 +7,7 @@ extension AccountPage {
         get("/accounts") { r in
             let a = jarr(r)
             var ts: [JObj] = []
-            for i in 0..<a.count where a.obj(i).optInt("id") != self.id && a.obj(i).optString("provider") != "greencloud" { ts.append(a.obj(i)) }
+            for i in 0..<a.count where a.obj(i).optInt("id") != self.id { ts.append(a.obj(i)) }
             if ts.isEmpty { self.toast("至少需要两个云账号"); return }
             let labels = ts.map { MainPage.pname($0.optString("provider")) + " · " + $0.optString("name") }
             self.choose("迁移到哪个账号", labels) { idx in

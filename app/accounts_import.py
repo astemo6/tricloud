@@ -19,8 +19,6 @@
 import json
 import re
 
-from .providers import greencloud_provider as gcp  # greencloud
-
 SECTION = re.compile(r"^\s*\[([^\]\r\n\"{}]+)\]\s*$")
 PEM = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S)
 OCI_KEYS = {"user", "fingerprint", "tenancy", "region", "pass_phrase", "compartment", "home_region", "proxy", "name", "key_content"}
@@ -37,8 +35,6 @@ META = {"provider", "name", "cred", "cloud", "type", "remark", "cloud_created_at
 
 def guess_provider(d):
     keys = {str(k).lower() for k in d}
-    if keys & gcp.JSON_KEYS:  # greencloud
-        return gcp.PROVIDER_ID  # greencloud
     if keys & {"access_key", "aws_access_key_id", "accesskeyid", "access_key_id", "secret_key"}:
         return "aws"
     if keys & {"tenant_id", "client_id", "client_secret", "subscription_id", "appid", "tenant"}:
@@ -63,10 +59,7 @@ def from_json(obj, default_provider=None):
         raise ValueError("不是 JSON 对象")
     prov = str(obj.get("provider") or obj.get("cloud") or obj.get("type") or "").lower() or None
     cred = obj.get("cred") if isinstance(obj.get("cred"), dict) else {k: v for k, v in obj.items() if k not in META}
-    prov = gcp.ALIASES.get(prov, prov) if prov else prov  # greencloud
     prov = prov or guess_provider(cred) or default_provider
-    if gcp.is_gc(prov):  # greencloud
-        return gcp.from_json(obj, str(obj.get("name") or obj.get("remark") or "").strip(), cred)  # greencloud
     if prov not in ("oci", "aws", "azure"):
         raise ValueError("无法判断云厂商，请加上 \"provider\": \"oci\" / \"aws\" / \"azure\"")
     cred = _norm(prov, cred)
@@ -145,9 +138,6 @@ OTHER_SIGNS = re.compile(r"AKIA|ASIA|access.?key|secret|tenant|client|subscripti
 
 def _parse_text(seg):
     """非 JSON 文本：标准 OCI config 走原解析，其余（控制台复制、环境变量、CSV…）走自动识别。"""
-    gc = gcp.sniff(seg)  # greencloud
-    if gc:  # greencloud
-        return gc  # greencloud
     looks_cfg = re.search(r"^\s*(user|tenancy|fingerprint)\s*=\s*\S", seg, re.M) and not OTHER_SIGNS.search(PEM.sub("", seg))
     if looks_cfg:
         return from_oci_config(seg)

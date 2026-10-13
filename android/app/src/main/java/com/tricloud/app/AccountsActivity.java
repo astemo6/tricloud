@@ -48,19 +48,14 @@ public class AccountsActivity extends BaseActivity {
         CRED.put("azure", new String[][]{{"tenant_id", "Tenant ID", "", "text"}, {"client_id", "Client (App) ID", "", "text"}, {"client_secret", "Client Secret", "", "password"},
                 {"subscription_id", "Subscription ID", "", "text"},
                 {"proxy", "出口代理（可选）", "http://host:port", "text"}, {"proxy_user", "代理用户名（可选）", "", "text"}, {"proxy_pass", "代理密码（可选）", "", "password"}});
-        // GreenCloud：字段放在请求体顶层（api_url / servers_text），不放 cred
-        CRED.put("greencloud", new String[][]{{"api_url", "面板地址", "https://cp.greencloudvps.com", "text"}, {"servers_text", "服务器列表（每行：名称 key hash）", "HK-1 ABCDE-12345 0123456789abcdef", "multi"}});
     }
-    static final String GC_DEFAULT_URL = "https://cp.greencloudvps.com";
-    /** 添加账号页切换按钮用的短名（四个按钮一行放得下）。 */
-    static final String[] PSHORT = {"OCI", "AWS", "Azure", "绿云"};
+    /** 添加账号页切换按钮用的短名。 */
+    static final String[] PSHORT = {"OCI", "AWS", "Azure"};
     static final Map<String, String> PROV_HINT = new LinkedHashMap<>();
     static {
         PROV_HINT.put("oci", "在 OCI 控制台「我的概要信息 → API 密钥」生成。");
         PROV_HINT.put("aws", "建议使用仅含 EC2/Lightsail/CloudFront/Service Quotas/CE 权限的 IAM 用户。");
         PROV_HINT.put("azure", "用 az ad sp create-for-rbac --role Contributor --scopes /subscriptions/<订阅 ID> 生成。");
-        PROV_HINT.put("greencloud", "面板地址默认 " + "https://cp.greencloudvps.com" + "。服务器列表每行一台，格式「名称 key hash」，用空格分隔，"
-                + "key 和 hash 在 GreenCloud 客户区该 VPS 的 API 页面获取。例如：\nHK-1 ABCDE-12345 0123456789abcdef\nJP-2 FGHIJ-67890 fedcba9876543210");
     }
 
     static String credLabel(String k) {
@@ -172,7 +167,7 @@ public class AccountsActivity extends BaseActivity {
             MaterialButton b = new MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle);
             b.setText(PSHORT[i]);
             b.setAllCaps(false);
-            // 四个按钮平分宽度时，默认左右 24dp 内边距会把文字挤成「…」
+            // 按钮平分宽度时，默认左右 24dp 内边距会把文字挤成「…」
             b.setPadding(dp(2), b.getPaddingTop(), dp(2), b.getPaddingBottom());
             b.setMinWidth(0);
             b.setMinimumWidth(0);
@@ -209,8 +204,6 @@ public class AccountsActivity extends BaseActivity {
                         : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
                 TextInputLayout til = inputLayout(f[1], f[2].isEmpty() ? null : f[2], it);
                 if ("multi".equals(f[3])) { til.getEditText().setMinLines(3); til.getEditText().setGravity(android.view.Gravity.TOP); }
-                if ("greencloud".equals(prov[0]) && "api_url".equals(f[0])) til.getEditText().setText(GC_DEFAULT_URL);
-                if ("greencloud".equals(prov[0]) && "servers_text".equals(f[0])) til.setHelperText("每行一台：名称 key hash（空格分隔）");
                 credBox.addView(til);
                 inputs.put(f[0], til.getEditText());
             }
@@ -318,11 +311,7 @@ public class AccountsActivity extends BaseActivity {
                 JSONObject cred = new JSONObject();
                 for (Map.Entry<String, EditText> e : inputs.entrySet()) cred.put(e.getKey(), e.getValue().getText().toString().trim());
                 JSONObject b = new JSONObject().put("provider", prov[0]).put("name", name.getText().toString().trim());
-                if ("greencloud".equals(prov[0])) {
-                    String url = cred.optString("api_url").isEmpty() ? GC_DEFAULT_URL : cred.optString("api_url");
-                    if (cred.optString("servers_text").isEmpty()) { toast("请填写服务器列表"); return; }
-                    b.put("api_url", url).put("servers_text", cred.optString("servers_text"));
-                } else b.put("cred", cred);
+                b.put("cred", cred);
                 toast("正在校验凭证…");
                 Api.post(this, "/accounts", b, r -> { dlg.dismiss(); toast("账号已添加"); refresh(); });
             } catch (Exception e) { toast(e.getMessage()); }

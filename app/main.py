@@ -14,7 +14,6 @@ import base64
 from . import accounts_import, core, extras, guard, hostname, services, tasks, telegram, traffic_guard
 from . import credits as creditsm
 from . import health as healthm
-from .providers import greencloud_provider as gcp  # greencloud
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "..", "web")
 VERSION = "1.6.0"
@@ -24,7 +23,6 @@ REQUIRED = {
     "aws": ["access_key", "secret_key", "region"],
     "azure": ["tenant_id", "client_id", "client_secret", "subscription_id"],
 }
-gcp.register(REQUIRED, gcp.REQUIRED_FIELDS)  # greencloud
 
 
 @asynccontextmanager
@@ -32,7 +30,6 @@ async def lifespan(app):
     core.init_db()
     core.fernet()
     core.ensure_password()
-    gcp.sync()  # greencloud：按设置注册 / 移除
     r = tasks.recover_on_startup()
     if r["resumed"] or r["interrupted"]:
         print(f"[tricloud] 重启恢复：抢机任务续抢 {r['resumed']} 个，其他任务标记中断 {r['interrupted']} 个", flush=True)
@@ -127,16 +124,13 @@ def need_acc(acc_id, provider=None):
         raise HTTPException(404, "账号不存在")
     if provider and acc["provider"] != provider:
         raise HTTPException(400, f"该接口仅支持 {provider}")
-    if gcp.hidden(acc["provider"]):  # greencloud
-        raise HTTPException(404, "账号不存在（" + gcp.DISABLED_MSG + "）")  # greencloud
     return acc
 
 
 # ---------------- 认证 ----------------
 @app.get("/api/meta")
 def meta():
-    """App / Web 用：当前可添加的云厂商（绿云在设置里关闭时不出现）。"""
-    gcp.sync()  # greencloud
+    """App / Web 用：当前可添加的云厂商。"""
     return {"providers": list(services.PROVIDERS)}
 
 
@@ -199,8 +193,6 @@ def accounts():
 
 
 def _clean_cred(prov, cred):
-    if gcp.is_gc(prov):  # greencloud
-        return gcp.clean_cred(cred)  # greencloud
     cred = {k: (v.strip() if isinstance(v, str) and k != "key_content" else v) for k, v in (cred or {}).items() if v}
     miss = [k for k in REQUIRED[prov] if not cred.get(k)]
     return cred, miss
@@ -245,8 +237,6 @@ async def add_account(body: dict = Body(...)):
     prov, name, cred = body.get("provider"), (body.get("name") or "").strip(), body.get("cred") or {}
     if prov not in REQUIRED:
         raise HTTPException(400, "provider 无效")
-    if gcp.is_gc(prov):  # greencloud
-        cred = gcp.merge_body(body, cred)  # greencloud
     cred, miss = _clean_cred(prov, cred)
     if miss or not name:
         raise HTTPException(400, f"缺少字段：{', '.join(miss) or 'name'}")
@@ -270,7 +260,7 @@ async def parse_accounts_text(body: dict = Body(...)):
     for it in items[:50]:
         prov = it.get("provider")
         miss = [k for k in REQUIRED.get(prov, []) if not (it.get("cred") or {}).get(k)] if prov else []
-        cred = gcp.form_cred(it.get("cred")) if gcp.is_gc(prov) else (it.get("cred") or {})  # greencloud
+        cred = it.get("cred") or {}
         out.append({"provider": prov, "name": it.get("name") or "", "cred": cred, "missing": miss, "error": it.get("error")})
     return {"items": out}
 
@@ -295,8 +285,8 @@ async def add_accounts_batch(body: dict = Body(...)):
         if it.get("error"):
             return dict(base, ok=False, error=it["error"])
         prov = it["provider"]
-        if prov not in REQUIRED:   # 例如绿云已在设置中关闭
-            return dict(base, ok=False, error="不支持的云厂商（可能已在设置中关闭）")
+        if prov not in REQUIRED:
+            return dict(base, ok=False, error="不支持的云厂商")
         cred, miss = _clean_cred(prov, it["cred"])
         name = it["name"] or f"{prov.upper()}-{(cred.get('region') or 'acc')}-{idx + 1}"
         base["name"] = name
@@ -478,8 +468,6 @@ def _apply_cred_patch(acc_id, patch):
     acc = core.get_account(acc_id, with_cred=True)
     prov, cred = acc["provider"], dict(acc["cred"])
     changed = False
-    if gcp.is_gc(prov):  # greencloud：打码的 key / hash 沿用原值
-        cred, changed, patch = (*gcp.patch_cred(cred, patch), {})  # greencloud
     for k, v in patch.items():
         if k not in CRED_KEYS[prov]:
             continue
@@ -513,8 +501,6 @@ def account_detail(acc_id: int):
     acc = need_acc(acc_id)
     cred = core.get_account(acc_id, with_cred=True)["cred"]
     prov = acc["provider"]
-    if gcp.is_gc(prov):  # greencloud：key / hash 打码
-        return gcp.detail(acc, cred, core.proxy_view(cred))  # greencloud
     fields = {}
     for k in CRED_KEYS[prov]:
         v = cred.get(k)
@@ -605,11 +591,10 @@ async def instances(acc_id: int, region: str = None, kind: str = "vm"):
 
 @app.post("/api/accounts/{acc_id}/instances/action")
 async def inst_action(acc_id: int, body: dict = Body(...)):
-    acc = need_acc(acc_id)
+    need_acc(acc_id)
     act = body.get("action")
     if act not in ("start", "stop", "reboot", "terminate", "hard_reboot"):
         raise HTTPException(400, "无效操作")
-    gcp.check_op(acc, act)  # greencloud
     if act == "terminate" and not body.get("confirm"):
         raise HTTPException(400, "终止需确认")
     return await run(services.instance_action, acc_id, body["instance_id"], act, body.get("region"), body.get("kind", "vm"),
@@ -619,7 +604,6 @@ async def inst_action(acc_id: int, body: dict = Body(...)):
 @app.post("/api/accounts/{acc_id}/instances/change-ip")
 async def change_ip(acc_id: int, body: dict = Body(...)):
     acc = need_acc(acc_id)
-    gcp.check_op(acc, "change-ip")  # greencloud
     p = {"instance_id": body["instance_id"], "region": body.get("region"), "kind": body.get("kind", "vm"),
          "mode": body.get("mode", "auto"), "name": body.get("name")}
     raw = body.get("cidrs") or ""
@@ -673,7 +657,7 @@ def ip_change_usage_all():
 
 @app.post("/api/accounts/{acc_id}/instances/resize")
 async def resize(acc_id: int, body: dict = Body(...)):
-    gcp.check_op(need_acc(acc_id), "resize")  # greencloud
+    need_acc(acc_id)
     await guarded(acc_id, "resize", body, body.get("region"))
     tid = tasks.create_task("resize", acc_id, {k: body.get(k) for k in
                             ("instance_id", "region", "name", "ocpus", "memory_gb", "shape", "size")})
@@ -686,7 +670,6 @@ async def inst_open_port(acc_id: int, iid: str, body: dict = Body(...)):
     OCI 写子网安全列表；AWS 写实例全部安全组；Azure 写网卡 / 子网 NSG。已存在的规则跳过。
     不带 confirm_public 返回 409（detail.public_warning）；空端口或 1-65535 返回 400。"""
     acc = need_acc(acc_id)
-    gcp.check_op(acc, "open-port")  # greencloud
     iid = (body.get("instance_id") or "").strip() if iid.strip("/") in ("", "-", "_") else iid
     if not iid:
         raise HTTPException(400, "缺少实例 ID")
@@ -742,7 +725,6 @@ def rename_sync(acc, prov, inst_id, name, kind="vm"):
 
 async def do_rename(acc_id, body, provider=None):
     acc = need_acc(acc_id, provider)
-    gcp.check_op(acc, "rename")  # greencloud
     name = (body.get("new_name") or "").strip()
     if not name:
         raise HTTPException(400, "名称不能为空")
@@ -1256,13 +1238,11 @@ def del_task(tid: int):
 @app.get("/api/monitors")
 def monitors():
     rows = core.q("SELECT m.*, a.name AS account_name, a.provider FROM monitors m LEFT JOIN accounts a ON a.id=m.account_id")
-    return [m for m in rows if not gcp.hidden(m["provider"])]  # greencloud
+    return rows
 
 
 @app.post("/api/monitors")
 def add_monitor(body: dict = Body(...)):
-    if gcp.is_gc(need_acc(body["account_id"])):  # greencloud：不能换 IP，连通检测只告警
-        body = dict(body, auto_change_ip=False)  # greencloud
     port = int(body.get("check_port") or 0)
     if port and not 0 < port < 65536:
         raise HTTPException(400, "端口无效")
@@ -1283,7 +1263,7 @@ def del_monitor(mid: int):
 
 # ---------------- 设置 ----------------
 SETTING_KEYS = ("tg_chat_id", "daily_report", "report_time", "monitor_interval", "timezone", "default_create", "free_guard",
-                "auto_ip_daily_limit", "enable_greencloud")  # greencloud：enable_greencloud
+                "auto_ip_daily_limit")
 
 
 @app.get("/api/settings")
@@ -1297,7 +1277,6 @@ def get_settings():
     s["proxycheck_key_set"] = bool(core.get_secret_setting("proxycheck_key"))
     s["totp_enabled"] = extras.totp_enabled()
     s["version"] = VERSION
-    s["enable_greencloud"] = gcp.enabled()  # greencloud
     return s
 
 
@@ -1310,12 +1289,9 @@ def save_settings(body: dict = Body(...)):
             raise HTTPException(400, "自动换 IP 每日上限需为整数")
         if not 0 <= body["auto_ip_daily_limit"] <= 50:
             raise HTTPException(400, "自动换 IP 每日上限 0~50")
-    if "enable_greencloud" in body:  # greencloud
-        body["enable_greencloud"] = bool(body["enable_greencloud"]) and str(body["enable_greencloud"]).lower() not in ("0", "false", "off", "no")  # greencloud
     for k in SETTING_KEYS:
         if k in body:
             core.set_setting(k, body[k])
-    gcp.sync()  # greencloud
     if body.get("tg_token"):
         core.set_secret_setting("tg_token", body["tg_token"].strip())
     if body.get("tg_token_clear"):
@@ -1545,7 +1521,6 @@ async def migrate(body: dict = Body(...)):
     src, dst = need_acc(int(body["from_account_id"])), need_acc(int(body["to_account_id"]))
     if src["id"] == dst["id"]:
         raise HTTPException(400, "目标账号不能与源账号相同")
-    gcp.check_op(dst, "migrate")  # greencloud
     c = dict(body.get("create") or {})
     if dst["provider"] == "azure" and not c.get("location"):
         raise HTTPException(400, "请选择 Azure 区域")
@@ -1565,22 +1540,19 @@ def _guard_view(g, a=None):
     return dict(g, account_name=a.get("name"), provider=a.get("provider"), mode=g.get("mode") or "monthly",
                 direction=traffic_guard.direction_of(g), enabled=0 if g.get("enabled") == 0 else 1,
                 status=st, status_text=traffic_guard.STATUS_TEXT[st],
-                scope=gcp.SCOPE_TEXT if gcp.is_gc(a) else traffic_guard.scope_text(g),  # greencloud
+                scope=traffic_guard.scope_text(g),
                 resume_at_text=traffic_guard.fmt_ts(g["resume_at"]) if g.get("resume_at") else None)
 
 
 @app.get("/api/traffic-guards")
 def traffic_guards():
     names = {a["id"]: a for a in core.list_accounts()}
-    return [_guard_view(g, names.get(g["account_id"])) for g in core.q("SELECT * FROM traffic_guards ORDER BY id")
-            if not gcp.hidden((core.get_account(g["account_id"]) or {}).get("provider"))]  # greencloud
+    return [_guard_view(g, names.get(g["account_id"])) for g in core.q("SELECT * FROM traffic_guards ORDER BY id")]
 
 
 @app.post("/api/traffic-guards")
 async def traffic_guard_save(body: dict = Body(...)):
     acc = need_acc(int(body["account_id"]))
-    if gcp.is_gc(acc):  # greencloud：只有本计费周期累计，额度跟随面板 bw.total
-        body = gcp.guard_body(body)  # greencloud
     limit = float(body.get("limit_gb") or traffic_guard.DEFAULT_LIMIT[acc["provider"]])
     warn = int(body.get("warn_pct") or 80)
     if limit <= 0 or not 10 <= warn <= 99:

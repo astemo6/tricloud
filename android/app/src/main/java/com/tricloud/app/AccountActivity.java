@@ -25,7 +25,6 @@ public class AccountActivity extends BaseActivity {
             case "oci": return new String[][]{{"instances", "实例"}, {"create", "创建实例"}, {"snatch", "自动抢机"}, {"secgroup", "安全组"}, {"storage", "存储"},
                     {"objects", "对象存储"}, {"traffic", "流量"}, {"limits", "配额/网络"}, {"regionsub", "区域订阅"}, {"billing", "账单"}};
             case "aws": return new String[][]{{"ec2", "EC2"}, {"lightsail", "Lightsail"}, {"regions", "区域"}, {"cloudfront", "CloudFront"}, {"quota", "配额"}, {"recycle", "闲置资源"}, {"billing", "账单"}};
-            case "greencloud": return new String[][]{{"gcinst", "实例"}};
             default: return new String[][]{{"vms", "虚拟机"}, {"azcreate", "创建 VM"}, {"rgs", "资源组"}, {"azquota", "配额"}, {"foundry", "Foundry"}, {"subscription", "订阅"}, {"billing", "账单"}};
         }
     }
@@ -108,7 +107,6 @@ public class AccountActivity extends BaseActivity {
         header();
         switch (tab) {
             case "instances": case "ec2": case "vms": instances("vm"); break;
-            case "gcinst": gcInstances(); break;
             case "lightsail": instances("lightsail"); break;
             case "create": ociCreate(false); break;
             case "snatch": ociCreate(true); break;
@@ -181,59 +179,6 @@ public class AccountActivity extends BaseActivity {
         if ("oci".equals(prov) && "VM.Standard.E2.1.Micro".equals(inst.optString("shape"))) button(r, "500M 下行", v -> net500(inst, kind));
         if (!"lightsail".equals(kind)) button(r, "重装系统", v -> reinstall(inst, kind));
         button(r, "azure".equals(prov) || "lightsail".equals(kind) ? "删除" : "终止", v -> simple(inst, kind, "terminate", "终止"));
-    }
-
-    // ---------------- GreenCloud（v1.6.0 build 11）：只有实例列表 + 开机/关机/重启 ----------------
-    private void gcInstances() {
-        Api.get(this, "/accounts/" + id + "/instances", r -> {
-            JSONArray a = Api.arr(r);
-            if (a.length() == 0) muted(card("没有服务器"), "在「云账号 → 编辑」里按「名称 key hash」每行一台补充服务器列表。");
-            for (int i = 0; i < a.length(); i++) gcCard(a.optJSONObject(i));
-        });
-    }
-
-    private static String gb(long bytes) { return String.format(Locale.US, "%.2f", bytes / 1073741824.0); }
-
-    private void gcCard(JSONObject inst) {
-        String st = str(inst, "state", "unknown");
-        String dot = "running".equals(st) ? "🟢 运行中" : "stopped".equals(st) ? "🔴 已关机" : "⚪ 未知";
-        LinearLayout c = card(inst.optString("name"));
-        JSONArray ips = inst.optJSONArray("ips");
-        String ipLine = str(inst, "public_ip", "-");
-        if (ips != null && ips.length() > 1) ipLine = join(ips);
-        text(c, "状态：" + dot + "\nIP：" + ipLine + "\n主机名：" + str(inst, "hostname", "-"), 13, false);
-        JSONObject bw = inst.optJSONObject("bw");
-        if (bw != null && bw.optLong("total") > 0) {
-            long used = bw.optLong("used"), total = bw.optLong("total");
-            double pct = bw.has("percent") && !bw.isNull("percent") ? bw.optDouble("percent") : used * 100.0 / total;
-            if (Double.isNaN(pct)) pct = used * 100.0 / total;
-            muted(c, "流量：" + gb(used) + " / " + gb(total) + " GB（" + String.format(Locale.US, "%.1f", pct) + "%）");
-            com.google.android.material.progressindicator.LinearProgressIndicator pb = new com.google.android.material.progressindicator.LinearProgressIndicator(this);
-            pb.setMax(1000);
-            pb.setProgressCompat((int) Math.max(0, Math.min(1000, Math.round(pct * 10))), false);
-            pb.setTrackCornerRadius(dp(3));
-            pb.setTrackThickness(dp(6));
-            if (pct >= 90) pb.setIndicatorColor(0xFFE53935);
-            else if (pct >= 70) pb.setIndicatorColor(0xFFFB8C00);
-            else pb.setIndicatorColor(0xFF43A047);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-            lp.setMargins(0, dp(4), 0, dp(4));
-            c.addView(pb, lp);
-        } else muted(c, "流量：-");
-        LinearLayout r = row(c);
-        button(r, "开机", v -> gcAction(inst, "start", "开机"));
-        button(r, "关机", v -> gcAction(inst, "stop", "关机"));
-        button(r, "重启", v -> gcAction(inst, "reboot", "重启"));
-    }
-
-    private void gcAction(JSONObject inst, String act, String label) {
-        confirm(label, "确定" + label + "「" + inst.optString("name") + "」？", () -> {
-            try {
-                JSONObject b = new JSONObject().put("instance_id", inst.optString("id")).put("region", "-").put("kind", "vm")
-                        .put("name", inst.optString("name")).put("action", act).put("confirm", false);
-                Api.post(this, "/accounts/" + id + "/instances/action", b, x -> { toast(label + "指令已发送"); body.postDelayed(this::refresh, 2500); });
-            } catch (Exception ignored) { }
-        });
     }
 
     // ---------------- v1.6 ----------------
@@ -1143,7 +1088,7 @@ public class AccountActivity extends BaseActivity {
         Api.get(this, "/accounts", r -> {
             JSONArray a = Api.arr(r);
             List<JSONObject> ts = new ArrayList<>();
-            for (int i = 0; i < a.length(); i++) if (a.optJSONObject(i).optInt("id") != id && !"greencloud".equals(a.optJSONObject(i).optString("provider"))) ts.add(a.optJSONObject(i));
+            for (int i = 0; i < a.length(); i++) if (a.optJSONObject(i).optInt("id") != id) ts.add(a.optJSONObject(i));
             if (ts.isEmpty()) { toast("至少需要两个云账号"); return; }
             String[] labels = new String[ts.size()];
             for (int i = 0; i < labels.length; i++) labels[i] = MainActivity.pname(ts.get(i).optString("provider")) + " · " + ts.get(i).optString("name");

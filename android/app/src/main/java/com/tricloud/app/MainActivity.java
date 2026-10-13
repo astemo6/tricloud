@@ -12,11 +12,11 @@ import java.util.Arrays;
 
 /** 总览（同 Web pageHome）：到期提醒、账号健康度、各账号实例数，抽屉导航到各账号与管理页。 */
 public class MainActivity extends BaseActivity {
-    static final String[] PROVS = {"oci", "aws", "azure", "greencloud"};
-    static final String[] PNAMES = {"Oracle Cloud", "AWS", "Azure", "GreenCloud"};
+    static final String[] PROVS = {"oci", "aws", "azure"};
+    static final String[] PNAMES = {"Oracle Cloud", "AWS", "Azure"};
 
-    /** 没有区域概念的云厂商（Azure 用资源组位置，GreenCloud 无区域）。 */
-    static boolean noRegion(String p) { return "azure".equals(p) || "greencloud".equals(p); }
+    /** 没有区域概念的云厂商（Azure 用资源组位置）。 */
+    static boolean noRegion(String p) { return "azure".equals(p); }
     private boolean first = true;
 
     @Override
@@ -52,7 +52,7 @@ public class MainActivity extends BaseActivity {
             Api.accounts = a;
             buildNav();
             if (a.length() == 0) {
-                muted(card("还没有云账号"), "添加 OCI / AWS / Azure / GreenCloud 账号后，这里会显示各账号的实例数、健康度和到期提醒。");
+                muted(card("还没有云账号"), "添加 OCI / AWS / Azure 账号后，这里会显示各账号的实例数、健康度和到期提醒。");
                 bigButton("＋ 添加云账号", v -> startActivity(new Intent(this, AccountsActivity.class).putExtra("add", true)));
                 return;
             }

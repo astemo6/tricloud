@@ -2,8 +2,8 @@ import SwiftUI
 
 /// 云账号管理（Web pageAccounts）：测活、信息、类型、编辑（含代理）、停用、删除。
 final class MainPage: Page {
-    static let PROVS = ["oci", "aws", "azure", "greencloud"]
-    static let PNAMES = ["Oracle Cloud", "AWS", "Azure", "GreenCloud"]
+    static let PROVS = ["oci", "aws", "azure"]
+    static let PNAMES = ["Oracle Cloud", "AWS", "Azure"]
 
     static let CRED_LABEL: [String: String] = [
         "user": "用户 OCID", "tenancy": "租户 OCID", "fingerprint": "API Key 指纹", "key_content": "私钥 (PEM)", "pass_phrase": "私钥密码", "region": "区域",
@@ -38,7 +38,7 @@ final class MainPage: Page {
                 top.button("到期提醒") { self.expiry() }
                 top.button("批量添加") { self.openBatchAdd() }
             }
-            if a.isEmpty { self.card("还没有云账号").muted("点击下方按钮添加 OCI / AWS / Azure / GreenCloud 账号") }
+            if a.isEmpty { self.card("还没有云账号").muted("点击下方按钮添加 OCI / AWS / Azure 账号") }
             for i in 0..<a.count {
                 let acc = a.obj(i)
                 let aid = acc.optInt("id")
@@ -57,9 +57,7 @@ final class MainPage: Page {
                 row.button("编辑") { self.editAccount(acc) }
                 // v1.6：账号类型 / 被封号一键停用（不测活、不监控、停止任务；凭证保留，可再启用）
                 row.button("信息") { self.editAccountInfo(acc) { self.accountsChanged() } }
-                if acc.optString("provider") != "greencloud" {
-                    row.button("类型") { self.showAccountType(aid, acc.optString("name"), false) }
-                }
+                row.button("类型") { self.showAccountType(aid, acc.optString("name"), false) }
                 let off = acc.optInt("disabled") == 1
                 row.button(off ? "启用" : "停用") {
                     if off {

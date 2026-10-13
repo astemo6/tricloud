@@ -140,7 +140,7 @@ public abstract class BaseActivity extends AppCompatActivity {
         logo.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_HeadlineSmall);
         head.addView(logo);
         TextView sub = new TextView(this);
-        sub.setText("OCI · AWS · Azure · GreenCloud 多云面板");
+        sub.setText("OCI · AWS · Azure 多云面板");
         sub.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodySmall);
         head.addView(sub);
         nav.addHeaderView(head);
@@ -201,7 +201,7 @@ public abstract class BaseActivity extends AppCompatActivity {
         add.apply(out, new String[]{"logout", "🚪 退出登录"}).setCheckable(false);
     }
 
-    private static final int[] PROV_LOGOS = {R.drawable.logo_oci, R.drawable.logo_aws, R.drawable.logo_azure, R.drawable.logo_greencloud};
+    private static final int[] PROV_LOGOS = {R.drawable.logo_oci, R.drawable.logo_aws, R.drawable.logo_azure};
 
     /** 侧栏云厂商分组标题：官方 Logo + 名称（保持原大小写）。 */
     private CharSequence provHeader(int p) {

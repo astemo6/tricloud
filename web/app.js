@@ -85,7 +85,7 @@ const TABS = {
   azure: [["vms", "虚拟机"], ["azcreate", "创建 VM"], ["rgs", "资源组"], ["azquota", "配额"], ["foundry", "Foundry"], ["subscription", "订阅"], ["billing", "账单"]],
 };
 const PNAME = { oci: "Oracle Cloud", aws: "AWS", azure: "Azure" };
-// 扩展点（附加云厂商在自己的代码块里登记，见文件末尾的 GC 块）
+// 扩展点（附加云厂商可在自己的代码块里登记）
 const PROVS = ["oci", "aws", "azure"];          // 侧栏 / 切换器 / 下拉的顺序
 let META = { providers: PROVS.slice() };         // GET /api/meta：当前可添加的云厂商
 const NO_REGION = new Set(["azure"]);            // 没有区域概念的云
@@ -1801,99 +1801,6 @@ async function smartParse() {
 document.addEventListener("input", (e) => { if (e.target.id === "smarttext") { clearTimeout(SMART_T); SMART_T = setTimeout(smartParse, 350); } });
 document.addEventListener("change", (e) => { if (e.target.id === "smartpick") smartFill(); });
 
-
-// ================= GC 块 BEGIN：绿云 GreenCloud（SolusVM 客户 API，只能开机 / 关机 / 重启、查流量）=================
-// 可拆卸：删掉 BEGIN 到 END 之间的全部代码即可移除 Web 端的绿云（其余地方只用上面的通用扩展点）。
-PROVS.push("greencloud");
-PNAME.greencloud = "GreenCloud";
-PLOGO.greencloud = "<svg class=\"plogo\" aria-hidden=\"true\" viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\"><path fill=\"#2fb344\" d=\"M18.5 19H7a5 5 0 0 1-.9-9.92A6.5 6.5 0 0 1 18.66 8.5 5.25 5.25 0 0 1 18.5 19z\"/><path fill=\"#fff\" d=\"M9 15.6c3.6.3 6.1-1.6 6.6-5.6-3.9-.2-6.4 1.4-6.6 5.6zm.2.4c1-1.8 2.4-3 4.2-3.9-1.9.6-3.4 1.7-4.6 3.4z\"/></svg>";
-TABS.greencloud = [["gcvps", "实例"]];
-NO_REGION.add("greencloud"); NO_CHANGE_IP.add("greencloud"); NO_CREATE.add("greencloud"); TEXTAREA_FIELDS.add("servers_text");
-OP_NAMES.greencloud = { start: "开机", stop: "关机", reboot: "重启" };
-CRED_FIELDS.greencloud = [["api_url", "面板地址", "https://cp.greencloudvps.com（可带端口，或填到 /api/client）"],
-  ["servers_text", "VPS 列表（每行一台：名称 key hash，空格或逗号分隔）", "洛杉矶 ABCDE-FGHIJ-KLMNO 0123456789abcdef0123456789abcdef01234567", "textarea"],
-  ["proxy", "出口代理（可选）", "http://host:port"], ["proxy_user", "代理用户名（可选）"], ["proxy_pass", "代理密码（可选）", "", "password"]];
-Object.assign(CRED_LABEL, { api_url: "面板地址（留空 = https://cp.greencloudvps.com）",
-  servers_text: "VPS 列表（每行：名称 key hash；****xxxx 为打码值，保持不动即沿用原值）" });
-PROV_HINT.greencloud = "在绿云 VPS 控制面板（SolusVM）每台机器的「API」页生成 key 和 hash。绿云 API 只支持开机、关机、重启和查看流量。";
-// 约定：POST /accounts 收 {provider, name, api_url, servers_text}，由后端拆成 servers
-ADD_BODY.greencloud = (f, cred, bg) => { const { api_url, servers_text, ...rest } = cred; const raw = bg.querySelector('[name="c_servers_text"]');
-  return { provider: "greencloud", name: f.name, api_url, servers_text: raw ? raw.value : servers_text, cred: rest }; };
-TAB_FNS_EXTRA.gcvps = tabGcInstances;
-TRAFFIC_DIALOG.greencloud = (acc, inst, g, onSaved) => gcTrafficDialog(acc, inst, g, onSaved);
-SETTINGS_CARDS.push({
-  html: (s) => `<div class="card" id="gcSet"><h3>绿云 GreenCloud</h3><p class="muted">关闭后：不能再添加绿云账号；已有绿云账号在列表、总览、侧栏、Telegram、流量守护、监控里全部隐藏，数据保留，重新打开即恢复。</p>
-    <label><input type="checkbox" name="enable_greencloud" ${s.enable_greencloud === false ? "" : "checked"}> 启用绿云</label>
-    <div class="bar" style="margin-top:12px"><button class="btn primary" id="saveGc">保存</button></div></div>`,
-  bind: (root) => { const b = root.querySelector("#saveGc"); if (b) b.onclick = async (e) => {
-    const on = root.querySelector('[name="enable_greencloud"]').checked;
-    if (await act(e.target, () => post("/settings", { enable_greencloud: on }), on ? "已启用绿云" : "已关闭绿云（数据保留）")) { await loadAccounts(); renderSide(parseHash()); }
-  }; },
-});
-const GC_OPS = [["start", "开机"], ["stop", "关机"], ["reboot", "重启"]];
-const GC_MORE = [["traffic", "流量守护"], ["monitor", "监控"]];
-const gcBytes = (b) => { const g = (+b || 0) / 1024 ** 3; return g >= 1024 ? `${(g / 1024).toFixed(2)} TB` : `${g.toFixed(g >= 100 ? 0 : 1)} GB`; };
-function gcBw(i) {
-  if (!i.bw) return `<span class="muted">-</span>`;
-  const p = +i.bw.percent || 0;
-  return `<div class="meter gcbw" title="本计费周期已用 ${p.toFixed(1)}%"><i style="width:${Math.min(100, p)}%" class="${p >= 100 ? "bad" : p >= 80 ? "warn" : ""}"></i></div>
-    <span class="nowrap">${gcBytes(i.bw.used)} / ${gcBytes(i.bw.total)} · ${p.toFixed(1)}%</span>`;
-}
-function gcCard(i) {
-  const other = (i.ips || []).filter((x) => x !== i.public_ip);
-  return `<div class="card inst" data-id="${esc(i.id)}"><div class="hd"><b title="${esc(i.id)}">${esc(i.name)}</b>
-    <span class="badge ${esc(i.state)}">${esc(i.state)}</span></div>
-    <div class="kv kv2"><span>公网</span><span class="mono">${esc(i.public_ip || "-")}</span>
-    ${other.length ? `<span>其他 IP</span><span class="mono wide">${other.map(esc).join("<br>")}</span>` : ""}
-    ${i.hostname ? `<span>主机名</span><span class="mono">${esc(i.hostname)}</span>` : ""}
-    <span>流量</span><span class="wide">${gcBw(i)}</span></div>
-    ${i.error ? `<p class="muted bad">❌ ${esc(i.error)}</p>` : ""}
-    <div class="ops">${GC_OPS.map(([o, l]) => opBtn(o, l, i)).join("")}<button class="btn sm" data-more aria-label="更多操作">更多 ▾</button></div></div>`;
-}
-function gcTable(list) {
-  return `<table class="inst-table"><tr><th>名称</th><th>状态</th><th>公网 IP</th><th>流量（本计费周期）</th><th>操作</th></tr>
-    ${list.map((i) => `<tr data-id="${esc(i.id)}"><td><b title="${esc(i.id)}">${esc(i.name)}</b>${i.hostname ? `<div class="muted mono">${esc(i.hostname)}</div>` : ""}${i.error ? `<div class="muted bad">❌ ${esc(i.error)}</div>` : ""}</td>
-    <td><span class="badge ${esc(i.state)}">${esc(i.state)}</span></td><td class="mono nowrap">${esc(i.public_ip || "-")}${(i.ips || []).length > 1 ? ` <span class="muted">+${i.ips.length - 1}</span>` : ""}</td>
-    <td style="min-width:180px">${gcBw(i)}</td>
-    <td class="row-ops"><div class="row-ops-in">${GC_OPS.map(([o, l]) => opBtn(o, l, i)).join("")}<button class="btn sm" data-more aria-label="更多操作">更多 ▾</button></div></td></tr>`).join("")}</table>`;
-}
-async function tabGcInstances(acc, box) {
-  const reload = () => tabGcInstances(acc, box);
-  box.innerHTML = `<div class="bar"><button class="btn" id="rf">刷新</button><span class="grow"></span><span class="muted" id="info"></span>
-    <div class="seg desk-only" id="ivw" title="视图（桌面宽度可用，选择会记住）"><button class="${instView() === "card" ? "on" : ""}" data-v="card">▦ 卡片</button><button class="${instView() === "table" ? "on" : ""}" data-v="table">☰ 表格</button></div></div>
-    <p class="muted">绿云（SolusVM 客户 API）只支持开机、关机、重启和查看流量；换 IP、重装、改配置等请到绿云面板操作。流量守护与监控在「更多」里设置。</p>
-    <div class="grid" id="list"><div class="empty"><span class="spin"></span></div></div>`;
-  $("#rf", box).onclick = reload;
-  box.querySelectorAll("#ivw [data-v]").forEach((b) => (b.onclick = () => { localStorage.setItem("tc_inst_view", b.dataset.v); reload(); }));
-  let list;
-  try { list = await api(`/accounts/${acc.id}/instances`); }
-  catch (e) { $("#list", box).innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
-  $("#info", box).textContent = `${list.length} 台`;
-  const useTable = instView() === "table" && isDesktop() && list.length;
-  const lb = $("#list", box);
-  lb.className = useTable ? "card itable" : "grid";
-  lb.innerHTML = !list.length ? `<div class="empty">该账号还没有 VPS（在「云账号 → 编辑」里填写 VPS 列表）</div>` : useTable ? gcTable(list) : list.map(gcCard).join("");
-  const instOf = (el) => list.find((x) => x.id === el.closest("[data-id]").dataset.id);
-  box.querySelectorAll("[data-op]").forEach((b) => (b.onclick = () => instOp(acc, instOf(b), b.dataset.op, "vm", b, reload)));
-  box.querySelectorAll("[data-more]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); const inst = instOf(b); opsMenu(b, GC_MORE, (op) => instOp(acc, inst, op, "vm", b, reload)); }));
-}
-async function gcTrafficDialog(acc, inst, g, onSaved) {
-  let t = null, use;
-  try {
-    t = await api(`/accounts/${acc.id}/traffic?instance_id=${encodeURIComponent(inst.id)}&kind=vm`);
-    use = `<p>本计费周期已用 <b>${t.used_gb} GB</b> / ${t.total_gb} GB（${(+t.percent || 0).toFixed(1)}%，出入合计）。</p>`;
-  } catch (e) { use = `<p class="muted">读取流量失败：${esc(e.message)}</p>`; }
-  const r = await modal(`流量守护 · ${inst.name}`, `${use}
-    <p class="muted">用量和额度都取自绿云面板（本计费周期的 bw），每 30 分钟检查一次。到预警比例推送 Telegram；到额度推送，可选自动关机。</p>
-    <div class="row2"><div><label>预警比例 %</label><input name="warn_pct" type="number" min="10" max="99" value="${g.warn_pct || 80}"></div>
-    <div><label>到达额度后</label><select name="action"><option value="notify">只推送</option><option value="stop" ${g.action === "stop" ? "selected" : ""}>推送并自动关机</option></select></div>
-    <div data-show-when="action=stop"><label>关机多少小时后自动开机（0 = 不自动开机）</label><input name="shutdown_hours" type="number" min="0" max="720" step="0.5" value="${g.shutdown_hours || 0}"></div></div>
-    <label><input type="checkbox" name="enabled" ${g.enabled === 0 ? "" : "checked"}> 启用这条规则</label>`,
-    (bg) => post("/traffic-guards", { account_id: acc.id, instance_id: inst.id, kind: "vm", name: inst.name, mode: "monthly",
-      limit_gb: (t && t.total_gb) || g.limit_gb || FREE_OUT.greencloud, ...form(bg) }), "保存");
-  if (r) { toast(r.warning || `已保存，当前已用 ${r.last_gb ?? "-"} GB（${r.last_pct ?? "-"}%）`, !!r.warning); if (onSaved) onSaved(); }
-}
-// ================= GC 块 END =================
 
 // ---------------- 启动 ----------------
 async function loadAccounts() {

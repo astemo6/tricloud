@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 与 iOS AppIcon 一致的三色圆：OCI 红、AWS 橙、Azure 蓝 -->
+<!-- 与 iOS AppIcon 一致的三色圆：OCI 红在上、AWS 橙左下、Azure 蓝右下 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FFAA4034" android:pathData="M43.6,46.9m-19.6,0a19.6,19.6 0,1 1,39.2 0a19.6,19.6 0,1 1,-39.2 0" />
-    <path android:fillColor="#FFD98309" android:pathData="M64.4,46.9m-19.6,0a19.6,19.6 0,1 1,39.2 0a19.6,19.6 0,1 1,-39.2 0" />
-    <path android:fillColor="#FF046BBD" android:pathData="M54,64.8m-19.6,0a19.6,19.6 0,1 1,39.2 0a19.6,19.6 0,1 1,-39.2 0" />
+    <path android:fillColor="#FFD98309" android:pathData="M43.6,62.95m-19.6,0a19.6,19.6 0,1 1,39.2 0a19.6,19.6 0,1 1,-39.2 0" />
+    <path android:fillColor="#FF046BBD" android:pathData="M64.4,62.95m-19.6,0a19.6,19.6 0,1 1,39.2 0a19.6,19.6 0,1 1,-39.2 0" />
+    <path android:fillColor="#FFAA4034" android:pathData="M54,45.05m-19.6,0a19.6,19.6 0,1 1,39.2 0a19.6,19.6 0,1 1,-39.2 0" />
 </vector>

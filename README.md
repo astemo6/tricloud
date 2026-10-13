@@ -74,6 +74,10 @@ bash <(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercon
 
 ## App
 
+直接下载：[Releases](https://github.com/astemo6/tricloud/releases/latest) 里有 Android APK 和 iOS 未签名 IPA。首次打开填你自己的面板地址。
+
+自行构建：
+
 - **Android**（Java，Material 3）：`cd android && ./gradlew assembleRelease`（JDK 17 + Android SDK 34，签名配置见 `keystore.properties.example`）。
 - **iOS**（SwiftUI，iOS 15+）：推送 `ios/` 改动或手动运行 Actions「iOS IPA」，在 Releases 生成未签名 IPA，用 Sideloadly / AltStore / TrollStore 等自签安装。本地：`cd ios && xcodegen generate`。
 

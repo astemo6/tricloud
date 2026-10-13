@@ -67,7 +67,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete "ios-v$V" -y --cleanup-tag || true
-          gh release create "ios-v$V" ios/TriCloud-$V-unsigned.ipa --title "TriCloud iOS $V（未签名）" \
-            --notes "未签名 IPA，用爱思助手 / Sideloadly / AltStore / TrollStore 等工具自签安装。首次打开填你自己的面板地址。
-
-          $(cat ios/ipa-check.txt)"
+          gh release view "v$V" >/dev/null 2>&1 || gh release create "v$V" --title "TriCloud $V" --notes-file .github/release-notes.md
+          gh release edit "v$V" --notes-file .github/release-notes.md
+          gh release upload "v$V" ios/TriCloud-$V-unsigned.ipa --clobber

@@ -29,6 +29,9 @@ async function api(path, opt = {}) {
 const post = (p, b) => api(p, { method: "POST", body: b || {} });
 const del = (p) => api(p, { method: "DELETE" });
 
+// 页面脚本出错时直接提示，避免点了按钮没反应（例如 Windows 客户端里）
+window.addEventListener("error", (e) => { try { toast("页面出错：" + (e.message || e.error), true); } catch (_) {} });
+window.addEventListener("unhandledrejection", (e) => { try { toast("操作出错：" + ((e.reason && e.reason.message) || e.reason), true); } catch (_) {} });
 function toast(msg, err) {
   const d = document.createElement("div");
   d.className = "toast" + (err ? " err" : "");
@@ -1742,7 +1745,10 @@ const proxyFields = (d = {}) => `<label>出口代理地址（可选，留空 = �
   <p class="muted">也兼容旧写法 http://user:pass@host:port。密码加密保存、不回显。</p>`;
 async function editAccount(a) {
   let d;
-  try { d = await api(`/accounts/${a.id}/detail`); } catch (e) { return toast(e.message, true); }
+  if (!a) return toast("找不到该账号，请刷新后重试", true);
+  toast("正在读取账号信息…");
+  try { d = await Promise.race([api(`/accounts/${a.id}/detail`), new Promise((_, rj) => setTimeout(() => rj(new Error("读取账号信息超时（15 秒），请检查网络或刷新")), 15000))]); }
+  catch (e) { return toast(e.message, true); }
   const fld = Object.entries(d.fields).map(([k, v]) => {
     const label = CRED_LABEL[k] || k;
     if (typeof v === "string") return TEXTAREA_FIELDS.has(k) ? `<label>${label}</label><textarea name="c_${k}" rows="4" class="mono">${esc(v)}</textarea>`

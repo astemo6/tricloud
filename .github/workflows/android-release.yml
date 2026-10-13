@@ -25,4 +25,8 @@ jobs:
         run: |
           gh release view "v$V" >/dev/null 2>&1 || gh release create "v$V" --title "TriCloud $V" --notes-file .github/release-notes.md
           gh release edit "v$V" --notes-file .github/release-notes.md
+          NEW=$(basename out/*.apk)
+          for a in $(gh release view "v$V" --json assets -q '.assets[].name' | grep '\.apk$'); do
+            [ "$a" = "$NEW" ] || gh release delete-asset "v$V" "$a" -y
+          done
           gh release upload "v$V" out/*.apk --clobber

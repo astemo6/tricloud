@@ -208,21 +208,23 @@ public abstract class BaseActivity extends AppCompatActivity {
         android.text.SpannableString ss = new android.text.SpannableString("\u00A0 " + MainActivity.PNAMES[p]);
         android.graphics.drawable.Drawable d = androidx.core.content.ContextCompat.getDrawable(this, PROV_LOGOS[p]);
         if (d == null) return MainActivity.PNAMES[p];
-        int h = Math.round(getResources().getDisplayMetrics().density * (p == 1 ? 15 : 13));
+        int h = Math.round(getResources().getDisplayMetrics().density * (p == 1 ? 18 : 13));
         int w = Math.round((float) d.getIntrinsicWidth() * h / Math.max(1, d.getIntrinsicHeight()));
         d.setBounds(0, 0, w, h);
-        ss.setSpan(new CenterImageSpan(d), 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        ss.setSpan(new CenterImageSpan(d, p == 1 ? Math.round(h * 0.23f) : 0), 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         return ss;
     }
 
     /** 图片与文字按垂直中线对齐（ALIGN_BASELINE 会让带下沿弧线的 AWS Logo 偏高）。 */
     static class CenterImageSpan extends android.text.style.ImageSpan {
-        CenterImageSpan(android.graphics.drawable.Drawable d) { super(d); }
+        /** 额外下移量：AWS 的「aws」字母只占图的上半部（下面是笑脸弧线），按字母中线而不是整图中线对齐。 */
+        final int shift;
+        CenterImageSpan(android.graphics.drawable.Drawable d, int shift) { super(d); this.shift = shift; }
         @Override public int getSize(android.graphics.Paint paint, CharSequence text, int start, int end, android.graphics.Paint.FontMetricsInt fm) {
             android.graphics.Rect r = getDrawable().getBounds();
             if (fm != null) {
                 android.graphics.Paint.FontMetricsInt pf = paint.getFontMetricsInt();
-                int mid = (pf.ascent + pf.descent) / 2, half = r.height() / 2;
+                int mid = (pf.ascent + pf.descent) / 2 + shift, half = r.height() / 2;
                 fm.ascent = Math.min(pf.ascent, mid - half); fm.top = fm.ascent;
                 fm.descent = Math.max(pf.descent, mid + half); fm.bottom = fm.descent;
             }
@@ -231,7 +233,7 @@ public abstract class BaseActivity extends AppCompatActivity {
         @Override public void draw(android.graphics.Canvas c, CharSequence text, int start, int end, float x, int top, int y, int bottom, android.graphics.Paint paint) {
             android.graphics.drawable.Drawable d = getDrawable();
             android.graphics.Paint.FontMetricsInt pf = paint.getFontMetricsInt();
-            int ty = y + (pf.ascent + pf.descent) / 2 - d.getBounds().height() / 2;
+            int ty = y + (pf.ascent + pf.descent) / 2 + shift - d.getBounds().height() / 2;
             c.save(); c.translate(x, ty); d.draw(c); c.restore();
         }
     }

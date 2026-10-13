@@ -35,7 +35,8 @@ struct SectionHeader: View {
         HStack(spacing: 6) {
             if let p = Brand.prov(forTitle: title) {
                 Image(Brand.logo(p)).resizable().scaledToFit()
-                    .frame(height: p == "aws" ? 15 : 13)
+                    .frame(height: p == "aws" ? 18 : 13)
+                    .offset(y: p == "aws" ? 4 : 0)  // 「aws」字母只占图上半部，下移与文字齐平
                     .accessibilityHidden(true)
             }
             Text(title)

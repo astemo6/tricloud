@@ -94,12 +94,26 @@ final class HomePage: Page {
                     continue
                 }
                 let q = region.isEmpty ? "" : "&region=" + enc(region)
-                Api.call("GET", "/accounts/\(acc.optInt("id"))/instances?kind=vm" + q, nil) { res in
+                let accId = acc.optInt("id")
+                Api.call("GET", "/accounts/\(accId)/instances?kind=vm" + q, nil) { res in
                     switch res {
                     case .success(let x):
                         let l = jarr(x)
                         let run = (0..<l.count).filter { l.obj($0).optString("state").lowercased() == "running" }.count
                         n.detail.text = headDetail + "\(l.count) 台（运行 \(run)）"
+                        // AWS：首页台数同时统计 Lightsail，失败不影响 EC2
+                        if p == "aws" {
+                            Api.call("GET", "/accounts/\(accId)/instances?kind=lightsail" + q, nil) { r2 in
+                                var lsText = "查询失败", total = l.count, run2 = run
+                                if case .success(let y) = r2 {
+                                    let ls = jarr(y)
+                                    total += ls.count
+                                    run2 += (0..<ls.count).filter { ls.obj($0).optString("state").lowercased() == "running" }.count
+                                    lsText = "\(ls.count)"
+                                }
+                                n.detail.text = headDetail + "\(total) 台（运行 \(run2)）· EC2 \(l.count) · Lightsail " + lsText
+                            }
+                        }
                     case .failure(let e):
                         n.detail.text = headDetail + "查询失败：" + String(((e as? ApiError)?.msg ?? e.localizedDescription).prefix(60))
                     }

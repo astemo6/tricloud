@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.6.0（build 17）(2026-10-14)
+- 1.6.0（build 17）：首页 AWS 实例数包含 Lightsail
+
 ## 1.5.0 (2026-10-11)
 - 移除快照功能（手动快照、快照列表/删除、定时快照策略；`/api/accounts/{id}/snapshots` 路由、Web/Android 快照 tab 与按钮）。新库不再建 `snapshot_policies` 表，旧库已有的表保留不动；历史 snapshot 任务显示为「快照（已移除）」。AWS 闲置资源里的 EBS / Recycle Bin 快照计费统计保留。
 - OCI 创建/抢机/迁移的规格下拉标明 Always Free（A1.Flex、E2.1.Micro）或付费（E4.Flex、Standard3.Flex）；Android 同步。

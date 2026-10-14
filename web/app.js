@@ -198,9 +198,13 @@ async function pageHome() {
       ${h.score == null ? `<span class="muted">未检测</span>` : `<span class="hs ${h.level}">${h.score}</span>`}</a>`).join("");
   }).catch(() => ($("#hhl").innerHTML = `<span class="muted">读取失败</span>`));
   for (const a of ACCOUNTS) {
-    api(`/accounts/${a.id}/instances?${rq(a)}`).then((l) => {
-      const run = l.filter((i) => i.state === "running").length;
-      const el = document.getElementById("cnt" + a.id); if (el) el.textContent = `${l.length} 台（运行 ${run}）`;
+    // AWS 首页台数 = EC2 + Lightsail（Lightsail 查询失败不影响 EC2 显示）
+    Promise.all([api(`/accounts/${a.id}/instances?${rq(a)}`),
+      a.provider === "aws" ? api(`/accounts/${a.id}/instances?kind=lightsail&${rq(a)}`).catch(() => null) : Promise.resolve([])]).then(([l, ls]) => {
+      const all = l.concat(ls || []);
+      const run = all.filter((i) => i.state === "running").length;
+      const extra = a.provider === "aws" ? ` · EC2 ${l.length} · Lightsail ${ls ? ls.length : "查询失败"}` : "";
+      const el = document.getElementById("cnt" + a.id); if (el) el.textContent = `${all.length} 台（运行 ${run}）${extra}`;
     }).catch((e) => { const el = document.getElementById("cnt" + a.id); if (el) el.textContent = "查询失败：" + e.message.slice(0, 60); });
   }
 }

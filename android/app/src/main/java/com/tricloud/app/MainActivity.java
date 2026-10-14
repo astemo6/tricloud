@@ -96,14 +96,25 @@ public class MainActivity extends BaseActivity {
                 String rq = noRegion(acc.optString("provider")) ? "" : "?region=" + Api.enc(reg);
                 if (acc.optInt("disabled") == 1) cnt.setText("实例：账号已停用");
                 else Api.job(this, () -> {
-                    try { return Api.call("GET", "/accounts/" + acc.optInt("id") + "/instances" + rq, null); }
+                    JSONObject o = new JSONObject();
+                    try { o.put("vm", Api.arr(Api.call("GET", "/accounts/" + acc.optInt("id") + "/instances" + rq, null))); }
                     catch (Exception e) { return new JSONObject().put("error", e.getMessage()); }
+                    // AWS：首页台数同时统计 Lightsail，失败不影响 EC2
+                    if ("aws".equals(acc.optString("provider"))) {
+                        try { o.put("ls", Api.arr(Api.call("GET", "/accounts/" + acc.optInt("id") + "/instances?kind=lightsail" + (rq.isEmpty() ? "" : "&" + rq.substring(1)), null))); }
+                        catch (Exception e) { o.put("ls_err", true); }
+                    }
+                    return o;
                 }, x -> {
-                    if (x instanceof JSONObject) { String e = ((JSONObject) x).optString("error"); cnt.setText("实例：查询失败 " + (e.length() > 60 ? e.substring(0, 60) : e)); return; }
-                    JSONArray l = Api.arr(x);
-                    int run = 0;
+                    JSONObject o = (JSONObject) x;
+                    if (o.has("error")) { String e = o.optString("error"); cnt.setText("实例：查询失败 " + (e.length() > 60 ? e.substring(0, 60) : e)); return; }
+                    JSONArray l = o.optJSONArray("vm"), ls = o.optJSONArray("ls");
+                    int run = 0, total = l.length() + (ls == null ? 0 : ls.length());
                     for (int j = 0; j < l.length(); j++) if ("running".equalsIgnoreCase(l.optJSONObject(j).optString("state"))) run++;
-                    cnt.setText("实例：" + l.length() + " 台（运行 " + run + "）");
+                    if (ls != null) for (int j = 0; j < ls.length(); j++) if ("running".equalsIgnoreCase(ls.optJSONObject(j).optString("state"))) run++;
+                    String extra = "aws".equals(acc.optString("provider"))
+                            ? " · EC2 " + l.length() + " · Lightsail " + (ls == null ? "查询失败" : String.valueOf(ls.length())) : "";
+                    cnt.setText("实例：" + total + " 台（运行 " + run + "）" + extra);
                 });
                 button(row(c), "进入管理", v -> openPage("acc_" + acc.optInt("id"), acc));
             }

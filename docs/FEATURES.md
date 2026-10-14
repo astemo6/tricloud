@@ -77,6 +77,7 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 
 | 版本 | 内容 |
 |---|---|
+| 1.6.0（build 17） | 首页 AWS 实例数包含 Lightsail（显示为「N 台（运行 X）· EC2 a · Lightsail b」） |
 | 1.6.0（build 16） | 移除第四家可选云厂商（彻底删除其后端、Web、演示、Android、iOS 代码），只保留 OCI / AWS / Azure；`/api/meta` 只返回三家云 |
 | 1.5.0 | 合并线上旧版：TG 内联按钮、已删账号回收站、代理账密分填、默认创建参数、OCI 安全组、CloudFront 全套、账号编辑、重启续跑、迁移脚本、Android 1.5.0；**移除串口控制台** |
 | 1.4.0 | 任务实时日志与任务抽屉、批量添加 / 一键测活 / 存活天数、Credit 与教育优惠、流量守护滚动窗口 + 关机 M 小时自动开机、换 IP 排除网段 + 自动换 IP 每日限次、Azure 订阅页、账号切换器 / 表格视图 / 紧凑模式、TG `/tasks` `/credits`、Android 1.4.0；修复同步接口停止任务时没有事件循环导致的 500 |

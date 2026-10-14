@@ -74,7 +74,33 @@ allow group <你的组> to read usage-reports in tenancy
 
 面板需要的字段：`tenant_id`、`client_id`、`client_secret`、`subscription_id`
 
-### 步骤
+### 方法一：Cloud Shell 命令（推荐，约 1 分钟）
+
+1. 登录 [Azure Portal](https://portal.azure.com)，点顶栏 `>_` 图标打开 **Cloud Shell**，选 **Bash**。
+2. 查订阅 ID：
+
+   ```bash
+   az account show --query id -o tsv
+   ```
+
+3. 创建服务主体并授权（把 `<SUB_ID>` 换成上一步的订阅 ID）：
+
+   ```bash
+   az ad sp create-for-rbac --name tricloud --role Contributor --scopes /subscriptions/<SUB_ID>
+   ```
+
+4. 输出字段对应关系：`appId` → `client_id`，`password` → `client_secret`（只显示这一次，请立即保存），`tenant` → `tenant_id`。
+5. 如需面板查**账单**，再授权 Cost Management 读者：
+
+   ```bash
+   az role assignment create --assignee <appId> --role "Cost Management Reader" --scope /subscriptions/<SUB_ID>
+   ```
+
+6. 把第 3 步的输出 JSON 连同一行 `subscription_id: <SUB_ID>` 一起粘贴到面板「添加账号 → 粘贴自动识别」，会自动拆成四个字段。
+
+> 想收紧权限：可把 Contributor 换成 **Virtual Machine Contributor + Network Contributor**（换 IP、创建 VM 还需资源组写权限）。
+
+### 方法二：Portal 网页手动创建
 
 1. 登录 [Azure Portal](https://portal.azure.com) → 搜索 **Microsoft Entra ID**（原 Azure AD）。
 2. 左侧 **应用注册** → **新注册**，名称如 `tricloud`，受支持的帐户类型保持默认 → 注册。
@@ -99,6 +125,9 @@ allow group <你的组> to read usage-reports in tenancy
 
 ## 填到面板
 
-面板 → 顶部云厂商标签 → **管理账号** → **添加账号**，按提示把上面复制的字段逐一填入，保存后点 **测试连接** 验证。
+面板（Web / Android / iOS / Windows 客户端）→ **账号** → **添加账号**：
 
-更换/轮换凭证后，在账号管理里删除旧账号重新添加即可（回收站会保留删除记录）。
+- 可以直接把上面的输出 / 复制的内容整段粘贴到「粘贴自动识别」，面板会识别云厂商并拆分字段；也可以逐项手动填写。
+- 保存前会自动测活，凭证有误不会保存。
+
+更换 / 轮换凭证：在账号列表点 **编辑**，填入新的密钥即可（留空的密钥字段保持不变，修改凭证时同样先测活）。

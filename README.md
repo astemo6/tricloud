@@ -65,6 +65,8 @@ bash <(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercon
 
 **Azure**：`az ad sp create-for-rbac --name tricloud --role "Virtual Machine Contributor" --scopes /subscriptions/<SUB_ID>`，换 IP / 创建 VM / 资源组管理需在订阅上授予 Contributor（或 Virtual Machine Contributor + Network Contributor + 资源组写权限），账单需 Cost Management Reader。学生订阅部分账单 API 可能不可用，面板会显示错误而不影响其他功能。
 
+> 三家云凭证的图文获取步骤（含 Azure Cloud Shell 一键命令）见 [docs/api-credentials.md](docs/api-credentials.md)。
+
 > AWS 只有 Cost Explorer 按次收费（$0.01/次）。面板只在每月 15 号和月末自动查询，其余时间读缓存，正常每账号每月 ≤ $0.04。
 
 ## Telegram

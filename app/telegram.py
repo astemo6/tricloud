@@ -5,7 +5,7 @@ import time
 
 import httpx
 
-from . import core, extras, services
+from . import core, net, services
 
 _cb = {}   # 短 key -> payload（callback_data 限 64 字节）
 STATE_ICON = {"running": "🟢", "stopped": "🔴", "deallocated": "🔴", "stopping": "🟡", "starting": "🟡",
@@ -447,7 +447,7 @@ async def handle_message(bot, chat_id, m):
     elif txt.startswith("/ipq"):   # v1.6
         arg = txt[4:].strip()
         try:
-            q = await asyncio.to_thread(extras.ip_quality, arg)
+            q = await asyncio.to_thread(net.ip_quality, arg)
         except ValueError:
             await _reply(bot, chat_id, "用法：/ipq 203.0.113.5")
             return

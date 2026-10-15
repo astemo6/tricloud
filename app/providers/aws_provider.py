@@ -3,6 +3,7 @@
 注意：Cost Explorer 每次调用 $0.01，只能经 app.billing 的缓存层调用 cost_explorer()。
 """
 import datetime as dt
+import threading
 import time
 import uuid
 
@@ -12,7 +13,7 @@ from botocore.config import Config
 
 from .. import hostname
 from .aws_more import AWSMore
-from ..extras import cloud_init, gen_password
+from ..cloudinit import cloud_init, gen_password
 
 _cfg = Config(retries={"max_attempts": 4, "mode": "standard"}, connect_timeout=10, read_timeout=30)
 
@@ -42,8 +43,19 @@ class AWSProvider(AWSMore):
         # 每账号独立出口代理
         self.cfg = _cfg.merge(Config(proxies={"http": cred["proxy"], "https": cred["proxy"]})) if cred.get("proxy") else _cfg
 
+    _client_lock = threading.Lock()   # boto3 Session 建客户端不是线程安全的；客户端本身线程安全，可复用
+
     def c(self, svc, region=None):
-        return self.session.client(svc, region_name=region or self.region, config=self.cfg)
+        """按 (服务, 区域) 复用 boto3 客户端：每次新建客户端要重新加载服务模型，既慢又占内存。"""
+        key = (svc, region or self.region)
+        cache = self.__dict__.setdefault("_clients", {})
+        cl = cache.get(key)
+        if cl is None:
+            with self._client_lock:
+                cl = cache.get(key)
+                if cl is None:
+                    cl = cache[key] = self.session.client(svc, region_name=key[1], config=self.cfg)
+        return cl
 
     def test(self):
         ident = self.c("sts").get_caller_identity()

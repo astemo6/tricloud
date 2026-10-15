@@ -1,17 +1,43 @@
 """Provider 工厂 + 账单（含 AWS 节流缓存，FR-03）。"""
 import calendar
 import datetime as dt
+import importlib
 import json
 import time
+from collections.abc import Mapping
 from zoneinfo import ZoneInfo
 
 from . import core
-from .providers.aws_provider import AWSProvider
-from .providers.azure_provider import AzureProvider
-from .providers.oci_provider import OCIProvider
 
-PROVIDERS = {"oci": OCIProvider, "aws": AWSProvider, "azure": AzureProvider}
+# 三家云 SDK（oci / boto3 / azure-mgmt-*）都很大：用到哪家才导入哪家，没有该云账号就不占内存、不拖慢启动。
+_PROVIDER_CLASSES = {"oci": ("oci_provider", "OCIProvider"), "aws": ("aws_provider", "AWSProvider"),
+                     "azure": ("azure_provider", "AzureProvider")}
+
+
+class _LazyProviders(Mapping):
+    """provider 名 → Provider 类（首次取值时才 import）。键顺序即 /api/meta 返回的顺序。"""
+
+    def __getitem__(self, name):
+        mod, cls = _PROVIDER_CLASSES[name]
+        return getattr(importlib.import_module(f".providers.{mod}", __package__), cls)
+
+    def __iter__(self):
+        return iter(_PROVIDER_CLASSES)
+
+    def __len__(self):
+        return len(_PROVIDER_CLASSES)
+
+
+PROVIDERS = _LazyProviders()
 _cache = {}
+
+
+def __getattr__(name):
+    """兼容旧写法 services.OCIProvider / AWSProvider / AzureProvider（按需导入）。"""
+    for prov, (_, cls) in _PROVIDER_CLASSES.items():
+        if name == cls:
+            return PROVIDERS[prov]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def provider(acc_id, region=None):
@@ -143,7 +169,7 @@ def instance_action(acc_id, inst_id, action, region=None, kind="vm", preserve_bo
             (f"user:{action}", acc_id, inst_id))
     if kind == "lightsail":
         return p.ls_action(inst_id, action)
-    if action == "terminate" and preserve_boot_volume and isinstance(p, OCIProvider):
+    if action == "terminate" and preserve_boot_volume and isinstance(p, PROVIDERS["oci"]):
         return p.action(inst_id, action, preserve_boot_volume=True)
     return p.action(inst_id, action)
 

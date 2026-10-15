@@ -3,6 +3,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TRICLOUD_DATA=/data
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# glibc 默认每线程一个 malloc arena，线程池多时内存碎片大；限制为 2 个（放在 pip 之后，不破坏依赖层缓存）
+ENV MALLOC_ARENA_MAX=2
 COPY app ./app
 COPY web ./web
 COPY entrypoint.sh /entrypoint.sh

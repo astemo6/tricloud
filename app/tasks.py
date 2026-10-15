@@ -4,7 +4,7 @@ import json
 import time
 import traceback
 
-from . import core, credits, extras, health, services, telegram, traffic_guard
+from . import cloudinit, core, credits, dns, health, net, services, telegram, traffic_guard
 
 RUNNING = set()
 LOG_KEEP = 500          # 每个任务最多保留的日志行数（抢机任务可能跑几千次）
@@ -99,10 +99,10 @@ async def _run_snatch(t):
     attempts = t["attempts"] + 1
     try:
         prov = services.provider(t["account_id"], p.get("region"))
-        create = dict(p["create"], _ad_index=attempts - 1, script=extras.resolve_script(p["create"]))
+        create = dict(p["create"], _ad_index=attempts - 1, script=cloudinit.resolve_script(p["create"]))
         r = await asyncio.to_thread(prov.create_instance, create)
         if r.get("password"):
-            extras.save_instance_secret(t["account_id"], r["id"], r["name"], r["username"], r["password"])
+            cloudinit.save_instance_secret(t["account_id"], r["id"], r["name"], r["username"], r["password"])
         _update(t["id"], status="done", attempts=attempts, message=f"抢机成功：{r['name']}（{r.get('ad', '')}）",
                 result={k: r.get(k) for k in ("id", "name", "ad", "public_ip", "username") if r.get(k)})
         await telegram.send(f"🎉 <b>抢机成功</b>\n账号：{telegram.esc(acc['name'])}\n实例：{telegram.esc(r['name'])}\n"
@@ -121,6 +121,148 @@ async def _run_snatch(t):
             await telegram.send(f"❌ <b>抢机任务 #{t['id']} 失败</b>\n{telegram.esc(acc['name'])}\n{telegram.esc(msg)}")
         else:
             _update(t["id"], attempts=attempts, message=msg, params=p)
+
+
+class _TaskCtx:
+    """一次性任务处理函数的上下文：任务行、参数、账号、provider、显示名，以及进度 / 安全点 / 日志回调。"""
+    __slots__ = ("t", "p", "acc", "prov", "name", "progress", "checkpoint", "tlog")
+
+    def __init__(self, t, p, acc, prov, name, progress, checkpoint, tlog):
+        self.t, self.p, self.acc, self.prov, self.name = t, p, acc, prov, name
+        self.progress, self.checkpoint, self.tlog = progress, checkpoint, tlog
+
+
+async def _do_change_ip(c):
+    """换 IP（OCI 由 provider 内部重试；AWS / Azure 走 _change_ip_retry），完成后同步 DNS 与监控里的 IP。"""
+    t, p, acc, prov, name, progress, checkpoint, tlog = c.t, c.p, c.acc, c.prov, c.name, c.progress, c.checkpoint, c.tlog
+    core.ex("UPDATE monitors SET last_state='user:changeip' WHERE account_id=? AND instance_id=?",
+            (t["account_id"], p["instance_id"]))
+    if p.get("cidrs"):
+        inc, exc = net.split_cidrs(p["cidrs"])
+        tlog("网段要求：" + "；".join(([f"命中 {', '.join(map(str, inc))}"] if inc else [])
+                                  + ([f"排除 {', '.join(map(str, exc))}"] if exc else [])))
+    acc_q = _quality_accept(p, tlog)
+    if acc_q:
+        tlog(f"质量要求：{'风险分 ≤ ' + str(p['quality_max_risk']) if p.get('quality_max_risk') not in (None, '') else ''}"
+             f"{' 归属 ' + str(p['quality_country']) if p.get('quality_country') else ''}（{net.QUALITY_SOURCES}）")
+    if acc["provider"] == "oci":
+        r = await asyncio.to_thread(prov.change_ip, p["instance_id"], p.get("cidrs"),
+                                    int(p.get("max_tries") or 20), checkpoint, **({"accept": acc_q} if acc_q else {}))
+    else:
+        r = await asyncio.to_thread(_change_ip_retry, prov, acc, p, progress, checkpoint, acc_q)
+    msg = f"{r.get('old_ip') or '-'} → {r.get('new_ip')}" + (f"（{r['tries']} 次）" if r.get("tries", 1) > 1 else "")
+    if r.get("warning"):
+        msg += "，" + r["warning"]
+        tlog(r["warning"], "warn")
+    tlog("同步 DNS 绑定…")
+    dns_out = await asyncio.to_thread(dns.dns_sync, t["account_id"], p["instance_id"], r.get("new_ip"))
+    for d in dns_out:
+        tlog(d)
+    core.ex("UPDATE monitors SET public_ip=?, fail_count=0 WHERE account_id=? AND instance_id=?",
+            (r.get("new_ip"), t["account_id"], p["instance_id"]))
+    _update(t["id"], status="done", message=msg + ("；" + "；".join(dns_out) if dns_out else ""),
+            result={"old_ip": r.get("old_ip"), "new_ip": r.get("new_ip"), "tries": r.get("tries", 1), "dns": dns_out})
+    await telegram.send(f"✅ <b>换 IP 完成</b>{'（' + telegram.esc(p['reason']) + '）' if p.get('reason') else ''}\n"
+                        f"{telegram.esc(acc['name'])} / {telegram.esc(name)}\n<code>{msg}</code>"
+                        + ("\n" + telegram.esc("\n".join(dns_out)) if dns_out else ""))
+
+
+async def _do_ipv6(c):
+    """一键 IPv6 全链路。"""
+    t, p, prov, name, progress = c.t, c.p, c.prov, c.name, c.progress
+    r = await asyncio.to_thread(prov.add_ipv6, p["instance_id"], progress)
+    dns_out = await asyncio.to_thread(dns.dns_sync, t["account_id"], p["instance_id"], None, r["ipv6"])
+    _update(t["id"], status="done", message=f"IPv6：{r['ipv6']}" + ("；" + "；".join(dns_out) if dns_out else ""), result={"ipv6": r["ipv6"]})
+    await telegram.send(f"✅ <b>IPv6 已就绪</b>\n{telegram.esc(name)}\n<code>{r['ipv6']}</code>")
+
+
+async def _do_azure_create(c):
+    """Azure 创建 VM（后台，含开机密码留存）。"""
+    t, p, prov, progress = c.t, c.p, c.prov, c.progress
+    create = dict(p["create"], script=cloudinit.resolve_script(p["create"]))
+    r = await asyncio.to_thread(prov.create_vm, create, progress)
+    if r.get("password"):
+        cloudinit.save_instance_secret(t["account_id"], r["id"], r["name"], r["username"], r["password"])
+    _update(t["id"], status="done", message=f"已创建 {r['name']}，IP {r.get('public_ip')}",
+            result={k: r.get(k) for k in ("id", "name", "public_ip", "username") if r.get(k)})
+    await telegram.send(f"✅ <b>Azure VM 创建完成</b>\n{telegram.esc(r['name'])}\n<code>{r.get('public_ip')}</code>")
+
+
+async def _do_ensure_network(c):
+    """OCI 自动建网（VCN / 网关 / 路由 / 公有子网）。"""
+    t, prov, progress = c.t, c.prov, c.progress
+    progress("创建 VCN、互联网网关、路由表与公有子网…")
+    r = await asyncio.to_thread(prov.ensure_network)
+    _update(t["id"], status="done", message=f"已创建 VCN 与公有子网 {r['subnet_id'][-16:]}")
+
+
+async def _do_migrate(c):
+    """跨云迁移。"""
+    t, p, progress = c.t, c.p, c.progress
+    await _migrate(t, p, progress)
+
+
+async def _do_cf_delete(c):
+    """CloudFront 分发：先停用、等部署完成再删除。"""
+    t, p, acc, prov, checkpoint = c.t, c.p, c.acc, c.prov, c.checkpoint
+    await _cf_delete(t, p, prov, checkpoint)
+    await telegram.send(f"🗑 <b>CloudFront 分发已删除</b>\n{telegram.esc(acc['name'])} / <code>{telegram.esc(p['distribution_id'])}</code>")
+
+
+async def _do_resize(c):
+    """改配置（Azure 改 VM 大小；OCI 改 OCPU / 内存 / 规格）。"""
+    t, p, acc, prov, name, progress = c.t, c.p, c.acc, c.prov, c.name, c.progress
+    if acc["provider"] == "azure":
+        progress(f"调整 VM 大小为 {p['size']}（VM 会重启）…")
+        await asyncio.to_thread(prov.resize, p["instance_id"], p["size"])
+    else:
+        progress(f"提交改配置：{p.get('shape') or '原规格'} {p.get('ocpus') or '-'} OCPU / {p.get('memory_gb') or '-'} GB…")
+        await asyncio.to_thread(prov.resize, p["instance_id"], p.get("ocpus"), p.get("memory_gb"), p.get("shape"))
+    _update(t["id"], status="done", message="改配置完成")
+    await telegram.send(f"✅ <b>改配置完成</b>\n{telegram.esc(acc['name'])} / {telegram.esc(name)}")
+
+
+async def _do_reinstall(c):
+    """v1.6 重装系统。"""
+    t, p, acc, prov, name, progress = c.t, c.p, c.acc, c.prov, c.name, c.progress
+    await _reinstall(t, p, acc, prov, progress, name)
+
+
+async def _do_net500m(c):
+    """v1.6 OCI 免费 AMD 下行 500Mbps 开 / 关。"""
+    t, p, prov, name, progress = c.t, c.p, c.prov, c.name, c.progress
+    if p.get("enable", True):
+        r = await asyncio.to_thread(prov.enable_500m, p["instance_id"], p.get("ssh_port") or 22, progress)
+        dns_out = await asyncio.to_thread(dns.dns_sync, t["account_id"], p["instance_id"], r.get("public_ip"))
+        _update(t["id"], status="done", message=f"已开启，新入口 IP {r.get('public_ip')}" + ("；" + "；".join(dns_out) if dns_out else ""),
+                result={"public_ip": r.get("public_ip"), "hint": r.get("hint")})
+        await telegram.send(f"✅ <b>下行 500Mbps 已开启</b>\n{telegram.esc(name)}\n新入口 IP <code>{r.get('public_ip')}</code>")
+    else:
+        r = await asyncio.to_thread(prov.disable_500m, p["instance_id"], progress)
+        _update(t["id"], status="done", message="已关闭并还原原公网 IP 入站")
+
+
+async def _do_foundry(c):
+    """v1.6 Azure Foundry 部署模型。"""
+    t, p, acc, prov, progress = c.t, c.p, c.acc, c.prov, c.progress
+    r = await asyncio.to_thread(prov.foundry_deploy, p, progress)
+    _update(t["id"], status="done", message=f"已部署 {r['model']} → {r['deployment']}，Endpoint {r['endpoint']}", result=r)
+    await telegram.send(f"✅ <b>AI 模型已部署</b>\n{telegram.esc(acc['name'])} / {telegram.esc(r['model'])}\nEndpoint <code>{telegram.esc(r['endpoint'] or '-')}</code>")
+
+
+# 一次性长任务：任务类型 → 处理函数（c 为 _TaskCtx）。新增任务类型在这里登记即可。
+ONCE_HANDLERS = {
+    "change_ip": _do_change_ip,
+    "ipv6": _do_ipv6,
+    "azure_create": _do_azure_create,
+    "ensure_network": _do_ensure_network,
+    "migrate": _do_migrate,
+    "cf_delete": _do_cf_delete,
+    "resize": _do_resize,
+    "reinstall": _do_reinstall,
+    "net500m": _do_net500m,
+    "foundry": _do_foundry,
+}
 
 
 async def _run_once(t):
@@ -143,84 +285,9 @@ async def _run_once(t):
     try:
         tlog(f"开始执行：{_summary(t['type'], p)}（{acc['provider'].upper()} · {acc['name']}）")
         prov = services.provider(t["account_id"], p.get("region"))
-        if t["type"] == "change_ip":
-            core.ex("UPDATE monitors SET last_state='user:changeip' WHERE account_id=? AND instance_id=?",
-                    (t["account_id"], p["instance_id"]))
-            if p.get("cidrs"):
-                inc, exc = extras.split_cidrs(p["cidrs"])
-                tlog("网段要求：" + "；".join(([f"命中 {', '.join(map(str, inc))}"] if inc else [])
-                                          + ([f"排除 {', '.join(map(str, exc))}"] if exc else [])))
-            acc_q = _quality_accept(p, tlog)
-            if acc_q:
-                tlog(f"质量要求：{'风险分 ≤ ' + str(p['quality_max_risk']) if p.get('quality_max_risk') not in (None, '') else ''}"
-                     f"{' 归属 ' + str(p['quality_country']) if p.get('quality_country') else ''}（{extras.QUALITY_SOURCES}）")
-            if acc["provider"] == "oci":
-                r = await asyncio.to_thread(prov.change_ip, p["instance_id"], p.get("cidrs"),
-                                            int(p.get("max_tries") or 20), checkpoint, **({"accept": acc_q} if acc_q else {}))
-            else:
-                r = await asyncio.to_thread(_change_ip_retry, prov, acc, p, progress, checkpoint, acc_q)
-            msg = f"{r.get('old_ip') or '-'} → {r.get('new_ip')}" + (f"（{r['tries']} 次）" if r.get("tries", 1) > 1 else "")
-            if r.get("warning"):
-                msg += "，" + r["warning"]
-                tlog(r["warning"], "warn")
-            tlog("同步 DNS 绑定…")
-            dns = await asyncio.to_thread(extras.dns_sync, t["account_id"], p["instance_id"], r.get("new_ip"))
-            for d in dns:
-                tlog(d)
-            core.ex("UPDATE monitors SET public_ip=?, fail_count=0 WHERE account_id=? AND instance_id=?",
-                    (r.get("new_ip"), t["account_id"], p["instance_id"]))
-            _update(t["id"], status="done", message=msg + ("；" + "；".join(dns) if dns else ""),
-                    result={"old_ip": r.get("old_ip"), "new_ip": r.get("new_ip"), "tries": r.get("tries", 1), "dns": dns})
-            await telegram.send(f"✅ <b>换 IP 完成</b>{'（' + telegram.esc(p['reason']) + '）' if p.get('reason') else ''}\n"
-                                f"{telegram.esc(acc['name'])} / {telegram.esc(name)}\n<code>{msg}</code>"
-                                + ("\n" + telegram.esc("\n".join(dns)) if dns else ""))
-        elif t["type"] == "ipv6":
-            r = await asyncio.to_thread(prov.add_ipv6, p["instance_id"], progress)
-            dns = await asyncio.to_thread(extras.dns_sync, t["account_id"], p["instance_id"], None, r["ipv6"])
-            _update(t["id"], status="done", message=f"IPv6：{r['ipv6']}" + ("；" + "；".join(dns) if dns else ""), result={"ipv6": r["ipv6"]})
-            await telegram.send(f"✅ <b>IPv6 已就绪</b>\n{telegram.esc(name)}\n<code>{r['ipv6']}</code>")
-        elif t["type"] == "azure_create":
-            c = dict(p["create"], script=extras.resolve_script(p["create"]))
-            r = await asyncio.to_thread(prov.create_vm, c, progress)
-            if r.get("password"):
-                extras.save_instance_secret(t["account_id"], r["id"], r["name"], r["username"], r["password"])
-            _update(t["id"], status="done", message=f"已创建 {r['name']}，IP {r.get('public_ip')}",
-                    result={k: r.get(k) for k in ("id", "name", "public_ip", "username") if r.get(k)})
-            await telegram.send(f"✅ <b>Azure VM 创建完成</b>\n{telegram.esc(r['name'])}\n<code>{r.get('public_ip')}</code>")
-        elif t["type"] == "ensure_network":
-            progress("创建 VCN、互联网网关、路由表与公有子网…")
-            r = await asyncio.to_thread(prov.ensure_network)
-            _update(t["id"], status="done", message=f"已创建 VCN 与公有子网 {r['subnet_id'][-16:]}")
-        elif t["type"] == "migrate":
-            await _migrate(t, p, progress)
-        elif t["type"] == "cf_delete":
-            await _cf_delete(t, p, prov, checkpoint)
-            await telegram.send(f"🗑 <b>CloudFront 分发已删除</b>\n{telegram.esc(acc['name'])} / <code>{telegram.esc(p['distribution_id'])}</code>")
-        elif t["type"] == "resize":
-            if acc["provider"] == "azure":
-                progress(f"调整 VM 大小为 {p['size']}（VM 会重启）…")
-                await asyncio.to_thread(prov.resize, p["instance_id"], p["size"])
-            else:
-                progress(f"提交改配置：{p.get('shape') or '原规格'} {p.get('ocpus') or '-'} OCPU / {p.get('memory_gb') or '-'} GB…")
-                await asyncio.to_thread(prov.resize, p["instance_id"], p.get("ocpus"), p.get("memory_gb"), p.get("shape"))
-            _update(t["id"], status="done", message="改配置完成")
-            await telegram.send(f"✅ <b>改配置完成</b>\n{telegram.esc(acc['name'])} / {telegram.esc(name)}")
-        elif t["type"] == "reinstall":   # v1.6
-            await _reinstall(t, p, acc, prov, progress, name)
-        elif t["type"] == "net500m":
-            if p.get("enable", True):
-                r = await asyncio.to_thread(prov.enable_500m, p["instance_id"], p.get("ssh_port") or 22, progress)
-                dns = await asyncio.to_thread(extras.dns_sync, t["account_id"], p["instance_id"], r.get("public_ip"))
-                _update(t["id"], status="done", message=f"已开启，新入口 IP {r.get('public_ip')}" + ("；" + "；".join(dns) if dns else ""),
-                        result={"public_ip": r.get("public_ip"), "hint": r.get("hint")})
-                await telegram.send(f"✅ <b>下行 500Mbps 已开启</b>\n{telegram.esc(name)}\n新入口 IP <code>{r.get('public_ip')}</code>")
-            else:
-                r = await asyncio.to_thread(prov.disable_500m, p["instance_id"], progress)
-                _update(t["id"], status="done", message="已关闭并还原原公网 IP 入站")
-        elif t["type"] == "foundry":   # v1.6 Azure Foundry 部署模型
-            r = await asyncio.to_thread(prov.foundry_deploy, p, progress)
-            _update(t["id"], status="done", message=f"已部署 {r['model']} → {r['deployment']}，Endpoint {r['endpoint']}", result=r)
-            await telegram.send(f"✅ <b>AI 模型已部署</b>\n{telegram.esc(acc['name'])} / {telegram.esc(r['model'])}\nEndpoint <code>{telegram.esc(r['endpoint'] or '-')}</code>")
+        h = ONCE_HANDLERS.get(t["type"])
+        if h:
+            await h(_TaskCtx(t, p, acc, prov, name, progress, checkpoint, tlog))
         else:
             _update(t["id"], status="failed", message=f"任务类型 {t['type']} 已不再支持")
     except TaskStopped:
@@ -253,7 +320,7 @@ async def _reinstall(t, p, acc, prov, progress, name):
     else:
         r = await asyncio.to_thread(prov.reinstall, p["instance_id"], p.get("os") or "debian-12", pw, p.get("ssh_key") or None, progress)
     if r.get("password"):
-        extras.save_instance_secret(t["account_id"], r.get("id") or p["instance_id"], r.get("name") or name, r.get("username"), r["password"])
+        cloudinit.save_instance_secret(t["account_id"], r.get("id") or p["instance_id"], r.get("name") or name, r.get("username"), r["password"])
     msg = "重装完成" + ("，新密码已存入「开机密码」" if r.get("password") else "") + (f"；{r['warning']}" if r.get("warning") else "")
     _update(t["id"], status="done", message=msg, result={k: r.get(k) for k in ("image_id", "username", "hint") if r.get(k)})
     await telegram.send(f"✅ <b>重装系统完成</b>\n{telegram.esc(acc['name'])} / {telegram.esc(name)}")
@@ -285,8 +352,8 @@ def _quality_accept(p, tlog=None):
         return None
 
     def accept(ip):
-        q = extras.ip_quality(ip)
-        good, why = extras.quality_ok(q, p.get("quality_max_risk"), p.get("quality_country"))
+        q = net.ip_quality(ip)
+        good, why = net.quality_ok(q, p.get("quality_max_risk"), p.get("quality_country"))
         if tlog:
             tlog(f"{ip} 质量：风险 {q.get('risk') if q.get('risk') is not None else '?'} · {q.get('country_code') or '?'} · {q.get('isp') or '?'}"
                  + ("" if good else f"（{why}）"), "info" if good else "warn")
@@ -308,7 +375,7 @@ def _change_ip_retry(prov, acc, p, progress, checkpoint=None, accept=None):
     for i in range(1, maxt + 1):
         r = once()
         first_old = first_old or r.get("old_ip")
-        why = "不满足网段要求" if cidrs and not extras.ip_matches(r.get("new_ip"), cidrs) else ""
+        why = "不满足网段要求" if cidrs and not net.ip_matches(r.get("new_ip"), cidrs) else ""
         if not why and accept:
             good, why = accept(r.get("new_ip"))
             why = "" if good else (why or "质量不合格")
@@ -349,7 +416,7 @@ async def _migrate(t, p, progress):
     """跨云迁移 = 用同一开机脚本在目标账号重建 + 切 DNS + （可选）停掉源实例。不复制磁盘数据。"""
     src_acc, dst_acc = core.get_account(p["from_account_id"]), core.get_account(t["account_id"])
     dst = services.provider(t["account_id"], p.get("region"))
-    c = dict(p["create"], script=extras.resolve_script(p["create"]))
+    c = dict(p["create"], script=cloudinit.resolve_script(p["create"]))
     progress(f"在 {dst_acc['name']} 创建新实例…")
     if dst_acc["provider"] == "oci":
         r = await asyncio.to_thread(dst.create_instance, c)
@@ -358,7 +425,7 @@ async def _migrate(t, p, progress):
     else:
         r = await asyncio.to_thread(dst.create_vm, c, progress)
     if r.get("password"):
-        extras.save_instance_secret(t["account_id"], r["id"], r["name"], r["username"], r["password"])
+        cloudinit.save_instance_secret(t["account_id"], r["id"], r["name"], r["username"], r["password"])
     progress("等待公网 IP…")
     ip = r.get("public_ip") or await asyncio.to_thread(dst.wait_public_ip, r["id"])
     notes = [f"新实例 {r['name']}（{dst_acc['name']}）IP {ip or '未分配'}"]
@@ -370,7 +437,7 @@ async def _migrate(t, p, progress):
                     "VALUES(?,?,?,?,?,?,?,?,?)", (t["account_id"], r["id"], r["name"], b["zone_id"], b["zone_name"],
                                                   b["record"], b["proxied"], b["v4"], 0))
             core.ex("DELETE FROM dns_bindings WHERE id=?", (b["id"],))
-        notes += await asyncio.to_thread(extras.dns_sync, t["account_id"], r["id"], ip) if binds else ["源实例没有绑定域名，未切换 DNS"]
+        notes += await asyncio.to_thread(dns.dns_sync, t["account_id"], r["id"], ip) if binds else ["源实例没有绑定域名，未切换 DNS"]
     if p.get("copy_monitor"):
         m = core.q("SELECT * FROM monitors WHERE account_id=? AND instance_id=?", (p["from_account_id"], p["instance_id"]), one=True)
         if m:
@@ -391,12 +458,14 @@ async def _migrate(t, p, progress):
                         f"{telegram.esc(dst_acc['name'])}\n" + telegram.esc("\n".join(notes)))
 
 
+TASK_RUNNERS = {"snatch": "_run_snatch"}
+
+
 async def _dispatch(t):
     try:
-        if t["type"] == "snatch":
-            await _run_snatch(t)
-        else:
-            await _run_once(t)
+        # 抢机是循环任务（每次只尝试一轮），其余都是一次性长任务；按名字查找，便于测试替换
+        runner = globals()[TASK_RUNNERS.get(t["type"], "_run_once")]
+        await runner(t)
     except Exception:
         traceback.print_exc()
     finally:
@@ -447,7 +516,7 @@ async def _reachability(m, st):
     注意：检测结果反映的是「面板服务器 → 实例」的连通性。"""
     if not m.get("check_port") or st != "running" or not m.get("public_ip"):
         return
-    ok = await asyncio.to_thread(extras.tcp_alive, m["public_ip"], m["check_port"])
+    ok = await asyncio.to_thread(net.tcp_alive, m["public_ip"], m["check_port"])
     if ok:
         if m.get("fail_count"):
             core.ex("UPDATE monitors SET fail_count=0 WHERE id=?", (m["id"],))

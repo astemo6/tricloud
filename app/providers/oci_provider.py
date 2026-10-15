@@ -5,12 +5,14 @@ import base64
 import datetime as dt
 import ipaddress
 import re
+import threading
 import time
 
 import oci
 
 from .. import hostname
-from ..extras import cloud_init, gen_password, ip_matches, split_cidrs
+from ..cloudinit import cloud_init, gen_password
+from ..net import ip_matches, split_cidrs
 from .oci_more import OCIMore
 
 
@@ -43,8 +45,20 @@ class OCIProvider(OCIMore):
         self.identity = self._c(oci.identity.IdentityClient)
         self._bs = None
 
+    _client_lock = threading.Lock()
+
     def _c(self, cls, cfg=None):
-        return _proxied(cls(cfg or self.cfg), self.proxy)
+        """按 (客户端类型, 区域) 复用 OCI 客户端（同一账号同一区域只建一次，含签名器与 HTTP 会话）。"""
+        cfg = cfg or self.cfg
+        key = (cls, cfg.get("region"))
+        cache = self.__dict__.setdefault("_clients", {})
+        cl = cache.get(key)
+        if cl is None:
+            with self._client_lock:
+                cl = cache.get(key)
+                if cl is None:
+                    cl = cache[key] = _proxied(cls(cfg), self.proxy)
+        return cl
 
     @property
     def bs(self):

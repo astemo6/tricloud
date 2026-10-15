@@ -19,7 +19,8 @@ from unittest import mock
 import oci
 from fastapi.testclient import TestClient
 
-from app import core, extras, main, services, tasks, telegram
+from app import cloudinit, core, main, net, services, tasks, telegram
+from app.routers import accounts as account_routes
 from app.providers import oci_more
 from app.providers.aws_provider import AWSProvider
 from app.providers.azure_provider import AzureProvider
@@ -209,9 +210,9 @@ ok("secondary IP: primary private IP cannot be deleted", raises(p.delete_private
 
 
 # ================= 6. IP 质量 =================
-ok("quality_ok: risk / country rules", extras.quality_ok({"risk": 20, "country_code": "US"}, 50, "us,jp") == (True, "")
-   and not extras.quality_ok({"risk": 80, "country_code": "US"}, 50)[0] and "不在" in extras.quality_ok({"risk": 1, "country_code": "DE"}, None, "US")[1]
-   and not extras.quality_ok({"risk": None}, 50)[0])
+ok("quality_ok: risk / country rules", net.quality_ok({"risk": 20, "country_code": "US"}, 50, "us,jp") == (True, "")
+   and not net.quality_ok({"risk": 80, "country_code": "US"}, 50)[0] and "不在" in net.quality_ok({"risk": 1, "country_code": "DE"}, None, "US")[1]
+   and not net.quality_ok({"risk": None}, 50)[0])
 
 
 class HR:
@@ -229,10 +230,10 @@ def fake_get(url, params=None, timeout=None):
     return HR({"status": "success", "countryCode": "JP", "country": "Japan", "isp": "Oracle", "as": "AS31898 Oracle", "hosting": True})
 
 
-with mock.patch("app.extras.httpx.get", fake_get):
-    q = extras.ip_quality("203.0.113.5")
+with mock.patch("app.net.httpx.get", fake_get):
+    q = net.ip_quality("203.0.113.5")
 ok("ip_quality: merges proxycheck risk + ip-api hosting/asn", q["risk"] == 12 and q["country_code"] == "JP" and q["hosting"] is True and q["asn"] == "AS31898")
-ok("ip_quality: invalid IP rejected", raises(extras.ip_quality, "1.2.3.4; rm -rf", exc=ValueError))
+ok("ip_quality: invalid IP rejected", raises(net.ip_quality, "1.2.3.4; rm -rf", exc=ValueError))
 
 # OCI 换 IP：带质量条件时重复更换
 p = bare_oci()
@@ -387,7 +388,7 @@ with TestClient(main.app) as c:
            and accs[oid]["disabled_reason"] == "被封号")
         async def fake_test(i):
             return {"account_id": i, "ok": True}
-        with mock.patch.object(main, "_test_with_timeout", fake_test):
+        with mock.patch.object(account_routes, "_test_with_timeout", fake_test):
             j = c.post("/api/accounts/test-all", json={}).json()
         ok("route disable: test-all skips disabled account", j["total"] == 1)
         ok("route disable: free-check skips disabled account", c.get("/api/oci/free-check").json() == [])
@@ -414,7 +415,7 @@ class RP:
 saved = []
 t = core.q("SELECT * FROM tasks WHERE type='reinstall' ORDER BY id DESC LIMIT 1", one=True)
 with mock.patch.object(services, "provider", lambda acc_id, region=None: RP()), mock.patch("app.providers.oci_provider.time.sleep", lambda s: None), \
-        mock.patch.object(extras, "save_instance_secret", lambda *a: saved.append(a)), mock.patch.object(telegram, "send", lambda *a, **k: asyncio.sleep(0)):
+        mock.patch.object(cloudinit, "save_instance_secret", lambda *a: saved.append(a)), mock.patch.object(telegram, "send", lambda *a, **k: asyncio.sleep(0)):
     asyncio.run(tasks._run_once(t))
 t = core.q("SELECT * FROM tasks WHERE id=?", (t["id"],), one=True)
 ok("task reinstall: done, new password saved to 开机密码", t["status"] == "done" and "开机密码" in t["message"] and saved and saved[0][4] == "Pw-123456789abc")
@@ -523,7 +524,8 @@ with TestClient(main.app, raise_server_exceptions=False) as c:
     ok("login page assets versioned + no-cache", r.headers.get("cache-control") == "no-cache" and _re.search(r'/static/style\.css\?v=[0-9a-f]{10}"', r.text))
     c.post("/api/login", json={"password": "devpassword123"})
     r = c.get("/")
-    ok("index app.js versioned", _re.search(r'/static/app\.js\?v=[0-9a-f]{10}"', r.text) is not None)
+    ok("index app.js versioned", _re.search(r'/static/js/main\.js\?v=[0-9a-f]{10}"', r.text) is not None
+       and _re.search(r'"/static/js/core\.js":"/static/js/core\.js\?v=[0-9a-f]{10}"', r.text) is not None)
     class _Deny:
         def regions(self):
             raise RuntimeError("An error occurred (UnauthorizedOperation) when calling the DescribeRegions operation: User: arn:aws:iam::0:user/x is not authorized to perform: ec2:DescribeRegions because no identity-based policy allows")
@@ -532,7 +534,7 @@ with TestClient(main.app, raise_server_exceptions=False) as c:
         ok("cloud permission error -> 403 with missing action", r.status_code == 403 and "ec2:DescribeRegions" in r.json()["detail"])
 
 # ================= 14. 前端 / 演示 / 约束 =================
-web = open(os.path.join(ROOT, "web", "app.js"), encoding="utf-8").read()
+web = "".join(open(os.path.join(ROOT, "web", "js", f), encoding="utf-8").read() for f in sorted(os.listdir(os.path.join(ROOT, "web", "js"))) if f.endswith(".js"))
 ok("web: new ops + tabs wired", all(s in web for s in ('["reinstall", "重装系统"]', '["ips", "附加 IP"]', '["net500", "500M 下行"]', '["disks", "磁盘"]',
                                                      '["lsports", "防火墙"]', '["quality", "IP 质量"]', '["storage", "存储"]', '["objects", "对象存储"]',
                                                      '["regionsub", "区域订阅"]', "pageFreeCheck", "QUALITY_FIELDS", "data-off", "proxycheck_key")))

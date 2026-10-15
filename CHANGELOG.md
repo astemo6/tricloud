@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.0 结构整理（2026-10-15，接口与数据不变）
+- 后端：`app/main.py` 只保留 app 创建、生命周期、认证 / 审计中间件、异常处理；124 个接口按功能拆到 `app/routers/`（auth、accounts、instances、oci、aws、azure、billing、tasks_monitors、settings、security、cloudflare、guard_health、pages，公共工具在 common），`routes_v16.py` 的 27 个接口并入对应模块。全部 151 个接口的路径、方法、参数与匹配顺序不变。
+- `extras.py` 拆为 `security`（TOTP / API Token / 审计 / 备份恢复）、`cloudinit`（开机密码 / cloud-init / 脚本模板）、`dns`（Cloudflare）、`net`（TCP 检测 / 网段 / IP 质量）。
+- `tasks.py` 一次性任务按类型改为注册表（`ONCE_HANDLERS`），行为不变。
+- 内存：三家云 SDK 改为用到哪家才导入；AWS `c()`、OCI `_c()`、Azure 订阅 / 成本客户端按（服务, 区域）复用并加锁；Docker 镜像设置 `MALLOC_ARENA_MAX=2`。
+- Web：`web/app.js` 拆为 `web/js/` 下按页面划分的原生 ES 模块（无框架、无打包）；首页生成 import map 给每个模块加内容哈希版本号，`/static/js/*` 另加 `Cache-Control: no-cache`。`demo/build.py` 按模块求值顺序把模块拼回单文件演示页。
+- 测试：`tests/selftest*.py` 按模块重命名为 `tests/test_*.py`，新增 `test_structure.py`（23 项）；合计 524 项。
+
 ## 1.6.0（build 17）(2026-10-14)
 - 1.6.0（build 17）：首页 AWS 实例数包含 Lightsail
 

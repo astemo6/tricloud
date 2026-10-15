@@ -17,7 +17,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 from moto import mock_aws
 
-from app import core, extras, guard, health, main, services, tasks, telegram
+from app import cloudinit, core, dns, guard, health, main, services, tasks, telegram
 from app.providers.aws_provider import AWSProvider
 from app.providers.oci_provider import OCIProvider
 
@@ -92,7 +92,7 @@ with TestClient(main.app) as c:
         ok("OCI VPU>10 warned", any("VPU" in x for x in guard.check(oid, "bootvol", {"instance_id": "i1", "vpus_per_gb": 20})))
         # API：409 + 警告，带 confirm_overage 才放行
         with mock.patch.object(OCIProvider, "create_instance", return_value={"id": "new", "name": "n", "state": "PROVISIONING"}, create=True), \
-             mock.patch.object(extras, "resolve_script", return_value=None):
+             mock.patch.object(cloudinit, "resolve_script", return_value=None):
             r = c.post(f"/api/accounts/{oid}/oci/create", json={"create": {"shape": "VM.Standard.A1.Flex", "ocpus": 4, "memory_gb": 24}})
             ok("API create over quota -> 409 with guard list", r.status_code == 409 and r.json()["detail"]["guard"])
             r = c.post(f"/api/accounts/{oid}/oci/create", json={"confirm_overage": True,
@@ -166,7 +166,7 @@ with TestClient(main.app) as c:
                                                                              "password": "Pw1!xyzXYZ123", "username": "root"}, create=True), \
              mock.patch.object(OCIProvider, "wait_public_ip", return_value="203.0.113.50", create=True), \
              mock.patch.object(guard, "check", return_value=[]), \
-             mock.patch.object(extras, "cf_upsert", lambda z, n, t, v, p=False: calls.append((n, t, v)) or f"{n} {t} → {v}"):
+             mock.patch.object(dns, "cf_upsert", lambda z, n, t, v, p=False: calls.append((n, t, v)) or f"{n} {t} → {v}"):
             services.drop_provider_cache(oid)
             ok("migrate same account rejected", c.post("/api/migrate", json={"from_account_id": aid, "to_account_id": aid,
                                                                               "instance_id": iid}).status_code == 400)

@@ -6,7 +6,7 @@
 import base64
 
 from .. import hostname
-from ..extras import cloud_init, gen_password
+from ..cloudinit import cloud_init, gen_password
 
 SKUS = ("Standard_LRS", "StandardSSD_LRS", "Premium_LRS", "StandardSSD_ZRS", "Premium_ZRS")
 TIERS = ("P1", "P2", "P3", "P4", "P6", "P10", "P15", "P20", "P30", "P40", "P50", "P60", "P70", "P80")

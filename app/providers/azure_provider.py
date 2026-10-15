@@ -2,6 +2,7 @@
 停止 = deallocate（释放计算资源，不再计费）；换 IP = 重建 Public IP。
 """
 import base64
+import threading
 import uuid
 
 from azure.identity import ClientSecretCredential
@@ -10,7 +11,7 @@ from azure.mgmt.network import NetworkManagementClient
 
 from .. import hostname
 from .azure_more import AzureFoundry, AzureMore
-from ..extras import cloud_init, gen_password
+from ..cloudinit import cloud_init, gen_password
 
 IMAGES = {
     "ubuntu-24.04": ("Canonical", "ubuntu-24_04-lts", "server", "latest"),
@@ -42,6 +43,19 @@ class AzureProvider(AzureMore, AzureFoundry):
         self.network = NetworkManagementClient(self.credential, self.sub, **self.kw)
         self._res = None
 
+    _client_lock = threading.Lock()
+
+    def _cached(self, key, factory):
+        """复用按需创建的管理客户端（订阅 / 成本等），避免每次请求都新建。"""
+        cache = self.__dict__.setdefault("_clients", {})
+        cl = cache.get(key)
+        if cl is None:
+            with self._client_lock:
+                cl = cache.get(key)
+                if cl is None:
+                    cl = cache[key] = factory()
+        return cl
+
     @property
     def res(self):
         if self._res is None:
@@ -64,7 +78,7 @@ class AzureProvider(AzureMore, AzureFoundry):
 
     def locations(self):
         from azure.mgmt.resource import SubscriptionClient
-        sc = SubscriptionClient(self.credential, **self.kw)
+        sc = self._cached(SubscriptionClient, lambda: SubscriptionClient(self.credential, **self.kw))
         return sorted(l.name for l in sc.subscriptions.list_locations(self.sub) if getattr(l.metadata, "region_type", "") == "Physical")
 
     def quotas(self, location):
@@ -382,7 +396,7 @@ class AzureProvider(AzureMore, AzureFoundry):
         from azure.mgmt.costmanagement import CostManagementClient
         from azure.mgmt.costmanagement.models import (QueryAggregation, QueryDataset, QueryDefinition,
                                                       QueryGrouping)
-        cm = CostManagementClient(self.credential)
+        cm = self._cached(CostManagementClient, lambda: CostManagementClient(self.credential))
         qd = QueryDefinition(type="ActualCost", timeframe="MonthToDate", dataset=QueryDataset(
             granularity="None", aggregation={"totalCost": QueryAggregation(name="Cost", function="Sum")},
             grouping=[QueryGrouping(type="Dimension", name="ServiceName")]))
@@ -452,7 +466,7 @@ class AzureProvider(AzureMore, AzureFoundry):
     def subscription_info(self):
         """订阅状态、类型（quotaId → offer）、spending limit 等，来自 Subscriptions API（免费只读）。"""
         from azure.mgmt.resource import SubscriptionClient
-        s = SubscriptionClient(self.credential, **self.kw).subscriptions.get(self.sub)
+        s = self._cached(SubscriptionClient, lambda: SubscriptionClient(self.credential, **self.kw)).subscriptions.get(self.sub)
         pol = getattr(s, "subscription_policies", None)
         quota = getattr(pol, "quota_id", None) or ""
         key = quota.split("_")[0]

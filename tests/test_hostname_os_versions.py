@@ -21,7 +21,8 @@ import oci
 from fastapi.testclient import TestClient
 from moto import mock_aws
 
-from app import core, extras, hostname, main, services, tasks, telegram
+from app import cloudinit, core, hostname, main, services, tasks, telegram
+from app.routers import oci as oci_routes
 from app.providers.aws_provider import AWSProvider
 from app.providers.azure_provider import AzureProvider
 from app.providers.oci_provider import OCIProvider
@@ -367,12 +368,12 @@ with TestClient(main.app) as c:
 
 
 # ================= 8. 新建实例默认主机名 =================
-old = extras.cloud_init("Pw#123abcXYZ", "root", "echo hi")
+old = cloudinit.cloud_init("Pw#123abcXYZ", "root", "echo hi")
 ok("cloud-init: no hostname -> output unchanged (back-compat)", "hostname" not in old and old.startswith("#cloud-config\nssh_pwauth"))
-ud = extras.cloud_init("Pw#123abcXYZ", "root", "echo hi", hostname="web-1")
+ud = cloudinit.cloud_init("Pw#123abcXYZ", "root", "echo hi", hostname="web-1")
 ok("cloud-init: hostname / fqdn / preserve_hostname lines added, user script kept", "\nhostname: web-1\nfqdn: web-1\npreserve_hostname: false\n" in ud
    and "tricloud-init.sh" in ud and "chpasswd" in ud)
-ok("cloud-init: invalid hostname ignored (no YAML injection)", "hostname" not in extras.cloud_init(None, hostname="a\nruncmd: [x]"))
+ok("cloud-init: invalid hostname ignored (no YAML injection)", "hostname" not in cloudinit.cloud_init(None, hostname="a\nruncmd: [x]"))
 
 
 class LaunchCompute:
@@ -451,18 +452,18 @@ with TestClient(main.app) as c:
         ok("os-versions route: returns {os: [versions]}", r1.status_code == 200 and r1.json() == {"Canonical Ubuntu": ["24.04", "22.04"], "Oracle Linux": ["9"]})
         ok("os-versions route: cached per shape (6h), new shape refetched", ovp.calls == ["VM.Standard.A1.Flex", "VM.Standard.E2.1.Micro"]
            and r2.json() == r1.json() and r3.status_code == 200)
-        main._OSV_CACHE[(oid, "ap-tokyo-1", "VM.Standard.A1.Flex")] = (0, {"old": []})
+        oci_routes._OSV_CACHE[(oid, "ap-tokyo-1", "VM.Standard.A1.Flex")] = (0, {"old": []})
         c.get(f"/api/accounts/{oid}/oci/os-versions?shape=VM.Standard.A1.Flex")
         ok("os-versions route: expired cache refetched", ovp.calls[-1] == "VM.Standard.A1.Flex" and len(ovp.calls) == 3)
         ok("os-versions route: OCI only", c.get(f"/api/accounts/{aid}/oci/os-versions").status_code == 400)
-web_ = open(os.path.join(ROOT, "web", "app.js"), encoding="utf-8").read()
+web_ = "".join(open(os.path.join(ROOT, "web", "js", f), encoding="utf-8").read() for f in sorted(os.listdir(os.path.join(ROOT, "web", "js"))) if f.endswith(".js"))
 ok("web: os_version is a select, CentOS removed", '<select name="os_version">' in web_ and 'name="os_version" value=' not in web_ and "CentOS" not in web_)
 
 # ================= 9. 约束：不引入 SSH / 远程控制台 =================
 src = open(os.path.join(ROOT, "app", "hostname.py"), encoding="utf-8").read().lower()
 req = open(os.path.join(ROOT, "requirements.txt"), encoding="utf-8").read().lower()
 ok("no ssh: no paramiko / asyncssh / ssh client", "import paramiko" not in src and "paramiko" not in req and "asyncssh" not in req)
-web = open(os.path.join(ROOT, "web", "app.js"), encoding="utf-8").read()
+web = "".join(open(os.path.join(ROOT, "web", "js", f), encoding="utf-8").read() for f in sorted(os.listdir(os.path.join(ROOT, "web", "js"))) if f.endswith(".js"))
 ok("web: rename dialog checkbox + tip", 'name="sync_hostname"' in web and "同步修改系统主机名（SSH 显示）" in web and "SSM 托管" in web)
 andr = open(os.path.join(ROOT, "android", "app", "src", "main", "java", "com", "tricloud", "app", "AccountActivity.java"), encoding="utf-8").read()
 ok("android: rename dialog has sync_hostname checkbox + manual_cmd", 'Field.check("sync_hostname"' in andr and "manual_cmd" in andr)

@@ -142,7 +142,7 @@ with TestClient(main.app) as c:
     ok("console: no console / serial routes registered", not [p for p in paths if "console" in p or "serial" in p])
     ok("console: old endpoints 404", c.get("/api/accounts/1/aws/serial").status_code == 404
        and c.get("/api/accounts/1/azure/serial-log?instance_id=x").status_code == 404)
-    web = open(os.path.join(ROOT, "web", "app.js"), encoding="utf-8").read()
+    web = "".join(open(os.path.join(ROOT, "web", "js", f), encoding="utf-8").read() for f in sorted(os.listdir(os.path.join(ROOT, "web", "js"))) if f.endswith(".js"))
     ok("console: web UI has no xterm / console entry", "xterm" not in web.lower() and "openConsole" not in web
        and not os.path.exists(os.path.join(ROOT, "web", "vendor", "xterm.js")))
     ok("console: paramiko dependency removed", "paramiko" not in open(os.path.join(ROOT, "requirements.txt")).read())

@@ -18,7 +18,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 from moto import mock_aws
 
-from app import core, extras, main, services, tasks, telegram
+from app import cloudinit, core, dns, main, net, security, services, tasks, telegram
 from app.providers.aws_provider import AWSProvider
 from app.providers.oci_provider import OCIProvider
 
@@ -51,14 +51,14 @@ with TestClient(main.app) as c:
     # ---------- TOTP ----------
     r = c.post("/api/2fa/setup").json()
     sec = r["secret"]
-    code = extras._totp_at(sec, int(time.time() // 30))
+    code = security._totp_at(sec, int(time.time() // 30))
     ok("2FA wrong code rejected", c.post("/api/2fa/enable", json={"code": "000000"}).status_code == 400)
     ok("2FA enable with valid code", c.post("/api/2fa/enable", json={"code": code}).status_code == 200)
     c2 = TestClient(main.app)
     r = c2.post("/api/login", json={"password": "devpassword123"})
     ok("2FA login without otp -> asks otp", r.status_code == 401 and r.json()["detail"] == "需要二次验证码")
     ok("2FA replay of same code rejected", c2.post("/api/login", json={"password": "devpassword123", "otp": code}).status_code == 401)
-    nxt = extras._totp_at(sec, int(time.time() // 30) + 1)
+    nxt = security._totp_at(sec, int(time.time() // 30) + 1)
     ok("2FA next-window code accepted", c2.post("/api/login", json={"password": "devpassword123", "otp": nxt}).status_code == 200)
     core.set_secret_setting("totp_secret", "")   # 关闭以便后续测试
 
@@ -96,17 +96,17 @@ with TestClient(main.app) as c:
        any(l["actor"] == "session" for l in logs))
 
     # ---------- cloud-init ----------
-    ud = extras.cloud_init("Pw#123abcXYZ", "root", "echo hi")
+    ud = cloudinit.cloud_init("Pw#123abcXYZ", "root", "echo hi")
     ok("cloud-init sets random pw, no curl|bash, runs user script", "root:Pw#123abcXYZ" in ud and "curl" not in ud and
        "tricloud-init.sh" in ud and base64.b64encode(b"echo hi").decode() in ud)
-    pws = {extras.gen_password() for _ in range(50)}
+    pws = {cloudinit.gen_password() for _ in range(50)}
     ok("gen_password unique & complex", len(pws) == 50 and all(len(x) == 20 and any(ch.isupper() for ch in x)
                                                               and any(ch.isdigit() for ch in x) for x in pws))
 
     # ---------- 脚本模板 ----------
     sid = c.post("/api/scripts", json={"name": "bbr", "content": "#!/bin/bash\necho bbr"}).json()["id"]
     ok("script too long rejected", c.post("/api/scripts", json={"name": "x", "content": "a" * 17000}).status_code == 400)
-    ok("resolve_script by id", extras.resolve_script({"script_id": sid}) == "#!/bin/bash\necho bbr")
+    ok("resolve_script by id", cloudinit.resolve_script({"script_id": sid}) == "#!/bin/bash\necho bbr")
 
     # ---------- EC2 创建（moto）+ 开机密码 ----------
     with mock_aws():
@@ -137,15 +137,15 @@ with TestClient(main.app) as c:
 
     # ---------- DNS 联动 ----------
     calls = []
-    with mock.patch.object(extras, "cf_upsert", lambda z, n, t, v, p=False: calls.append((n, t, v)) or f"{n} {t} → {v}"):
+    with mock.patch.object(dns, "cf_upsert", lambda z, n, t, v, p=False: calls.append((n, t, v)) or f"{n} {t} → {v}"):
         r = c.post("/api/dns-bindings", json={"account_id": aid, "instance_id": "i-1", "name": "n1", "zone_id": "z",
                                               "zone_name": "example.com", "record": "evil.com"})
         ok("DNS record must belong to zone", r.status_code == 400)
         c.post("/api/dns-bindings", json={"account_id": aid, "instance_id": "i-1", "name": "n1", "zone_id": "z",
                                           "zone_name": "example.com", "record": "n1.example.com", "v6": True})
-        out = extras.dns_sync(aid, "i-1", "1.2.3.4", "2001:db8::1")
+        out = dns.dns_sync(aid, "i-1", "1.2.3.4", "2001:db8::1")
         ok("dns_sync updates A + AAAA", calls == [("n1.example.com", "A", "1.2.3.4"), ("n1.example.com", "AAAA", "2001:db8::1")] and len(out) == 2)
-        ok("dns_sync no binding -> noop", extras.dns_sync(aid, "i-other", "1.1.1.1") == [])
+        ok("dns_sync no binding -> noop", dns.dns_sync(aid, "i-other", "1.1.1.1") == [])
 
     # ---------- OCI 指定网段换 IP ----------
     seq = iter(["10.1.1.1", "10.2.2.2", "129.146.3.3"])
@@ -166,12 +166,12 @@ with TestClient(main.app) as c:
     c.post("/api/monitors", json={"account_id": aid, "instance_id": "i-9", "name": "m9", "public_ip": "203.0.113.9",
                                   "check_port": 22, "auto_change_ip": True, "state": "running"})
     m = core.q("SELECT * FROM monitors WHERE instance_id='i-9'", one=True)
-    with mock.patch.object(extras, "tcp_alive", return_value=False):
+    with mock.patch.object(net, "tcp_alive", return_value=False):
         for _ in range(4):
             asyncio.run(tasks._reachability(core.q("SELECT * FROM monitors WHERE id=?", (m["id"],), one=True), "running"))
     tk = core.q("SELECT * FROM tasks WHERE type='change_ip' AND params LIKE '%i-9%'")
     ok("unreachable x3 -> exactly one auto change_ip task + alert", len(tk) == 1 and any("IP 不通" in s for s in sent))
-    with mock.patch.object(extras, "tcp_alive", return_value=True):
+    with mock.patch.object(net, "tcp_alive", return_value=True):
         asyncio.run(tasks._reachability(core.q("SELECT * FROM monitors WHERE id=?", (m["id"],), one=True), "running"))
     ok("reachable resets fail count", core.q("SELECT fail_count FROM monitors WHERE id=?", (m["id"],), one=True)["fail_count"] == 0)
     ok("bad monitor port rejected", c.post("/api/monitors", json={"account_id": aid, "instance_id": "x", "check_port": 70000}).status_code == 400)

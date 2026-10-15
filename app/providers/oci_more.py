@@ -16,7 +16,7 @@ import time
 
 import oci
 
-from ..extras import cloud_init, gen_password
+from ..cloudinit import cloud_init, gen_password
 
 FREE = {"a1_ocpus": 2, "a1_mem": 12, "micro": 2, "storage_gb": 200, "object_gb": 20, "nlb": 1}
 A1 = "VM.Standard.A1.Flex"

@@ -22,7 +22,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 from moto import mock_aws
 
-from app import accounts_import, core, credits, extras, main, services, tasks, telegram, traffic_guard
+from app import accounts_import, core, credits, dns, main, net, services, tasks, telegram, traffic_guard
 from app.providers.aws_provider import AWSProvider
 from app.providers.azure_provider import AzureProvider
 from app.providers.oci_provider import OCIProvider
@@ -205,7 +205,7 @@ key_file=~/.oci/key.pem
     with mock.patch.object(OCIProvider, "change_ip", lambda self, iid, cidrs=None, max_tries=20, progress=None, interval=8:
                            (progress and progress("第 1 次：10.9.9.9 不满足网段要求，继续…")) or
                            {"old_ip": "10.0.0.1", "new_ip": "129.146.20.7", "tries": 2}), \
-         mock.patch.object(extras, "dns_sync", return_value=["A n1.example.com → 129.146.20.7"]):
+         mock.patch.object(dns, "dns_sync", return_value=["A n1.example.com → 129.146.20.7"]):
         r = c.post(f"/api/accounts/{oid}/instances/change-ip", json={"instance_id": "ocid1.instance.x", "name": "arm",
                                                                        "cidrs": "129.146.0.0/16, !129.146.10.0/24"})
         tid = r.json()["task_id"]
@@ -268,11 +268,11 @@ key_file=~/.oci/key.pem
     ok("stopped long task exits at safe checkpoint", len(calls) == 1 and t["status"] == "stopped" and "后续步骤未执行" in t["logs"][-1]["msg"])
 
     # ---------------- 5. 换 IP 排除网段 ----------------
-    ok("ip_matches: include + exclude mixed", extras.ip_matches("129.146.20.7", ["129.146.0.0/16", "!129.146.10.0/24"])
-       and not extras.ip_matches("129.146.10.9", ["129.146.0.0/16", "!129.146.10.0/24"])
-       and not extras.ip_matches("10.1.1.1", ["129.146.0.0/16"]))
-    ok("ip_matches: exclude-only accepts anything outside", extras.ip_matches("8.8.8.8", ["!10.0.0.0/8"])
-       and not extras.ip_matches("10.2.3.4", "!10.0.0.0/8"))
+    ok("ip_matches: include + exclude mixed", net.ip_matches("129.146.20.7", ["129.146.0.0/16", "!129.146.10.0/24"])
+       and not net.ip_matches("129.146.10.9", ["129.146.0.0/16", "!129.146.10.0/24"])
+       and not net.ip_matches("10.1.1.1", ["129.146.0.0/16"]))
+    ok("ip_matches: exclude-only accepts anything outside", net.ip_matches("8.8.8.8", ["!10.0.0.0/8"])
+       and not net.ip_matches("10.2.3.4", "!10.0.0.0/8"))
     ok("bad excluded CIDR -> 400", c.post(f"/api/accounts/{oid}/instances/change-ip", json={"instance_id": "x", "cidrs": "!999.1.1.0/24"}).status_code == 400
        and c.post(f"/api/accounts/{oid}/instances/change-ip", json={"instance_id": "x", "cidrs": "!"}).status_code == 400)
     seq = iter(["129.146.10.5", "130.0.0.1", "129.146.20.7"])
@@ -286,7 +286,7 @@ key_file=~/.oci/key.pem
     ok("OCI change_ip skips excluded + out-of-range IPs", r["new_ip"] == "129.146.20.7" and r["tries"] == 3)
     seq2 = iter(["10.0.0.5", "10.0.0.6", "54.1.2.3"])
     with mock.patch.object(AzureProvider, "change_ip", lambda self, iid, progress=None: {"old_ip": "1.1.1.1", "new_ip": next(seq2)}), \
-         mock.patch.object(extras, "dns_sync", return_value=[]):
+         mock.patch.object(dns, "dns_sync", return_value=[]):
         tz = c.post(f"/api/accounts/{zid}/instances/change-ip", json={"instance_id": "/sub/vm", "cidrs": "!10.0.0.0/8"}).json()["task_id"]
         run_task(tz)
     t = c.get(f"/api/tasks/{tz}").json()
@@ -302,7 +302,7 @@ key_file=~/.oci/key.pem
     m = core.q("SELECT * FROM monitors WHERE instance_id='i-mon'", one=True)
     created = []
     sent.clear()
-    with mock.patch.object(extras, "tcp_alive", return_value=False):
+    with mock.patch.object(net, "tcp_alive", return_value=False):
         for i in range(4):
             core.ex("UPDATE tasks SET status='failed' WHERE type='change_ip' AND status='running'")
             core.ex("UPDATE monitors SET fail_count=? WHERE id=?", (tasks.PING_FAIL_THRESHOLD - 1, m["id"]))

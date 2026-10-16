@@ -443,3 +443,17 @@ tr.acc-off td:last-child { opacity: 1; }
 .bad { color: var(--bad); }
 .modal h4 { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; font-size: 14px; }
 .brand { font-weight: 700; } .brand span { color: var(--primary); }
+
+/* build 23 OneDrive 计划编辑 */
+.od-times { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.od-time { display: inline-flex; align-items: center; gap: 4px; }
+.od-time input { width: auto; }
+.od-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.od-chip { display: inline-block; margin: 0; cursor: pointer; }
+.od-chip input { position: absolute; opacity: 0; pointer-events: none; }
+.od-chip span { display: inline-block; min-width: 40px; text-align: center; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);
+  font-size: 13px; color: var(--text); letter-spacing: 0; transition: background .15s; }
+.od-chip input:checked + span { background: var(--primary-c); color: var(--on-primary-c); border-color: transparent; }
+.od-chip input:focus-visible + span { outline: 2px solid var(--primary); }
+.od-days .od-chip span { min-width: 34px; padding: 6px 4px; }
+.od-prev { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--s-c); font-size: 13px; line-height: 1.6; }

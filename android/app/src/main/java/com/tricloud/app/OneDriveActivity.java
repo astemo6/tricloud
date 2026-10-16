@@ -13,7 +13,7 @@ import org.json.JSONObject;
 
 import java.util.Arrays;
 
-/** build 21 OneDrive 定期备份（同 Web pageOneDrive）：状态、设备码绑定（microsoft.com/devicelogin + 轮询）、
+/** build 21 OneDrive 定期备份（同 Web pageOneDrive；build 23 计划编辑见 OneDriveScheduleActivity）：状态、设备码绑定（microsoft.com/devicelogin + 轮询）、
  *  计划 / 保留 / 备份密码、立即备份、备份列表与恢复（密码 + 二次确认）、解绑。 */
 public class OneDriveActivity extends BaseActivity {
     static final String LOGIN_URL = "https://microsoft.com/devicelogin";
@@ -37,10 +37,15 @@ public class OneDriveActivity extends BaseActivity {
     @Override
     protected void onDestroy() { pollGen++; super.onDestroy(); }
 
-    static String plan(JSONObject c) {
-        return ("weekly".equals(c.optString("freq")) ? "每" + WD[Math.max(0, Math.min(6, c.optInt("weekday")))] + " " : "每天 ")
-                + c.optString("time", "03:30") + "，保留 " + c.optInt("keep", 30) + " 份";
+    /** build 23：计划描述用后端的 desc（每 N 小时 / 多时间点 / 每周多选 / 每月 / Cron）；旧后端没有 desc 时退回 freq/time。 */
+    static String plan(JSONObject s, JSONObject c) {
+        String d = s.optString("desc", "");
+        if (d.isEmpty()) d = ("weekly".equals(c.optString("freq")) ? "每" + WD[Math.max(0, Math.min(6, c.optInt("weekday")))] + " " : "每天 ") + c.optString("time", "03:30");
+        return d + "，保留 " + c.optInt("keep", 30) + " 份";
     }
+
+    @Override
+    protected void onRestart() { super.onRestart(); refresh(); }   // 从计划编辑页返回后刷新
 
     @Override
     protected void refresh() {
@@ -59,7 +64,15 @@ public class OneDriveActivity extends BaseActivity {
         StringBuilder sb = new StringBuilder();
         sb.append(bound ? "✅ 已绑定" + (str(acc, "folder", "").isEmpty() ? "" : "（OneDrive / 应用 / " + str(acc, "folder", "") + "）") : "未绑定");
         sb.append("\n备份密码：").append(pwSet ? "已设置" : "未设置");
-        if (s.optBoolean("ready")) sb.append("\n定时：").append(plan(c)).append("（").append(s.optString("timezone")).append("）\n下次备份：").append(str(s, "next_run", "-"));
+        if (s.optBoolean("ready")) {
+            JSONArray nl = s.optJSONArray("next_runs_label");
+            sb.append("\n定时：").append(plan(s, c)).append("（").append(s.optString("timezone")).append("）\n下次备份：")
+                    .append(nl != null && nl.length() > 0 ? nl.optString(0) : str(s, "next_run", "-"));
+            if (nl != null && nl.length() > 1) {
+                sb.append("\n之后：");
+                for (int i = 1; i < nl.length(); i++) sb.append(i > 1 ? "、" : "").append(nl.optString(i));
+            }
+        }
         else sb.append("\n").append(!bound ? "绑定 OneDrive 并设置备份密码后开始定时备份" : !pwSet ? "设置备份密码后开始定时备份" : "定时备份已停用");
         if (st.optLong("last_ok") > 0) sb.append("\n上次成功：").append(fmtTime(st.optLong("last_ok"))).append(" · ").append(str(st, "last_file", ""))
                 .append(st.optLong("last_size") > 0 ? " · " + (st.optLong("last_size") / 1024) + " KB" : "");
@@ -100,15 +113,10 @@ public class OneDriveActivity extends BaseActivity {
         if (!cid.isEmpty() && bound) button(apr, "重新绑定", v -> Api.post(this, "/onedrive/bind", null, x -> showPending(Api.obj(x))));
 
         LinearLayout pl = card("2. 计划、保留与备份密码");
-        muted(pl, "启用：" + (c.optBoolean("enabled", true) ? "是" : "否") + " · " + plan(c) + "\n备份文件用备份密码加密（scrypt + AES-256-GCM）；为了无人值守定时运行，密码用面板 Fernet 密钥加密后保存在面板数据库里。");
+        muted(pl, "启用：" + (c.optBoolean("enabled", true) ? "是" : "否") + " · " + plan(s, c) + "\n备份文件用备份密码加密（scrypt + AES-256-GCM）；为了无人值守定时运行，密码用面板 Fernet 密钥加密后保存在面板数据库里。");
         LinearLayout plr = row(pl);
-        button(plr, "修改计划", v -> form("备份计划", "时间按面板时区（" + s.optString("timezone") + "）。", Arrays.asList(
-                Field.check("enabled", "启用定时备份", c.optBoolean("enabled", true)),
-                Field.select("freq", "频率", c.optString("freq", "daily"), new String[]{"daily", "weekly"}, new String[]{"每天", "每周"}),
-                Field.select("weekday", "星期（每周时）", String.valueOf(c.optInt("weekday")), new String[]{"0", "1", "2", "3", "4", "5", "6"}, WD),
-                Field.text("time", "时间 HH:MM", c.optString("time", "03:30")),
-                Field.num("keep", "保留最近几份（1–365）", String.valueOf(c.optInt("keep", 30)))), "保存",
-                f -> Api.post(this, "/onedrive/config", f, x -> { toast("已保存"); refresh(); })));
+        button(plr, "修改计划", v -> startActivity(new Intent(this, OneDriveScheduleActivity.class)
+                .putExtra("cfg", c.toString()).putExtra("tz", s.optString("timezone"))));
         button(plr, pwSet ? "修改备份密码" : "设置备份密码", v -> form("备份密码", "不能为空，长度不限；恢复时需要，丢失无法恢复，请另外记下来。",
                 Arrays.asList(Field.pass("password", "备份密码"), Field.pass("password2", "再输一次")), "保存", f -> {
                     if (f.optString("password").trim().isEmpty()) { toast("备份密码不能为空"); return; }

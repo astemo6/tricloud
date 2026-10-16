@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-// build 21 OneDrive 定期备份（对照 Web pageOneDrive / Android OneDriveActivity）：
+// build 21 OneDrive 定期备份（对照 Web pageOneDrive / Android OneDriveActivity；build 23 计划编辑见 OneDriveSchedule.swift）：
 // 状态、设备码绑定（microsoft.com/devicelogin + 轮询）、计划 / 保留 / 备份密码、立即备份、备份列表与恢复（密码 + 二次确认）、解绑。
 
 final class OneDrivePage: Page {
@@ -20,9 +20,14 @@ final class OneDrivePage: Page {
     override func appeared() { visible = true; super.appeared() }
     override func disappeared() { visible = false }
 
-    static func plan(_ c: JObj) -> String {
-        let wd = max(0, min(6, c.optInt("weekday")))
-        return (c.optString("freq") == "weekly" ? "每" + weekdays[wd] + " " : "每天 ") + c.optString("time", "03:30") + "，保留 \(c.optInt("keep", 30)) 份"
+    /// build 23：计划描述用后端的 desc（每 N 小时 / 多时间点 / 每周多选 / 每月 / Cron）；旧后端没有 desc 时退回 freq/time。
+    static func plan(_ s: JObj, _ c: JObj) -> String {
+        var d = s.optString("desc")
+        if d.isEmpty {
+            let wd = max(0, min(6, c.optInt("weekday")))
+            d = (c.optString("freq") == "weekly" ? "每" + weekdays[wd] + " " : "每天 ") + c.optString("time", "03:30")
+        }
+        return d + "，保留 \(c.optInt("keep", 30)) 份"
     }
 
     override func refresh() {
@@ -43,8 +48,10 @@ final class OneDrivePage: Page {
         lines.append(bound ? "✅ 已绑定" + (folder.isEmpty ? "" : "（OneDrive / 应用 / \(folder)）") : "未绑定")
         lines.append("备份密码：" + (pwSet ? "已设置" : "未设置"))
         if s.optBoolean("ready") {
-            lines.append("定时：" + OneDrivePage.plan(c) + "（" + s.optString("timezone") + "）")
-            lines.append("下次备份：" + str(s, "next_run", "-"))
+            lines.append("定时：" + OneDrivePage.plan(s, c) + "（" + s.optString("timezone") + "）")
+            let nl = s.optJSONArray("next_runs_label") ?? []
+            lines.append("下次备份：" + (nl.isEmpty ? str(s, "next_run", "-") : nl.string(0)))
+            if nl.count > 1 { lines.append("之后：" + (1..<nl.count).map { nl.string($0) }.joined(separator: "、")) }
         } else {
             lines.append(!bound ? "绑定 OneDrive 并设置备份密码后开始定时备份" : !pwSet ? "设置备份密码后开始定时备份" : "定时备份已停用")
         }
@@ -111,18 +118,13 @@ final class OneDrivePage: Page {
         }
 
         let pl = card("2. 计划、保留与备份密码")
-        pl.muted("启用：" + (c.optBoolean("enabled", true) ? "是" : "否") + " · " + OneDrivePage.plan(c)
+        pl.muted("启用：" + (c.optBoolean("enabled", true) ? "是" : "否") + " · " + OneDrivePage.plan(s, c)
                  + "\n备份文件用备份密码加密（scrypt + AES-256-GCM）；为了无人值守定时运行，密码用面板 Fernet 密钥加密后保存在面板数据库里。")
         let plr = pl.row()
         plr.button("修改计划") {
-            self.form("备份计划", "时间按面板时区（" + s.optString("timezone") + "）。", [
-                Field.check("enabled", "启用定时备份", c.optBoolean("enabled", true)),
-                Field.select("freq", "频率", c.optString("freq", "daily"), ["daily", "weekly"], ["每天", "每周"]),
-                Field.select("weekday", "星期（每周时）", String(c.optInt("weekday")), ["0", "1", "2", "3", "4", "5", "6"], OneDrivePage.weekdays),
-                Field.text("time", "时间 HH:MM", c.optString("time", "03:30")),
-                Field.num("keep", "保留最近几份（1–365）", String(c.optInt("keep", 30)))], "保存") { v in
-                self.post("/onedrive/config", v) { _ in self.toast("已保存"); self.refresh() }
-            }
+            let p = OneDriveSchedulePage(cfg: c, tz: s.optString("timezone"))
+            p.onSaved = { [weak self] in self?.refresh() }
+            self.push(p)
         }
         plr.button(pwSet ? "修改备份密码" : "设置备份密码") {
             self.form("备份密码", "不能为空，长度不限；恢复时需要，丢失无法恢复，请另外记下来。",

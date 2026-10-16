@@ -359,8 +359,10 @@ async def _do_onedrive_backup(c):
         s = onedrive.state()
         retry = ""
         if trigger == "schedule":
-            left = onedrive.RETRY_MAX - int(s.get("slot_tries") or 0)
-            retry = f"\n1 小时后自动重试（本期还剩 {left} 次）" if left > 0 else "\n本期已重试 3 次，等下一次计划时间"
+            try:
+                retry = "\n" + onedrive.retry_text(s.get("slot"))   # build 23：短周期按周期 1/4 重试，不跨到下一期
+            except Exception:   # noqa: BLE001
+                retry = ""
         await telegram.send(f"❌ <b>OneDrive 备份失败</b>（{ {'schedule': '定时', 'tg': 'Telegram', 'manual': '手动'}.get(trigger, trigger) }）\n"
                             f"{telegram.esc(msg)}{retry}")
         return
@@ -788,7 +790,7 @@ async def schedule_loop():
                 port_traffic.prune()
             except Exception as e:
                 print("port traffic prune failed", e, flush=True)
-        # build 21 OneDrive 定期备份（每天 / 每周 HH:MM，面板时区；失败 1 小时后重试，每期最多 3 次）
+        # build 21/23 OneDrive 定期备份（每 N 小时 / 每天多个时间 / 每周多选 / 每月 / Cron，面板时区；失败本期内重试，每期最多 3 次）
         try:
             from . import onedrive
             key = onedrive.due(now)

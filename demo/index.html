@@ -341,19 +341,81 @@
   function odName(d) { function z(n) { return (n < 10 ? "0" : "") + n; } return "tricloud-backup-" + d.getFullYear() + z(d.getMonth() + 1) + z(d.getDate()) + "-" + z(d.getHours()) + z(d.getMinutes()) + z(d.getSeconds()) + ".tcod"; }
   function odTime(n) { var m = n.match(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/); return m ? m[1] + "-" + m[2] + "-" + m[3] + " " + m[4] + ":" + m[5] + ":" + m[6] : ""; }
   var od = { client_id: "11111111-2222-3333-4444-555555555555", tenant: "consumers", bound: true, pending: null, polls: 0, pw: true,
-    cfg: { enabled: true, freq: "daily", time: "03:30", weekday: 0, keep: 30 }, state: {}, files: [], nid: 1, task: null };
+    cfg: { enabled: true, freq: "daily", time: "03:30", weekday: 0, keep: 30, mode: "daily", times: ["03:30"], weekdays: [0], days: [1], last_day: false,
+      every_hours: 6, minute: 0, start_hour: 0, cron: "30 3 * * *" }, state: {}, files: [], nid: 1, task: null };
   (function () { for (var i = 1; i <= 3; i++) { var d = new Date(Date.now() - i * 86400000); d.setHours(3, 30, 2, 0); od.files.push({ id: "OD" + od.nid++, name: odName(d), size: 48000 + i * 512 }); } od.state = { last_ok: Math.floor(od.files.length && (Date.now() - 86400000) / 1000), last_file: od.files[0].name, last_size: od.files[0].size, last_result: "done" }; })();
-  function odNext() {
-    var c = od.cfg, h = +c.time.split(":")[0], mi = +c.time.split(":")[1], n = new Date(), s = new Date(n); s.setHours(h, mi, 0, 0);
-    if (c.freq === "weekly") { var wd = (n.getDay() + 6) % 7; s.setDate(s.getDate() - ((wd - c.weekday + 7) % 7)); if (s > n) s.setDate(s.getDate() - 7); s.setDate(s.getDate() + 7); }
-    else { if (s > n) s.setDate(s.getDate() - 1); s.setDate(s.getDate() + 1); }
-    function z(x) { return (x < 10 ? "0" : "") + x; } return s.getFullYear() + "-" + z(s.getMonth() + 1) + "-" + z(s.getDate()) + " " + c.time;
+  // build 23：计划（每 N 小时 / 每天多个时间 / 每周多选 / 每月含月末 / Cron 简化版），与后端 od_schedule 同规则
+  var OD_WDN = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  function z2(x) { return (x < 10 ? "0" : "") + x; }
+  function odCron(e) {
+    var parts = String(e || "").trim().split(/\s+/), lim = [[0, 59, "分钟"], [0, 23, "小时"], [1, 31, "日"], [1, 12, "月"], [0, 7, "星期"]];
+    if (!e || !String(e).trim()) throw new Error("Cron 表达式不能为空");
+    if (parts.length !== 5) throw new Error("Cron 需要 5 段：分 时 日 月 周（当前 " + parts.length + " 段）");
+    var sets = parts.map(function (pt, i) {
+      var lo = lim[i][0], hi = lim[i][1], out = {};
+      pt.split(",").forEach(function (it) {
+        var st = 1, base = it; if (it.indexOf("/") >= 0) { base = it.split("/")[0]; st = +it.split("/")[1]; if (!(st >= 1)) throw new Error("Cron 第 " + (i + 1) + " 段（" + lim[i][2] + "）：步长应为正整数"); }
+        var a, b; if (base === "*") { a = lo; b = hi; } else if (base.indexOf("-") >= 0) { a = +base.split("-")[0]; b = +base.split("-")[1]; } else { a = +base; b = it.indexOf("/") >= 0 ? hi : a; }
+        if (!(a >= lo && b <= hi && a <= b) || isNaN(a) || isNaN(b)) throw new Error("Cron 第 " + (i + 1) + " 段（" + lim[i][2] + "）：「" + it + "」超出范围 " + lo + "–" + hi);
+        for (var v = a; v <= b; v += st) out[i === 4 && v === 7 ? 0 : v] = 1;
+      });
+      return out;
+    });
+    return { s: sets, domStar: parts[2][0] === "*", dowStar: parts[4][0] === "*" };
   }
+  function odDayTimes(c, d) {
+    var tl = (c.times || []).map(function (t) { return [+t.split(":")[0], +t.split(":")[1]]; }), wd = (d.getDay() + 6) % 7, out = [], h, m;
+    if (c.mode === "hourly") { for (h = 0; h < 24; h++) if (((h - c.start_hour) % c.every_hours + c.every_hours) % c.every_hours === 0) out.push([h, +c.minute]); return out; }
+    if (c.mode === "daily") return tl;
+    if (c.mode === "weekly") return c.weekdays.indexOf(wd) >= 0 ? tl : [];
+    if (c.mode === "monthly") { var last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); return c.days.indexOf(d.getDate()) >= 0 || (c.last_day && d.getDate() === last) ? tl : []; }
+    var cr = odCron(c.cron), s = cr.s; if (!s[3][d.getMonth() + 1]) return [];
+    var dom = !!s[2][d.getDate()], dow = !!s[4][d.getDay()];
+    if (!((cr.domStar || cr.dowStar) ? dom && dow : dom || dow)) return [];
+    for (h = 0; h < 24; h++) if (s[1][h]) for (m = 0; m < 60; m++) if (s[0][m]) out.push([h, m]);
+    return out;
+  }
+  function odNextN(c, n) {
+    var now = new Date(), out = [], d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    for (var i = 0; i < 366 * 8 + 2 && out.length < n; i++) {
+      var d = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate() + i);
+      odDayTimes(c, d).forEach(function (t) { var x = new Date(d.getFullYear(), d.getMonth(), d.getDate(), t[0], t[1]); if (x > now && out.length < n) out.push(x); });
+    }
+    return out;
+  }
+  function odFmt(x) { return x.getFullYear() + "-" + z2(x.getMonth() + 1) + "-" + z2(x.getDate()) + " " + z2(x.getHours()) + ":" + z2(x.getMinutes()); }
+  function odDesc(c) {
+    if (c.mode === "hourly") return +c.every_hours === 1 ? (+c.minute ? "每小时第 " + c.minute + " 分" : "每小时整点") : "每 " + c.every_hours + " 小时（每天 " + odDayTimes(c, new Date()).slice(0, 6).map(function (t) { return z2(t[0]) + ":" + z2(t[1]); }).join("、") + "）";
+    if (c.mode === "daily") return "每天 " + c.times.join("、");
+    if (c.mode === "weekly") return (c.weekdays.length === 7 ? "每天" : "每周" + c.weekdays.map(function (i) { return OD_WDN[i].slice(1); }).join("、")) + " " + c.times.join("、");
+    if (c.mode === "monthly") return (c.days.length ? "每月 " + c.days.join("、") + " 日" + (c.last_day ? "和月末" : "") : "每月月末") + " " + c.times.join("、");
+    return "Cron「" + c.cron + "」";
+  }
+  function odApply(body) {
+    var c = JSON.parse(JSON.stringify(od.cfg));
+    if ("mode" in body) { if (["hourly", "daily", "weekly", "monthly", "cron"].indexOf(body.mode) < 0) throw new Error("频率模式无效"); c.mode = body.mode; }
+    else if ("freq" in body && (body.freq !== c.freq || body.time !== c.time)) { if (["daily", "weekly"].indexOf(body.freq) < 0) throw new Error("频率只能是 daily（每天）或 weekly（每周）"); c.mode = body.freq; c.times = [body.time || c.time]; if (body.freq === "weekly") c.weekdays = [+body.weekday || 0]; }
+    if ("times" in body) { var ts = (body.times || []).filter(function (t, i, a) { return a.indexOf(t) === i; }).sort(); if (!ts.length) throw new Error("至少需要一个时间点"); ts.forEach(function (t) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) throw new Error("时间「" + t + "」格式应为 HH:MM（24 小时制）"); }); c.times = ts; }
+    if ("weekdays" in body) { if (!body.weekdays.length) throw new Error("每周至少选一天"); c.weekdays = body.weekdays.slice().sort(); }
+    if ("days" in body || "last_day" in body) { var dd = body.days || c.days, ld = "last_day" in body ? !!body.last_day : c.last_day; if (!dd.length && !ld) throw new Error("每月至少选一个日期（或月末）"); c.days = dd.slice().sort(function (a, b) { return a - b; }); c.last_day = ld; }
+    if ("every_hours" in body) { var eh = +body.every_hours; if (!(eh >= 1 && eh <= 24)) throw new Error("间隔小时数需为 1~24"); c.every_hours = eh; }
+    if ("minute" in body) { var mi = +body.minute; if (!(mi >= 0 && mi <= 59)) throw new Error("起始分钟需为 0~59"); c.minute = mi; }
+    if ("start_hour" in body) { var sh = +body.start_hour; if (!(sh >= 0 && sh <= 23)) throw new Error("起始小时需为 0~23"); c.start_hour = sh; }
+    if ("cron" in body && c.mode === "cron") c.cron = String(body.cron || "").trim();
+    var nx = odNextN(c, 60);
+    if (!nx.length) throw new Error("这个计划在未来 8 年内都不会触发（例如 2 月 30 日），请检查日期");
+    for (var i = 1; i < nx.length; i++) if (nx[i] - nx[i - 1] < 30 * 60000) throw new Error("两次备份至少间隔 30 分钟（" + odFmt(nx[i - 1]).slice(5) + " 与 " + odFmt(nx[i]).slice(11) + " 太近）");
+    c.freq = c.mode === "weekly" ? "weekly" : "daily"; c.time = c.times[0]; c.weekday = c.weekdays[0];
+    return { c: c, next: nx.slice(0, 3) };
+  }
+  function odLabel(x) { return odFmt(x) + "（" + OD_WDN[(x.getDay() + 6) % 7] + "）"; }
+  function odNext() { var n = odNextN(od.cfg, 1); return n.length ? odFmt(n[0]) : null; }
   function odRunning() { return od.task && tasks.some(function (t) { return t.id === od.task && t.status === "running"; }) ? od.task : null; }
   function odStatus() {
     var ready = od.bound && od.pw && od.cfg.enabled;
     return { client_id: od.client_id, tenant: od.tenant, scope: "Files.ReadWrite.AppFolder offline_access", bound: od.bound, account: od.bound ? { folder: "TriCloud Backup", drive_type: "personal" } : {},
       pending: od.pending, password_set: od.pw, cfg: JSON.parse(JSON.stringify(od.cfg)), ready: ready, next_run: ready ? odNext() : null, timezone: settings.timezone || "Asia/Shanghai",
+      desc: odDesc(od.cfg), next_runs: ready ? odNextN(od.cfg, 3).map(odFmt) : [], next_runs_label: ready ? odNextN(od.cfg, 3).map(odLabel) : [], min_gap_minutes: 30,
       state: JSON.parse(JSON.stringify(od.state)), device_login_url: "https://microsoft.com/devicelogin", restart_after_restore: true, running_task_id: odRunning() };
   }
   function route21(method, p, q, body) {
@@ -366,12 +428,18 @@
         if (cid !== od.client_id) { od.client_id = cid; ch.push("client_id"); if (od.bound) { od.bound = false; ch.push("unbound"); } } }
       if ("tenant" in body) { if (["consumers", "common"].indexOf(body.tenant) < 0) return { __status: 400, detail: "登录端点只能是 consumers 或 common" }; od.tenant = body.tenant; }
       if (body.password) { if (!String(body.password).trim()) return { __status: 400, detail: "备份密码不能为空" }; if ("password2" in body && body.password2 !== body.password) return { __status: 400, detail: "两次输入的备份密码不一致" }; od.pw = true; ch.push("password"); }
-      if ("freq" in body) { if (["daily", "weekly"].indexOf(body.freq) < 0) return { __status: 400, detail: "频率只能是每天或每周" }; od.cfg.freq = body.freq; }
-      if ("time" in body) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(body.time)) return { __status: 400, detail: "时间格式应为 HH:MM（24 小时制）" }; od.cfg.time = body.time; }
-      if ("weekday" in body) od.cfg.weekday = +body.weekday;
+      if (["mode", "freq", "time", "weekday", "times", "weekdays", "days", "last_day", "every_hours", "minute", "start_hour", "cron"].some(function (k) { return k in body; })) {
+        var ap; try { ap = odApply(body); } catch (e) { return { __status: 400, detail: e.message }; }
+        if (JSON.stringify(ap.c) !== JSON.stringify(od.cfg)) ch.push("schedule");
+        var keepEn = { keep: od.cfg.keep, enabled: od.cfg.enabled }; od.cfg = ap.c; od.cfg.keep = keepEn.keep; od.cfg.enabled = keepEn.enabled;
+      }
       if ("keep" in body) { var k = +body.keep; if (!(k >= 1 && k <= 365 && Math.floor(k) === k)) return { __status: 400, detail: "保留份数需为 1~365" }; od.cfg.keep = k; }
       if ("enabled" in body) od.cfg.enabled = !!body.enabled;
       var r = odStatus(); r.changed = ch; return r;
+    }
+    if (p === "/onedrive/schedule/preview") {
+      var pv; try { pv = odApply(body); } catch (e) { return { __status: 400, detail: e.message }; }
+      return { ok: true, desc: odDesc(pv.c), mode: pv.c.mode, timezone: settings.timezone || "Asia/Shanghai", next_runs: pv.next.map(odFmt), next_runs_label: pv.next.map(odLabel), cfg: pv.c };
     }
     if (p === "/onedrive/bind" && method === "POST") {
       if (!od.client_id) return { __status: 400, detail: "请先填写 Azure 应用的 client_id（应用程序(客户端) ID）" };
@@ -1589,6 +1657,20 @@ tr.acc-off td:last-child { opacity: 1; }
 .bad { color: var(--bad); }
 .modal h4 { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; font-size: 14px; }
 .brand { font-weight: 700; } .brand span { color: var(--primary); }
+
+/* build 23 OneDrive 计划编辑 */
+.od-times { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.od-time { display: inline-flex; align-items: center; gap: 4px; }
+.od-time input { width: auto; }
+.od-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.od-chip { display: inline-block; margin: 0; cursor: pointer; }
+.od-chip input { position: absolute; opacity: 0; pointer-events: none; }
+.od-chip span { display: inline-block; min-width: 40px; text-align: center; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);
+  font-size: 13px; color: var(--text); letter-spacing: 0; transition: background .15s; }
+.od-chip input:checked + span { background: var(--primary-c); color: var(--on-primary-c); border-color: transparent; }
+.od-chip input:focus-visible + span { outline: 2px solid var(--primary); }
+.od-days .od-chip span { min-width: 34px; padding: 6px 4px; }
+.od-prev { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--s-c); font-size: 13px; line-height: 1.6; }
 </style>
 </head>
 <body>
@@ -2332,13 +2414,17 @@ async function pageTraffic() {
   }));
 }
 
-// TriCloud 前端 v1.6.0 build 22 · OneDrive 定期备份（设备码绑定、计划与保留、备份密码、立即备份、备份列表与恢复、解绑）
+// TriCloud 前端 v1.6.0 build 23 · OneDrive 定期备份（设备码绑定、计划与保留、备份密码、立即备份、备份列表与恢复、解绑）
+// build 23：计划支持 每 N 小时 / 每天多个时间点 / 每周多选 / 每月日期（含月末）/ Cron，保存前预览接下来 3 次
 
 const OD_WD = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 const OD_LOGIN_URL = "https://microsoft.com/devicelogin";
 let odTimer = null;
 
-const odPlan = (c) => (c.freq === "weekly" ? `每${OD_WD[+c.weekday || 0]} ` : "每天 ") + esc(c.time) + `，保留 ${esc(c.keep)} 份`;
+const OD_MODES = [["hourly", "每 N 小时"], ["daily", "每天（多个时间点）"], ["weekly", "每周（多选星期）"], ["monthly", "每月（指定日期）"], ["cron", "高级：Cron 表达式"]];
+let odPrevTimer = null, odPrevSeq = 0;
+// build 23：计划描述由后端给（s.desc）；旧后端没有 desc 时退回 freq/time
+const odPlan = (c, desc) => esc(desc || ((c.freq === "weekly" ? `每${OD_WD[+c.weekday || 0]} ` : "每天 ") + c.time)) + `，保留 ${esc(c.keep)} 份`;
 
 // 设置页里的小卡片：状态一行 + 进入按钮
 function odSettingsCard() {
@@ -2349,7 +2435,7 @@ async function odSettingsBind() {
   const el = document.getElementById("odSum"); if (!el) return;
   try {
     const s = await api("/onedrive");
-    el.innerHTML = !s.bound ? `<span class="badge">未绑定</span>` : `<span class="badge done">已绑定</span> ${s.ready ? `${odPlan(s.cfg)} · 下次 ${esc(s.next_run || "-")}` : s.password_set ? "定时备份已停用" : "还没设置备份密码"}`
+    el.innerHTML = !s.bound ? `<span class="badge">未绑定</span>` : `<span class="badge done">已绑定</span> ${s.ready ? `${odPlan(s.cfg, s.desc)} · 下次 ${esc(s.next_run || "-")}` : s.password_set ? "定时备份已停用" : "还没设置备份密码"}`
       + (s.state.last_ok ? `<br>上次成功 ${esc(fmtDT(s.state.last_ok))}` : "") + (s.state.last_result === "failed" ? `<br><span class="err-text">上次失败：${esc(s.state.last_error || "")}</span>` : "");
   } catch (e) { el.textContent = e.message; }
 }
@@ -2366,7 +2452,7 @@ async function pageOneDrive(hint) {
   <div class="card" id="odStat"><h3>状态</h3>
     <p>${s.bound ? `<span class="badge done">已绑定</span> ${esc((s.account && s.account.folder) ? "OneDrive / 应用 / " + s.account.folder : "个人 OneDrive")}` : `<span class="badge">未绑定</span>`}
       ${s.password_set ? `<span class="badge done">已设置备份密码</span>` : `<span class="badge">未设置备份密码</span>`}</p>
-    <p>${s.ready ? `定时：${odPlan(c)}（${esc(s.timezone)}）<br>下次备份：<b>${esc(s.next_run || "-")}</b>` : `<span class="muted">${!s.bound ? "绑定 OneDrive 并设置备份密码后开始定时备份" : !s.password_set ? "设置备份密码后开始定时备份" : "定时备份已停用"}</span>`}</p>
+    <p>${s.ready ? `定时：${odPlan(c, s.desc)}（${esc(s.timezone)}）<br>下次备份：<b>${esc((s.next_runs_label || [])[0] || s.next_run || "-")}</b>${(s.next_runs_label || []).length > 1 ? `<br><span class="muted">之后：${s.next_runs_label.slice(1).map(esc).join("、")}</span>` : ""}` : `<span class="muted">${!s.bound ? "绑定 OneDrive 并设置备份密码后开始定时备份" : !s.password_set ? "设置备份密码后开始定时备份" : "定时备份已停用"}</span>`}</p>
     ${st.last_ok ? `<p>上次成功：${esc(fmtDT(st.last_ok))} · ${esc(st.last_file || "")}${st.last_size ? ` · ${esc(fmtBytes(st.last_size))}` : ""}</p>` : ""}
     ${failed ? `<p class="err-text">上次失败（${esc(fmtDT(st.last_try))}）：${esc(st.last_error || "")}</p>` : ""}
     ${st.auth_error ? `<p class="err-text">${esc(st.auth_error)}</p>` : ""}
@@ -2384,9 +2470,7 @@ async function pageOneDrive(hint) {
     <div id="odPendBox"></div></div>
   <div class="card" id="odPlan"><h3>2. 计划、保留与备份密码</h3>
     <label><input type="checkbox" name="enabled" style="width:auto" ${c.enabled ? "checked" : ""}> 启用定时备份</label>
-    <div class="row2"><div><label>频率</label><select name="freq"><option value="daily" ${c.freq === "daily" ? "selected" : ""}>每天</option><option value="weekly" ${c.freq === "weekly" ? "selected" : ""}>每周</option></select></div>
-      <div><label>时间（${esc(s.timezone)}）</label><input name="time" type="time" value="${esc(c.time)}"></div></div>
-    <div data-show-when="freq=weekly"><label>星期</label><select name="weekday">${OD_WD.map((w, i) => `<option value="${i}" ${+c.weekday === i ? "selected" : ""}>${w}</option>`).join("")}</select></div>
+    ${odSchedForm(c, s.timezone)}
     <label>保留最近几份（1–365，多余的自动删除）</label><input name="keep" type="number" min="1" max="365" value="${esc(c.keep)}">
     <label>备份密码（不能为空，长度不限）${s.password_set ? ` <span class="badge done">已设置</span>` : ""}</label><input name="password" type="password" autocomplete="new-password" placeholder="${s.password_set ? "留空保持不变" : "恢复时需要，丢失无法恢复"}">
     <label>再输一次</label><input name="password2" type="password" autocomplete="new-password">
@@ -2398,15 +2482,16 @@ async function pageOneDrive(hint) {
     <p class="muted">恢复前面板会自动在 data/ 下保存一份当前数据（pre-restore-时间）。</p></div></div>
   <div class="card" id="odList"><div class="bar"><h3 class="grow" style="margin:0">OneDrive 上的备份</h3>${s.bound ? `<button class="btn sm" id="odRefresh">刷新</button>` : ""}</div>
     <div id="odItems" class="muted">${s.bound ? `<span class="spin"></span> 读取中…` : "绑定后显示"}</div></div>`;
-  applyShowWhen($("#odPlan")); $("#odPlan").addEventListener("change", () => applyShowWhen($("#odPlan")));
+  odSchedBind($("#odPlan"));
   $("#odSaveApp").onclick = (e) => act(e.target, () => post("/onedrive/config", form($("#odApp"))),
     (r) => (r.changed.includes("unbound") ? "已保存；换了应用，原绑定已解除。点「绑定 OneDrive」获取代码" : !r.bound && r.client_id ? "已保存，点「绑定 OneDrive」获取代码" : "已保存"))
     .then((r) => r && pageOneDrive(!r.bound && !!r.client_id));
   $("#odSavePlan").onclick = (e) => {
-    const f = form($("#odPlan"));
-    if (!f.password && f.password2) return toast("备份密码不能为空", true);
-    if (f.password && f.password !== f.password2) return toast("两次输入的备份密码不一致", true);
-    if (!f.password) { delete f.password; delete f.password2; }
+    const pf = form($("#odPlan"));
+    if (!pf.password && pf.password2) return toast("备份密码不能为空", true);
+    if (pf.password && pf.password !== pf.password2) return toast("两次输入的备份密码不一致", true);
+    const f = Object.assign(odSchedBody($("#odPlan")), { enabled: pf.enabled, keep: pf.keep });
+    if (pf.password) Object.assign(f, { password: pf.password, password2: pf.password2 });
     act(e.target, () => post("/onedrive/config", f), "已保存").then((r) => r && pageOneDrive());
   };
   $("#odBind").onclick = (e) => act(e.target, async () => {
@@ -2421,6 +2506,63 @@ async function pageOneDrive(hint) {
     if (r) pageOneDrive();
   };
   if (s.bound) { loadList(); $("#odRefresh").onclick = loadList; }
+}
+
+// ---------------- build 23 计划编辑 ----------------
+const odTimeRow = (t) => `<span class="od-time"><input type="time" value="${esc(t)}" data-odt><button type="button" class="btn sm" data-odrm title="删除这个时间">✕</button></span>`;
+const odChip = (attr, v, label, on) => `<label class="od-chip"><input type="checkbox" ${attr}="${v}" ${on ? "checked" : ""}><span>${label}</span></label>`;
+
+function odSchedForm(c, tz) {
+  const days = new Set(c.days || []), wds = new Set(c.weekdays || []);
+  return `<label>频率（时间按面板时区 ${esc(tz || "")}）</label><select name="mode">${OD_MODES.map(([k, v]) => `<option value="${k}" ${c.mode === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+    <div data-show-when="mode=hourly"><div class="row2"><div><label>每隔几小时（1–24）</label><input name="every_hours" type="number" min="1" max="24" value="${esc(c.every_hours ?? 6)}"></div>
+      <div><label>第几分钟（0 = 整点）</label><input name="minute" type="number" min="0" max="59" value="${esc(c.minute ?? 0)}"></div></div>
+      <label>起始小时（0–23，每天从这个小时起按间隔对齐）</label><input name="start_hour" type="number" min="0" max="23" value="${esc(c.start_hour ?? 0)}">
+      <p class="muted">例如每 6 小时、第 15 分、起始 0 点 = 每天 00:15、06:15、12:15、18:15。24 不能被间隔整除时，每天最后一段会短一些。</p></div>
+    <div data-show-when="mode=daily|weekly|monthly"><label>时间点（可多个）</label><div class="od-times" id="odTimes">${(c.times && c.times.length ? c.times : ["03:30"]).map(odTimeRow).join("")}</div>
+      <button type="button" class="btn sm" id="odAddTime">＋ 添加时间</button></div>
+    <div data-show-when="mode=weekly"><label>星期（可多选）</label><div class="od-chips">${OD_WD.map((w, i) => odChip("data-odwd", i, w, wds.has(i))).join("")}</div></div>
+    <div data-show-when="mode=monthly"><label>日期（可多选；没有这一天的月份会跳过，每月最后一天请选「月末」）</label>
+      <div class="od-chips od-days">${Array.from({ length: 31 }, (_, i) => odChip("data-odday", i + 1, i + 1, days.has(i + 1))).join("")}${odChip("data-odlast", 1, "月末", !!c.last_day)}</div></div>
+    <div data-show-when="mode=cron"><label>Cron 表达式（分 时 日 月 周）</label><input name="cron" class="mono" value="${esc(c.cron || "30 3 * * *")}" placeholder="30 3 * * 1-5" autocomplete="off" spellcheck="false">
+      <p class="muted">标准 5 段，按面板时区；支持 <code>*</code> <code>,</code> <code>-</code> <code>/</code>、数字、英文缩写（mon、jan）和 @daily 等。例：<code>30 3 * * 1-5</code> 工作日 03:30；<code>0 */6 * * *</code> 每 6 小时；<code>0 4 1,15 * *</code> 每月 1、15 日 04:00。日和周都指定时满足任一即可。两次备份至少间隔 30 分钟。</p></div>
+    <div class="od-prev" id="odPrev"><span class="muted">接下来 3 次：计算中…</span></div>`;
+}
+
+function odSchedBody(root) {
+  const mode = root.querySelector("[name=mode]").value, b = { mode };
+  if (mode === "hourly") ["every_hours", "minute", "start_hour"].forEach((k) => (b[k] = root.querySelector(`[name=${k}]`).value));
+  if (mode === "daily" || mode === "weekly" || mode === "monthly") b.times = [...root.querySelectorAll("[data-odt]")].map((i) => i.value).filter(Boolean);
+  if (mode === "weekly") b.weekdays = [...root.querySelectorAll("[data-odwd]:checked")].map((i) => +i.dataset.odwd);
+  if (mode === "monthly") { b.days = [...root.querySelectorAll("[data-odday]:checked")].map((i) => +i.dataset.odday); b.last_day = !!root.querySelector("[data-odlast]:checked"); }
+  if (mode === "cron") b.cron = root.querySelector("[name=cron]").value.trim();
+  return b;
+}
+
+async function odPreview(root) {
+  const box = root.querySelector("#odPrev"); if (!box) return;
+  const seq = ++odPrevSeq;
+  let r;
+  try { r = await post("/onedrive/schedule/preview", odSchedBody(root)); } catch (e) { r = { error: e.message }; }
+  if (seq !== odPrevSeq || !document.body.contains(box)) return;
+  box.innerHTML = r.error ? `<span class="err-text">⚠️ ${esc(r.error)}</span>`
+    : `<b>${esc(r.desc)}</b><br><span class="muted">接下来 3 次（${esc(r.timezone)}）：</span>${r.next_runs_label.map((x) => `<br>· ${esc(x)}`).join("")}`;
+}
+
+function odSchedBind(root) {
+  const refresh = () => { applyShowWhen(root); clearTimeout(odPrevTimer); odPrevTimer = setTimeout(() => odPreview(root), 350); };
+  root.addEventListener("change", refresh);
+  root.addEventListener("input", (e) => { if (!e.target.matches("[name=password],[name=password2],[name=keep]")) refresh(); });
+  root.addEventListener("click", (e) => {
+    const rm = e.target.closest("[data-odrm]");
+    if (rm) { const rows = root.querySelectorAll(".od-time"); if (rows.length <= 1) return toast("至少保留一个时间点", true); rm.parentElement.remove(); refresh(); }
+  });
+  root.querySelector("#odAddTime").onclick = () => {
+    const box = root.querySelector("#odTimes");
+    if (box.querySelectorAll(".od-time").length >= 24) return toast("最多 24 个时间点", true);
+    box.insertAdjacentHTML("beforeend", odTimeRow("12:00")); refresh();
+  };
+  applyShowWhen(root); odPreview(root);
 }
 
 function showPending(p) {

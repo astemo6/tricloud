@@ -335,19 +335,81 @@
   function odName(d) { function z(n) { return (n < 10 ? "0" : "") + n; } return "tricloud-backup-" + d.getFullYear() + z(d.getMonth() + 1) + z(d.getDate()) + "-" + z(d.getHours()) + z(d.getMinutes()) + z(d.getSeconds()) + ".tcod"; }
   function odTime(n) { var m = n.match(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/); return m ? m[1] + "-" + m[2] + "-" + m[3] + " " + m[4] + ":" + m[5] + ":" + m[6] : ""; }
   var od = { client_id: "11111111-2222-3333-4444-555555555555", tenant: "consumers", bound: true, pending: null, polls: 0, pw: true,
-    cfg: { enabled: true, freq: "daily", time: "03:30", weekday: 0, keep: 30 }, state: {}, files: [], nid: 1, task: null };
+    cfg: { enabled: true, freq: "daily", time: "03:30", weekday: 0, keep: 30, mode: "daily", times: ["03:30"], weekdays: [0], days: [1], last_day: false,
+      every_hours: 6, minute: 0, start_hour: 0, cron: "30 3 * * *" }, state: {}, files: [], nid: 1, task: null };
   (function () { for (var i = 1; i <= 3; i++) { var d = new Date(Date.now() - i * 86400000); d.setHours(3, 30, 2, 0); od.files.push({ id: "OD" + od.nid++, name: odName(d), size: 48000 + i * 512 }); } od.state = { last_ok: Math.floor(od.files.length && (Date.now() - 86400000) / 1000), last_file: od.files[0].name, last_size: od.files[0].size, last_result: "done" }; })();
-  function odNext() {
-    var c = od.cfg, h = +c.time.split(":")[0], mi = +c.time.split(":")[1], n = new Date(), s = new Date(n); s.setHours(h, mi, 0, 0);
-    if (c.freq === "weekly") { var wd = (n.getDay() + 6) % 7; s.setDate(s.getDate() - ((wd - c.weekday + 7) % 7)); if (s > n) s.setDate(s.getDate() - 7); s.setDate(s.getDate() + 7); }
-    else { if (s > n) s.setDate(s.getDate() - 1); s.setDate(s.getDate() + 1); }
-    function z(x) { return (x < 10 ? "0" : "") + x; } return s.getFullYear() + "-" + z(s.getMonth() + 1) + "-" + z(s.getDate()) + " " + c.time;
+  // build 23：计划（每 N 小时 / 每天多个时间 / 每周多选 / 每月含月末 / Cron 简化版），与后端 od_schedule 同规则
+  var OD_WDN = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  function z2(x) { return (x < 10 ? "0" : "") + x; }
+  function odCron(e) {
+    var parts = String(e || "").trim().split(/\s+/), lim = [[0, 59, "分钟"], [0, 23, "小时"], [1, 31, "日"], [1, 12, "月"], [0, 7, "星期"]];
+    if (!e || !String(e).trim()) throw new Error("Cron 表达式不能为空");
+    if (parts.length !== 5) throw new Error("Cron 需要 5 段：分 时 日 月 周（当前 " + parts.length + " 段）");
+    var sets = parts.map(function (pt, i) {
+      var lo = lim[i][0], hi = lim[i][1], out = {};
+      pt.split(",").forEach(function (it) {
+        var st = 1, base = it; if (it.indexOf("/") >= 0) { base = it.split("/")[0]; st = +it.split("/")[1]; if (!(st >= 1)) throw new Error("Cron 第 " + (i + 1) + " 段（" + lim[i][2] + "）：步长应为正整数"); }
+        var a, b; if (base === "*") { a = lo; b = hi; } else if (base.indexOf("-") >= 0) { a = +base.split("-")[0]; b = +base.split("-")[1]; } else { a = +base; b = it.indexOf("/") >= 0 ? hi : a; }
+        if (!(a >= lo && b <= hi && a <= b) || isNaN(a) || isNaN(b)) throw new Error("Cron 第 " + (i + 1) + " 段（" + lim[i][2] + "）：「" + it + "」超出范围 " + lo + "–" + hi);
+        for (var v = a; v <= b; v += st) out[i === 4 && v === 7 ? 0 : v] = 1;
+      });
+      return out;
+    });
+    return { s: sets, domStar: parts[2][0] === "*", dowStar: parts[4][0] === "*" };
   }
+  function odDayTimes(c, d) {
+    var tl = (c.times || []).map(function (t) { return [+t.split(":")[0], +t.split(":")[1]]; }), wd = (d.getDay() + 6) % 7, out = [], h, m;
+    if (c.mode === "hourly") { for (h = 0; h < 24; h++) if (((h - c.start_hour) % c.every_hours + c.every_hours) % c.every_hours === 0) out.push([h, +c.minute]); return out; }
+    if (c.mode === "daily") return tl;
+    if (c.mode === "weekly") return c.weekdays.indexOf(wd) >= 0 ? tl : [];
+    if (c.mode === "monthly") { var last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); return c.days.indexOf(d.getDate()) >= 0 || (c.last_day && d.getDate() === last) ? tl : []; }
+    var cr = odCron(c.cron), s = cr.s; if (!s[3][d.getMonth() + 1]) return [];
+    var dom = !!s[2][d.getDate()], dow = !!s[4][d.getDay()];
+    if (!((cr.domStar || cr.dowStar) ? dom && dow : dom || dow)) return [];
+    for (h = 0; h < 24; h++) if (s[1][h]) for (m = 0; m < 60; m++) if (s[0][m]) out.push([h, m]);
+    return out;
+  }
+  function odNextN(c, n) {
+    var now = new Date(), out = [], d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    for (var i = 0; i < 366 * 8 + 2 && out.length < n; i++) {
+      var d = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate() + i);
+      odDayTimes(c, d).forEach(function (t) { var x = new Date(d.getFullYear(), d.getMonth(), d.getDate(), t[0], t[1]); if (x > now && out.length < n) out.push(x); });
+    }
+    return out;
+  }
+  function odFmt(x) { return x.getFullYear() + "-" + z2(x.getMonth() + 1) + "-" + z2(x.getDate()) + " " + z2(x.getHours()) + ":" + z2(x.getMinutes()); }
+  function odDesc(c) {
+    if (c.mode === "hourly") return +c.every_hours === 1 ? (+c.minute ? "每小时第 " + c.minute + " 分" : "每小时整点") : "每 " + c.every_hours + " 小时（每天 " + odDayTimes(c, new Date()).slice(0, 6).map(function (t) { return z2(t[0]) + ":" + z2(t[1]); }).join("、") + "）";
+    if (c.mode === "daily") return "每天 " + c.times.join("、");
+    if (c.mode === "weekly") return (c.weekdays.length === 7 ? "每天" : "每周" + c.weekdays.map(function (i) { return OD_WDN[i].slice(1); }).join("、")) + " " + c.times.join("、");
+    if (c.mode === "monthly") return (c.days.length ? "每月 " + c.days.join("、") + " 日" + (c.last_day ? "和月末" : "") : "每月月末") + " " + c.times.join("、");
+    return "Cron「" + c.cron + "」";
+  }
+  function odApply(body) {
+    var c = JSON.parse(JSON.stringify(od.cfg));
+    if ("mode" in body) { if (["hourly", "daily", "weekly", "monthly", "cron"].indexOf(body.mode) < 0) throw new Error("频率模式无效"); c.mode = body.mode; }
+    else if ("freq" in body && (body.freq !== c.freq || body.time !== c.time)) { if (["daily", "weekly"].indexOf(body.freq) < 0) throw new Error("频率只能是 daily（每天）或 weekly（每周）"); c.mode = body.freq; c.times = [body.time || c.time]; if (body.freq === "weekly") c.weekdays = [+body.weekday || 0]; }
+    if ("times" in body) { var ts = (body.times || []).filter(function (t, i, a) { return a.indexOf(t) === i; }).sort(); if (!ts.length) throw new Error("至少需要一个时间点"); ts.forEach(function (t) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) throw new Error("时间「" + t + "」格式应为 HH:MM（24 小时制）"); }); c.times = ts; }
+    if ("weekdays" in body) { if (!body.weekdays.length) throw new Error("每周至少选一天"); c.weekdays = body.weekdays.slice().sort(); }
+    if ("days" in body || "last_day" in body) { var dd = body.days || c.days, ld = "last_day" in body ? !!body.last_day : c.last_day; if (!dd.length && !ld) throw new Error("每月至少选一个日期（或月末）"); c.days = dd.slice().sort(function (a, b) { return a - b; }); c.last_day = ld; }
+    if ("every_hours" in body) { var eh = +body.every_hours; if (!(eh >= 1 && eh <= 24)) throw new Error("间隔小时数需为 1~24"); c.every_hours = eh; }
+    if ("minute" in body) { var mi = +body.minute; if (!(mi >= 0 && mi <= 59)) throw new Error("起始分钟需为 0~59"); c.minute = mi; }
+    if ("start_hour" in body) { var sh = +body.start_hour; if (!(sh >= 0 && sh <= 23)) throw new Error("起始小时需为 0~23"); c.start_hour = sh; }
+    if ("cron" in body && c.mode === "cron") c.cron = String(body.cron || "").trim();
+    var nx = odNextN(c, 60);
+    if (!nx.length) throw new Error("这个计划在未来 8 年内都不会触发（例如 2 月 30 日），请检查日期");
+    for (var i = 1; i < nx.length; i++) if (nx[i] - nx[i - 1] < 30 * 60000) throw new Error("两次备份至少间隔 30 分钟（" + odFmt(nx[i - 1]).slice(5) + " 与 " + odFmt(nx[i]).slice(11) + " 太近）");
+    c.freq = c.mode === "weekly" ? "weekly" : "daily"; c.time = c.times[0]; c.weekday = c.weekdays[0];
+    return { c: c, next: nx.slice(0, 3) };
+  }
+  function odLabel(x) { return odFmt(x) + "（" + OD_WDN[(x.getDay() + 6) % 7] + "）"; }
+  function odNext() { var n = odNextN(od.cfg, 1); return n.length ? odFmt(n[0]) : null; }
   function odRunning() { return od.task && tasks.some(function (t) { return t.id === od.task && t.status === "running"; }) ? od.task : null; }
   function odStatus() {
     var ready = od.bound && od.pw && od.cfg.enabled;
     return { client_id: od.client_id, tenant: od.tenant, scope: "Files.ReadWrite.AppFolder offline_access", bound: od.bound, account: od.bound ? { folder: "TriCloud Backup", drive_type: "personal" } : {},
       pending: od.pending, password_set: od.pw, cfg: JSON.parse(JSON.stringify(od.cfg)), ready: ready, next_run: ready ? odNext() : null, timezone: settings.timezone || "Asia/Shanghai",
+      desc: odDesc(od.cfg), next_runs: ready ? odNextN(od.cfg, 3).map(odFmt) : [], next_runs_label: ready ? odNextN(od.cfg, 3).map(odLabel) : [], min_gap_minutes: 30,
       state: JSON.parse(JSON.stringify(od.state)), device_login_url: "https://microsoft.com/devicelogin", restart_after_restore: true, running_task_id: odRunning() };
   }
   function route21(method, p, q, body) {
@@ -360,12 +422,18 @@
         if (cid !== od.client_id) { od.client_id = cid; ch.push("client_id"); if (od.bound) { od.bound = false; ch.push("unbound"); } } }
       if ("tenant" in body) { if (["consumers", "common"].indexOf(body.tenant) < 0) return { __status: 400, detail: "登录端点只能是 consumers 或 common" }; od.tenant = body.tenant; }
       if (body.password) { if (!String(body.password).trim()) return { __status: 400, detail: "备份密码不能为空" }; if ("password2" in body && body.password2 !== body.password) return { __status: 400, detail: "两次输入的备份密码不一致" }; od.pw = true; ch.push("password"); }
-      if ("freq" in body) { if (["daily", "weekly"].indexOf(body.freq) < 0) return { __status: 400, detail: "频率只能是每天或每周" }; od.cfg.freq = body.freq; }
-      if ("time" in body) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(body.time)) return { __status: 400, detail: "时间格式应为 HH:MM（24 小时制）" }; od.cfg.time = body.time; }
-      if ("weekday" in body) od.cfg.weekday = +body.weekday;
+      if (["mode", "freq", "time", "weekday", "times", "weekdays", "days", "last_day", "every_hours", "minute", "start_hour", "cron"].some(function (k) { return k in body; })) {
+        var ap; try { ap = odApply(body); } catch (e) { return { __status: 400, detail: e.message }; }
+        if (JSON.stringify(ap.c) !== JSON.stringify(od.cfg)) ch.push("schedule");
+        var keepEn = { keep: od.cfg.keep, enabled: od.cfg.enabled }; od.cfg = ap.c; od.cfg.keep = keepEn.keep; od.cfg.enabled = keepEn.enabled;
+      }
       if ("keep" in body) { var k = +body.keep; if (!(k >= 1 && k <= 365 && Math.floor(k) === k)) return { __status: 400, detail: "保留份数需为 1~365" }; od.cfg.keep = k; }
       if ("enabled" in body) od.cfg.enabled = !!body.enabled;
       var r = odStatus(); r.changed = ch; return r;
+    }
+    if (p === "/onedrive/schedule/preview") {
+      var pv; try { pv = odApply(body); } catch (e) { return { __status: 400, detail: e.message }; }
+      return { ok: true, desc: odDesc(pv.c), mode: pv.c.mode, timezone: settings.timezone || "Asia/Shanghai", next_runs: pv.next.map(odFmt), next_runs_label: pv.next.map(odLabel), cfg: pv.c };
     }
     if (p === "/onedrive/bind" && method === "POST") {
       if (!od.client_id) return { __status: 400, detail: "请先填写 Azure 应用的 client_id（应用程序(客户端) ID）" };

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.0（build 23）(2026-10-16)
+- 新功能：OneDrive 备份频率自定义。在每天 / 每周之外新增：每 N 小时（1–24，第几分钟 + 起始小时对齐）、每天多个时间点、每周多选星期 + 多个时间点、每月指定日期（多选 1–31 和「月末」）+ 时间点、高级 5 段 Cron（分 时 日 月 周，按面板时区；自写解析器，支持 `* , - /`、数字、英文缩写、@daily 等宏，未引入 croniter）。全部按面板时区墙上时间计算，夏令时不重复、不漏跑；两次备份至少间隔 30 分钟，8 年内不会触发的计划拒绝保存。
+- 新接口：`POST /api/onedrive/schedule/preview`（不保存，返回计划描述与接下来 3 次备份时间，非法配置 400 友好提示；不写审计；API Token 403，与其他改设置接口一致）。/api 路由 176 → 177。`GET /api/onedrive` 新增 `desc`、`next_runs`、`next_runs_label`、`modes`、`min_gap_minutes`，`cfg` 新增 `mode / times / weekdays / days / last_day / every_hours / minute / start_hour / cron`。
+- 兼容：旧配置 `{freq, time, weekday}` 读取时自动迁移（不改库，slot key 与 build 21/22 相同，升级后不会多跑或漏跑一期）；status 仍返回 `freq / time / weekday` 给旧版 App；旧版 App 原样带回这三个字段（例如只改保留份数）时不会覆盖新计划。
+- 失败重试沿用 build 21（失败后 1 小时重试、每期最多 3 次），短周期（每 1–3 小时）改为按周期的 1/4 重试（≥10 分钟），离下一期不到 5 分钟不再重试，不跨期；TG 失败推送写明下次重试或下一期时间。
+- Web / Android（Material 3 Chip + TimePicker，新页面 OneDriveScheduleActivity）/ iOS（原生分组 Form，新页面 OneDriveSchedule.swift）计划编辑页，修改时实时预览；状态卡片与 TG `/backup` 显示计划描述、下次与之后两次时间。
+- 版本：Android versionCode 23 / iOS build 23（versionName 仍 1.6.0）。
+
 ## 1.6.0（build 22）(2026-10-16)
 - 新功能：流量守护「推送并限速」（`action=throttle`，默认 1 Mbps，0.1–10000）：用户自己在实例上运行安装命令装 agent（纯 bash + tc HTB + systemd timer 每 5 分钟，无常驻进程），按守护专属 token 拉取状态；超限出站限速、SSH 端口不限；回落 / 跨月自动解除，可手动解除；agent 离线时 TG 提示「无法限速」，15 分钟无心跳提醒一次。token 失效（401/404）立即解除，24 小时连不上面板也解除。
 - 新功能：同一 agent 按端口 / 服务统计入站、出站流量（流量明细开关，任何动作都能开）：nftables 独立 table `inet tricloud_acct`（只有 counter），无 nft 时退回 iptables / ip6tables mangle 计数链；按 `ss -lntup` 监听端口自动增删计数规则并映射进程名（Docker 发布端口 → `docker:容器名`），非监听端口流量归「其他/出站连接」；每 5 分钟 POST 增量，失败下次补报；关闭 / 卸载时清理干净。面板按日聚合（`guard_port_traffic`，保留 90 天），Web / Android / iOS 显示今日 / 本月按端口和服务的 Top（入站、出站、合计 + 占比条），TG `/ports 实例名`。

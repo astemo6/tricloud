@@ -16,7 +16,7 @@
 | 代理 | **每账号独立出口代理**（http/https/socks5），代理密码加密、不回显 |
 | 安全 | **TOTP 二次验证**（防重放）；**API Token**（只读/完全，仅存哈希，不能触碰 2FA/备份/密码）；**审计日志**（写操作、来源、IP，保留 180 天） |
 | 备份 | **加密备份/恢复**：数据库 + 密钥整包用口令（scrypt + Fernet）加密，下载与恢复都需面板密码 |
-| 备份 | **OneDrive 定期备份**（1.6.0 build 21）：见下方「OneDrive 定期备份」 |
+| 备份 | **OneDrive 定期备份**（1.6.0 build 21；build 23 自定义频率：每 N 小时 / 每天多个时间 / 每周多选 / 每月含月末 / Cron）：见下方「OneDrive 定期备份」 |
 | 流量守护 | **推送并限速 + 端口流量明细**（1.6.0 build 22）：见下方「流量守护 agent」 |
 
 ## 实例改名 + 同步系统主机名（v1.5）
@@ -72,11 +72,12 @@
 - 设备码登录 Microsoft Graph（`/consumers` 或 `/common`），scope 只有 `Files.ReadWrite.AppFolder offline_access`，只能读写 OneDrive「应用 / <应用名>」文件夹。`client_id` 由用户注册自己的公共客户端应用后填写（教程见 `docs/api-credentials.md` 第四节）。
 - 备份内容：`tricloud.db`（SQLite backup API 一致快照）+ `fernet.key` + `meta.json` 打 zip，用备份密码 scrypt（N=2^15, r=8, p=1）派生密钥、AES-256-GCM 加密，文件 `tricloud-backup-YYYYMMDD-HHMMSS.tcod`；≤4MB 直接 PUT，更大用 upload session（3.125 MiB 分片）。
 - 定时：每天 / 每周（星期几）+ HH:MM，按面板时区；保留最近 N 份（默认 30，只删自己生成的文件）；失败 TG 通知，1 小时后重试，每期最多 3 次；成功写审计 `onedrive-backup`。任务类型 `onedrive_backup`（面板级任务，account_id=0），任务抽屉可看日志。
+- 计划（build 23）：`mode` = `hourly`（`every_hours` 1–24、`minute`、`start_hour`）/ `daily`（`times` 多个 HH:MM）/ `weekly`（`weekdays` 多选 0=周一 + `times`）/ `monthly`（`days` 1–31 + `last_day` 月末 + `times`，没有该日的月份跳过）/ `cron`（标准 5 段，自写解析器，支持 `* , - /`、数字、英文缩写、@daily 等宏，日/周按 Vixie cron 规则取或）。按面板时区墙上时间计算，DST 不重复不漏跑；两次至少间隔 30 分钟；`POST /api/onedrive/schedule/preview` 返回描述与接下来 3 次（不保存，不进审计）。旧配置 `freq/time/weekday` 读取时自动迁移（slot key 不变），status 仍返回这三个字段兼容旧版 App；旧版 App 原样带回时不会覆盖新计划。重试：周期 ≥4 小时 1 小时后重试，更短的周期按周期 1/4（≥10 分钟），每期最多 3 次，只在本期内。TG `/backup` 显示计划描述、下次与之后两次时间。
 - 备份密码（build 22 起）：只要求不能为空、两次输入一致，不限长度和复杂度。绑定：填 client_id 保存后点蓝色「绑定 OneDrive」才会出现代码（未绑定时页面会提示）。
 - 恢复：选一份 + 备份密码 + 二次确认；先在 `data/pre-restore-时间/` 存当前快照，校验完整性与密钥匹配后替换 db + key，保留当前机器的 OneDrive 绑定，所有会话作废；Docker 里随后退出进程由 restart 策略拉起（`TRICLOUD_RESTART_AFTER_RESTORE` 可覆盖）。
 - 离线解密：`python -m tools.decrypt_backup 文件 [密码] 输出目录`（只依赖 cryptography）。
 - API Token：只能 GET 状态 / 列表与 `POST /api/onedrive/backup`，其余（绑定、设置、恢复、解绑）403。TG：`/backup` 立即备份 + 状态，`/backup status` 只看状态。
-- 接口：`GET /api/onedrive`、`POST /api/onedrive/config`、`POST /api/onedrive/bind`、`POST /api/onedrive/bind/poll`、`DELETE /api/onedrive/bind?confirm=true`（`pending_only=true` 取消待授权）、`POST /api/onedrive/backup`、`GET /api/onedrive/backups`、`POST /api/onedrive/restore`。
+- 接口：`GET /api/onedrive`、`POST /api/onedrive/config`、`POST /api/onedrive/bind`、`POST /api/onedrive/bind/poll`、`DELETE /api/onedrive/bind?confirm=true`（`pending_only=true` 取消待授权）、`POST /api/onedrive/backup`、`GET /api/onedrive/backups`、`POST /api/onedrive/restore`、`POST /api/onedrive/schedule/preview`（build 23）。
 
 ## 流量守护 agent：推送并限速 + 按端口 / 服务的流量明细（1.6.0 build 22）
 - **推送并限速**：流量守护「到达上限后」新增第三种动作 `throttle`，限速默认 **1 Mbps**（0.1–10000，出站）。超限时面板把这条守护标记为「已限速」并推送 Telegram；滚动窗口回落到上限以下、或月度模式跨月（`release_due`，不查云指标）自动解除，也可手动「解除限速」（本期内不再自动限速）。agent 离线 / 未安装时 TG 文案注明「无法限速」；装过的 agent 超过 15 分钟没心跳推送一次「限速 agent 离线」，恢复心跳后重置。
@@ -99,6 +100,7 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 
 | 版本 | 内容 |
 |---|---|
+| 1.6.0（build 23） | OneDrive 备份频率自定义：每 N 小时、每天多个时间点、每周多选星期、每月指定日期（含月末）、Cron 表达式，保存前预览接下来 3 次，旧设置自动迁移，Web + Android + iOS + TG |
 | 1.6.0（build 22） | 流量守护「推送并限速」（实例自装 bash + tc agent，默认 1 Mbps，SSH 不限）+ 按端口 / 服务的流量明细（nftables / iptables 只计数，今日 / 本月 Top，保留 90 天，TG `/ports`）；OneDrive 绑定按钮更醒目、备份密码不再限制长度，Web + Android + iOS |
 | 1.6.0（build 21） | OneDrive 定期备份（设备码绑定、每天 / 每周、保留 N 份、立即备份、列表与恢复、解绑、TG `/backup`、离线解密工具），Web + Android + iOS |
 | 1.6.0（build 17） | 首页 AWS 实例数包含 Lightsail（显示为「N 台（运行 X）· EC2 a · Lightsail b」） |

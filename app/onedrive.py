@@ -28,7 +28,7 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
-from . import core
+from . import core, od_schedule
 
 SCOPE = "Files.ReadWrite.AppFolder offline_access"
 TENANTS = ("consumers", "common")
@@ -53,7 +53,7 @@ HDR_LEN = len(MAGIC) + 4 + 16 + 12
 # settings 键
 K_CLIENT, K_TENANT, K_TOKEN, K_PENDING, K_PW, K_CFG, K_STATE = (
     "onedrive_client_id", "onedrive_tenant", "onedrive_token", "onedrive_pending", "onedrive_password", "onedrive_cfg", "onedrive_state")
-CFG_DEFAULT = {"enabled": True, "freq": "daily", "time": "03:30", "weekday": 0, "keep": KEEP_DEFAULT}
+CFG_DEFAULT = {"enabled": True, "freq": "daily", "time": "03:30", "weekday": 0, "keep": KEEP_DEFAULT}   # build 21 格式（旧库里就是这样）
 
 # 测试替换点
 _transport = None          # httpx.MockTransport
@@ -81,8 +81,18 @@ def tenant():
 
 
 def cfg():
-    c = dict(CFG_DEFAULT)
-    c.update({k: v for k, v in (core.get_setting(K_CFG) or {}).items() if k in CFG_DEFAULT})
+    """当前配置（规范化后）：enabled / keep + build 23 计划字段（mode、times、weekdays、days、last_day、every_hours、minute、
+    start_hour、cron）+ 兼容旧版 App 的 freq / time / weekday。旧库只有 freq/time/weekday 时读取时自动迁移，不写库。"""
+    raw = core.get_setting(K_CFG) or {}
+    c = {"enabled": True, "keep": KEEP_DEFAULT}
+    if "enabled" in raw:
+        c["enabled"] = bool(raw["enabled"])
+    try:
+        k = int(raw.get("keep", KEEP_DEFAULT))
+        c["keep"] = k if 1 <= k <= KEEP_MAX else KEEP_DEFAULT
+    except (TypeError, ValueError):
+        pass
+    c.update(od_schedule.norm(raw))
     return c
 
 
@@ -110,28 +120,16 @@ def password():
     return core.get_secret_setting(K_PW, "") or ""
 
 
-def validate_cfg(body):
-    """校验并返回要合并进 onedrive_cfg 的字段（只含 body 里给了的）。"""
-    out = {}
+def validate_cfg(body, cur=None):
+    """校验并返回 (要写入的完整配置, 改了哪些项)。计划字段见 od_schedule.apply（兼容旧版 freq/time/weekday）。"""
+    c = dict(cur or cfg())
+    keys = []
     if "enabled" in body:
         v = body["enabled"]
-        out["enabled"] = v.strip().lower() not in ("0", "false", "no", "off", "") if isinstance(v, str) else bool(v)
-    if "freq" in body:
-        if body["freq"] not in ("daily", "weekly"):
-            raise ODError("频率只能是 daily（每天）或 weekly（每周）", "config")
-        out["freq"] = body["freq"]
-    if "time" in body:
-        if not TIME_RE.match(str(body["time"] or "")):
-            raise ODError("时间格式应为 HH:MM（24 小时制）", "config")
-        out["time"] = str(body["time"])
-    if "weekday" in body:
-        try:
-            wd = int(body["weekday"])
-        except (TypeError, ValueError):
-            raise ODError("星期需为 0（周一）~6（周日）", "config")
-        if not 0 <= wd <= 6:
-            raise ODError("星期需为 0（周一）~6（周日）", "config")
-        out["weekday"] = wd
+        en = v.strip().lower() not in ("0", "false", "no", "off", "") if isinstance(v, str) else bool(v)
+        if en != c["enabled"]:
+            keys.append("enabled")
+        c["enabled"] = en
     if "keep" in body:
         try:
             k = int(body["keep"])
@@ -139,8 +137,32 @@ def validate_cfg(body):
             raise ODError(f"保留份数需为 1~{KEEP_MAX} 的整数", "config")
         if not 1 <= k <= KEEP_MAX:
             raise ODError(f"保留份数需为 1~{KEEP_MAX}", "config")
-        out["keep"] = k
-    return out
+        if k != c["keep"]:
+            keys.append("keep")
+        c["keep"] = k
+    try:
+        sc, sched_changed = od_schedule.apply(c, body)
+        if sched_changed or any(k in body for k in od_schedule.SCHED_KEYS):
+            od_schedule.check(sc, now_local())   # 能触发、间隔 ≥30 分钟
+    except od_schedule.ScheduleError as e:
+        raise ODError(str(e), "config")
+    c.update(sc)
+    if sched_changed:
+        keys.append("schedule")
+    return c, keys
+
+
+def preview(body):
+    """POST /api/onedrive/schedule/preview：不保存，返回计划描述与接下来 3 次备份时间（面板时区）。"""
+    c, _ = validate_cfg(body)
+    now = now_local()
+    try:
+        nxt = od_schedule.check(c, now)
+    except od_schedule.ScheduleError as e:
+        raise ODError(str(e), "config")
+    return {"ok": True, "desc": od_schedule.describe(c), "mode": c["mode"], "timezone": str(now.tzinfo),
+            "next_runs": [t.strftime("%Y-%m-%d %H:%M") for t in nxt], "next_runs_label": [od_schedule.label(t) for t in nxt],
+            "cfg": {k: c[k] for k in od_schedule.SCHED_KEYS}}
 
 
 def save_config(body):
@@ -174,14 +196,13 @@ def save_config(body):
             raise ODError("两次输入的备份密码不一致", "config")
         core.set_secret_setting(K_PW, pw)
         changed.append("password")
-    upd = validate_cfg(body)
-    if upd:
-        c = cfg()
-        c.update(upd)
-        core.set_setting(K_CFG, c)
-        changed += sorted(upd)
-        # 改了计划：从当前这一期开始算，不补跑已过去的那次
-        set_state(slot=slot_key(c, now_local()), slot_tries=0)
+    if any(k in body for k in ("enabled", "keep") + od_schedule.SCHED_KEYS):
+        c, keys = validate_cfg(body)
+        core.set_setting(K_CFG, c)     # 写入新格式（含 mode 等），同时保留 freq/time/weekday 给旧版 App
+        changed += keys
+        if "schedule" in keys or "enabled" in keys:
+            # 改了计划：从当前这一期开始算，不补跑已过去的那次
+            set_state(slot=slot_key(c, now_local()), slot_tries=0, failed_slot=None)
     return changed
 
 
@@ -671,38 +692,46 @@ def schedule_restart(delay=1.5):
 
 
 # ---------------- 定时 ----------------
-def _hm(c):
-    h, m = (c.get("time") or "03:30").split(":")
-    return int(h), int(m)
-
-
+# build 23：计划计算在 od_schedule（每 N 小时 / 每天多个时间点 / 每周多选 / 每月日期含月末 / Cron），按面板时区墙上时间。
+# slot key 格式不变（YYYY-MM-DD HH:MM），旧的每天 / 每周配置升级后 key 完全一致，不会多跑或漏跑一期。
 def slot_dt(c, now):
-    """当前所在这一期的计划时间（≤ now 的最近一次）。"""
-    h, m = _hm(c)
-    s = now.replace(hour=h, minute=m, second=0, microsecond=0)
-    if c.get("freq") == "weekly":
-        s -= dt.timedelta(days=(now.weekday() - int(c.get("weekday") or 0)) % 7)
-        if s > now:
-            s -= dt.timedelta(days=7)
-    elif s > now:
-        s -= dt.timedelta(days=1)
-    return s
+    """当前所在这一期的计划时间（≤ now 的最近一次，带面板时区）；8 年内没有返回 None。"""
+    s = od_schedule.prev_run(od_schedule.norm(c), now)
+    return s.replace(tzinfo=now.tzinfo) if s is not None and now.tzinfo else s
 
 
 def slot_key(c, now):
-    return slot_dt(c, now).strftime("%Y-%m-%d %H:%M")
+    s = slot_dt(c, now)
+    return s.strftime("%Y-%m-%d %H:%M") if s else "-"
+
+
+def next_runs(c, now, count=3):
+    return [t.replace(tzinfo=now.tzinfo) if now.tzinfo else t for t in od_schedule.next_runs(od_schedule.norm(c), now, count)]
 
 
 def next_run(c, now):
-    s = slot_dt(c, now)
-    return s + dt.timedelta(days=7 if c.get("freq") == "weekly" else 1)
+    n = next_runs(c, now, 1)
+    return n[0] if n else None
 
 
 RETRY_MAX, RETRY_GAP = 3, 3600
 
 
+def retry_info(c, key):
+    """(这一期的重试间隔秒, 下一期 naive datetime 或 None)。周期 ≥4 小时间隔 1 小时；更短的周期按周期 1/4（≥10 分钟）。"""
+    try:
+        slot = dt.datetime.strptime(key, "%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return RETRY_GAP, None
+    n = od_schedule.norm(c)
+    nxt = od_schedule.next_runs(n, slot, 1)
+    period = (nxt[0] - slot).total_seconds() if nxt else 86400.0
+    return min(RETRY_GAP, od_schedule.retry_gap(period)), (nxt[0] if nxt else None)
+
+
 def due(now):
-    """调度器每分钟调用：该跑返回 slot key，否则 None。失败的一期最多再试到 3 次（间隔 ≥1 小时）。"""
+    """调度器每分钟调用：该跑返回 slot key，否则 None。失败的一期最多试 3 次（周期 ≥4 小时间隔 1 小时，短周期按周期 1/4），
+    重试只在本期内进行：到了下一期 key 变了，按新的一期正常跑，不会跨期补跑。"""
     c = cfg()
     if not c["enabled"] or not bound() or not password():
         return None
@@ -711,12 +740,31 @@ def due(now):
     if not s.get("slot"):            # 第一次：从当前这一期开始算，不立刻补跑
         set_state(slot=key, slot_tries=0)
         return None
+    if key == "-":
+        return None
     if s.get("slot") != key:
         return key
-    if s.get("last_result") == "failed" and s.get("failed_slot") == key and int(s.get("slot_tries") or 0) < RETRY_MAX \
-            and time.time() - int(s.get("last_try") or 0) >= RETRY_GAP:
-        return key
+    if s.get("last_result") == "failed" and s.get("failed_slot") == key and int(s.get("slot_tries") or 0) < RETRY_MAX:
+        gap, nxt = retry_info(c, key)
+        if time.time() - int(s.get("last_try") or 0) >= gap:
+            # 离下一期不到 5 分钟就不再重试，交给下一期
+            if nxt is None or (nxt - od_schedule._naive(now)).total_seconds() > 300:
+                return key
     return None
+
+
+def retry_text(key):
+    """失败推送里的重试说明（只会在本期内重试）。"""
+    s = state()
+    left = RETRY_MAX - int(s.get("slot_tries") or 0)
+    gap, nxt = retry_info(cfg(), key)
+    nxt_s = f"{nxt:%m-%d %H:%M}" if nxt else "-"
+    when = dt.datetime.fromtimestamp(int(s.get("last_try") or time.time()) + gap, now_local().tzinfo).replace(tzinfo=None)
+    if left > 0 and (nxt is None or (nxt - when).total_seconds() > 300):
+        return f"{'1 小时' if gap >= 3600 else f'{gap // 60} 分钟'}后自动重试（本期还剩 {left} 次）"
+    if left > 0:
+        return f"离下一期太近，不再重试，下一次计划时间 {nxt_s}"
+    return f"本期已试 {RETRY_MAX} 次，等下一次计划时间 {nxt_s}"
 
 
 def mark_try(key):
@@ -731,8 +779,11 @@ def status_view():
     t = token() or {}
     now = now_local()
     ready = bound() and bool(password()) and c["enabled"]
-    nr = next_run(c, now) if ready else None
-    return {"client_id": client_id(), "tenant": tenant(), "scope": SCOPE, "bound": bound(), "account": t.get("account") or {},
+    nrs = next_runs(c, now, 3) if ready else []
+    nr = nrs[0] if nrs else None
+    return {"desc": od_schedule.describe(c), "next_runs": [t.strftime("%Y-%m-%d %H:%M") for t in nrs],
+            "next_runs_label": [od_schedule.label(t) for t in nrs], "modes": od_schedule.MODE_NAMES,
+            "min_gap_minutes": od_schedule.MIN_GAP_MIN, "client_id": client_id(), "tenant": tenant(), "scope": SCOPE, "bound": bound(), "account": t.get("account") or {},
             "pending": pending_view(), "password_set": bool(password()), "cfg": c, "ready": ready,
             "next_run": nr.strftime("%Y-%m-%d %H:%M") if nr else None, "timezone": str(now.tzinfo),
             "state": {k: s.get(k) for k in ("last_ok", "last_file", "last_size", "last_error", "last_result", "last_try",
@@ -747,10 +798,11 @@ def status_text():
     lines = [f"绑定：{'已绑定' if v['bound'] else '未绑定'}" + (f"（{v['account'].get('folder')}）" if v["account"].get("folder") else ""),
              f"备份密码：{'已设置' if v['password_set'] else '未设置'}"]
     c = v["cfg"]
-    plan = ("每天 " if c["freq"] == "daily" else f"每周{WEEKDAYS[int(c['weekday'])][1:]} ") + c["time"]
-    lines.append(f"计划：{plan}（{v['timezone']}），保留 {c['keep']} 份，{'已启用' if c['enabled'] else '已停用'}")
-    if v["next_run"]:
-        lines.append(f"下次：{v['next_run']}")
+    lines.append(f"计划：{v['desc']}（{v['timezone']}），保留 {c['keep']} 份，{'已启用' if c['enabled'] else '已停用'}")
+    if v["next_runs_label"]:
+        lines.append(f"下次：{v['next_runs_label'][0]}")
+        if len(v["next_runs_label"]) > 1:
+            lines.append("之后：" + "、".join(x[5:] for x in v["next_runs_label"][1:]))
     if s.get("last_ok"):
         lines.append(f"上次成功：{dt.datetime.fromtimestamp(s['last_ok'], now_local().tzinfo):%Y-%m-%d %H:%M} {s.get('last_file') or ''}"
                      + (f"（{(s.get('last_size') or 0) / 1024:.1f} KB）" if s.get("last_size") else ""))

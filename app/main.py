@@ -33,6 +33,7 @@ app = FastAPI(title="TriCloud", version=VERSION, lifespan=lifespan, docs_url=Non
 PUBLIC = {"/api/login", "/api/health",
           "/api/guard-agent/state", "/api/guard-agent/install.sh", "/api/guard-agent/uninstall.sh"}   # agent 凭守护专属 token / 通用卸载脚本
 AUDIT_SKIP = {"/api/logout", "/api/onedrive/bind/poll",   # 设备码轮询每几秒一次，绑定成功由路由自己写 onedrive-bind
+              "/api/onedrive/schedule/preview",          # build 23：编辑计划时实时预览，只读不保存
               "/api/guard-agent/state"}                  # build 22：agent 每 5 分钟 POST 心跳 + 流量明细，不进审计
 AGENT_RESET_RE = re.compile(r"^/api/traffic-guards/\d+/agent/reset$")
 AUDIT_SKIP_OK = {("DELETE", "/api/audit")}   # 清空审计成功时路由自己写了 audit-clear，中间件不再追加一条

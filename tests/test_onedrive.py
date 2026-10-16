@@ -200,10 +200,11 @@ def post(p, body=None):
 
 # ================= 1. 路由与默认状态 =================
 api = [r for r in main.app.routes if getattr(r, "path", "").startswith("/api/onedrive")]
-ok("routes: 8 onedrive routes", len(api) == 8)
+ok("routes: 9 onedrive routes (build 23 +schedule/preview)", len(api) == 9)
 s = g("/api/onedrive").json()
 ok("status: defaults (unbound, daily 03:30, keep 30, enabled, consumers)",
-   s["bound"] is False and s["cfg"] == {"enabled": True, "freq": "daily", "time": "03:30", "weekday": 0, "keep": 30}
+   s["bound"] is False and {k: s["cfg"][k] for k in ("enabled", "freq", "time", "weekday", "keep")} == {"enabled": True, "freq": "daily", "time": "03:30", "weekday": 0, "keep": 30}
+   and s["cfg"]["mode"] == "daily" and s["cfg"]["times"] == ["03:30"]
    and s["tenant"] == "consumers" and s["password_set"] is False and s["next_run"] is None and s["pending"] is None)
 ok("status: scope is exactly Files.ReadWrite.AppFolder offline_access", s["scope"] == "Files.ReadWrite.AppFolder offline_access")
 ok("status: timezone defaults to Asia/Shanghai", s["timezone"] == "Asia/Shanghai")

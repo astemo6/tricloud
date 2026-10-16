@@ -13,7 +13,7 @@
 - **Azure**：创建 VM、资源组、配额、Foundry、订阅信息
 - **成本**：三家账单、Credit 与教育优惠到期提醒、免费额度护栏与免费体检（OCI A1：免费号 2C/12G，付费号 4C/24G）
 - **运维**：流量守护（超限自动关机 / 实例自装 agent 限速 + 按端口/服务的流量明细）、IP 连通监控与自动换 IP、DNS 联动（Cloudflare）、开机脚本模板、随机开机密码、跨云迁移、任务实时日志、账号健康度
-- **安全**：TOTP 二次验证、API Token、审计日志、加密备份 / 恢复
+- **安全**：TOTP 二次验证、API Token、审计日志、加密备份 / 恢复、OneDrive 定期备份（每 N 小时 / 每天多个时间 / 每周 / 每月 / Cron）
 
 不提供 Web SSH、串口控制台或远程终端。功能详解见 [docs/FEATURES.md](docs/FEATURES.md)，更新日志见 [CHANGELOG.md](CHANGELOG.md)。
 

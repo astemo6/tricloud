@@ -33,5 +33,6 @@
         <activity android:name=".SecurityActivity" />
         <activity android:name=".OneDriveActivity" />
         <activity android:name=".GuardAgentActivity" />
+        <activity android:name=".OneDriveScheduleActivity" />
     </application>
 </manifest>

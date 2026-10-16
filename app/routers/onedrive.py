@@ -46,6 +46,12 @@ async def od_config(body: dict = Body(...)):
     return v
 
 
+@router.post("/api/onedrive/schedule/preview")
+async def od_schedule_preview(body: dict = Body(...)):
+    """build 23：不保存，预览计划描述与接下来 3 次备份时间；非法配置 400（友好提示）。"""
+    return await _call(onedrive.preview, body)
+
+
 @router.post("/api/onedrive/bind")
 async def od_bind():
     return await _call(onedrive.bind_start)

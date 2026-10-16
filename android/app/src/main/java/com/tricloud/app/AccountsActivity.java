@@ -53,7 +53,7 @@ public class AccountsActivity extends BaseActivity {
     static final String[] PSHORT = {"OCI", "AWS", "Azure"};
     static final Map<String, String> PROV_HINT = new LinkedHashMap<>();
     static {
-        PROV_HINT.put("oci", "在 OCI 控制台「我的概要信息 → API 密钥」生成。");
+        PROV_HINT.put("oci", "OCI 控制台右上角头像 →「用户设置」(User settings) →「令牌和密钥」(Tokens and keys) →「添加 API 密钥」生成。");
         PROV_HINT.put("aws", "建议使用仅含 EC2/Lightsail/CloudFront/Service Quotas/CE 权限的 IAM 用户。");
         PROV_HINT.put("azure", "用 az ad sp create-for-rbac --role Contributor --scopes /subscriptions/<订阅 ID> 生成。");
     }

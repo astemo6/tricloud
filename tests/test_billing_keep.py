@@ -276,8 +276,9 @@ with TestClient(main.app) as c:
         r = c.post(U, json={"confirm": True})
         ok("route unknown plan: queries account type once, then refuses", r.status_code == 400 and "PAYG" in r.json()["detail"] and fp.calls == ["account_type"])
         set_plan(oid, "PAYG")
-        ok("route: size_gb range 10.5–20 enforced", c.post(U, json={"size_gb": 10, "confirm": True}).status_code == 400
-           and c.post(U, json={"size_gb": 25, "confirm": True}).status_code == 400 and c.post(U, json={"size_gb": "x", "confirm": True}).status_code == 400)
+        ok("route: size_gb range 0.5–20 enforced", c.post(U, json={"size_gb": 0.4, "confirm": True}).status_code == 400
+           and c.post(U, json={"size_gb": 25, "confirm": True}).status_code == 400 and c.post(U, json={"size_gb": "x", "confirm": True}).status_code == 400
+           and c.post(U, json={"size_gb": -1, "confirm": True}).status_code == 400)
         ok("route: needs confirm", c.post(U, json={}).status_code == 400 and not core.q("SELECT id FROM tasks WHERE type='billing_keep'"))
         j = c.get(U).json()
         ok("route PAYG: GET status + note + defaults", j["eligible"] and j["plan"] == "paid" and j["default_gb"] == 11 and "$0.02–0.03" in j["note"]
@@ -339,7 +340,7 @@ ok("task: registered + named", "billing_keep" in tasks.ONCE_HANDLERS and tasks.T
 tid2 = tasks.create_task("billing_keep", oid, {"name": "保号账单", "size_bytes": 1, "resume": None})
 ok("task: not auto-resumed on restart (interrupted, user re-starts = resume)", tasks.recover_on_startup()["interrupted"] >= 1
    and core.q("SELECT status FROM tasks WHERE id=?", (tid2,), one=True)["status"] == "interrupted")
-ok("route constants: 10.5–20, default 11", (oci_routes.BK_MIN_GB, oci_routes.BK_MAX_GB, oci_routes.BK_DEFAULT_GB) == (10.5, 20, 11))
+ok("route constants: 0.5–20, default 11", (oci_routes.BK_MIN_GB, oci_routes.BK_MAX_GB, oci_routes.BK_DEFAULT_GB) == (0.5, 20, 11))
 
 # ================= 5. Web / demo 静态检查 =================
 web = open(os.path.join(ROOT, "web", "js", "oci.js"), encoding="utf-8").read()

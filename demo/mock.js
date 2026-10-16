@@ -212,7 +212,24 @@
   var vols = { 1: [{ id: "ocid1.volume.demo1", name: "data-1", size_gb: 50, vpus_per_gb: 10, state: "AVAILABLE", attached_to: "ocid1.instance.oc1.ap-tokyo-1.demo1", attachment_id: "att-demo1", device: "/dev/oracleoci/oraclevdb" }] };
   var boots = { 1: [{ id: "bv1", name: "arm-main (Boot Volume)", size_gb: 100, vpus_per_gb: 10, state: "AVAILABLE" }, { id: "bv2", name: "amd-micro (Boot Volume)", size_gb: 47, vpus_per_gb: 10, state: "AVAILABLE" }] };
   var bkeep = {};
-  var buckets = { 1: [{ name: "backup", created: "2026-03-02 10:11", objs: [{ name: "db/2026-10-01.sql.gz", size: 12582912, created: "2026-10-01 03:00" }, { name: "db/2026-10-08.sql.gz", size: 13107200, created: "2026-10-08 03:00" }, { name: "readme.txt", size: 312, created: "2026-03-02 10:12" }] }] };
+  // v1.6 保号账单「先检测已有存储」：其他区域已有的 Bucket（演示：类似用户手动建的 alive）
+  var bucketsOther = { 1: [{ name: "alive", region: "us-sanjose-1", created: "2025-06-27 08:30", size: Math.round(3.2 * 1073741824), count: 1, storage_tier: "Standard", auto_tiering: "Disabled" },
+    { name: "media", region: "us-sanjose-1", created: "2025-11-02 14:05", size: Math.round(1.5 * 1073741824), count: 37, storage_tier: "Standard", auto_tiering: "InfrequentAccess" }] };
+  function bucketRow(b) { var sz = b.objs.reduce(function (a, o) { return a + (+o.size || 0); }, 0); return { name: b.name, created: b.created, size: sz, count: b.objs.length, storage_tier: b.tier || "Standard", auto_tiering: "Disabled" }; }
+  function bkTier(b) { return b.size == null ? "unknown" : b.storage_tier === "Archive" ? "archive" : b.storage_tier === "Standard" ? (b.auto_tiering && b.auto_tiering !== "Disabled" ? "autotier" : "standard") : "unknown"; }
+  function bkFillGb(used) { return Math.round(Math.max(0.5, Math.ceil(Math.round((11 - used) * 1e6) / 1e5) / 10) * 10) / 10; }
+  function bkScan(id) { var home = (ACCT_TYPES[id] || {}).home_region || "ap-tokyo-1", G = 1073741824, bks = bkeep[id] || {};
+    var rows = (buckets[id] || []).map(function (b) { return Object.assign(bucketRow(b), { region: home }); }).concat(bucketsOther[id] || []);
+    if (bks.exists || bks.task) rows.push({ name: "tricloud-billing-keep", region: home, created: "2026-10-16 15:00", size: bks.exists ? bks.size : 0, count: bks.exists ? 1 : 0, storage_tier: "Standard", auto_tiering: "Disabled", billing_keep: true });
+    var by = { standard: 0, autotier: 0, archive: 0, unknown: 0 };
+    rows.forEach(function (r) { r.tier = bkTier(r); if (r.size != null) by[r.tier] += r.size; });
+    rows.sort(function (a, b) { return (b.size || 0) - (a.size || 0); });
+    var std = by.standard / G, over = std > 10, r3 = function (v) { return Math.round(v * 1000) / 1000; };
+    return { buckets: rows, bytes: by, standard_gb: r3(std), autotier_gb: r3(by.autotier / G), archive_gb: r3(by.archive / G), unknown_count: 0, free_gb: 10, over_free: over,
+      short_gb: over ? 0 : Math.max(0.1, Math.ceil(Math.round((10 - std) * 1e6) / 1e5) / 10), fill_gb: bkFillGb(std), target_gb: 11,
+      regions: [home, "us-sanjose-1"], home: home, compartments: 1, compartments_truncated: false, errors: [], requests: 2 + rows.length, scanned_at: new Date().toISOString().slice(0, 19).replace("T", " "), cached: false, age: 0 }; }
+  var buckets = { 1: [{ name: "backup", created: "2026-03-02 10:11", objs: [{ name: "db/2026-10-01.sql.gz", size: 12582912, created: "2026-10-01 03:00" }, { name: "db/2026-10-08.sql.gz", size: 13107200, created: "2026-10-08 03:00" }, { name: "readme.txt", size: 312, created: "2026-03-02 10:12" }] },
+    { name: "logs-archive", tier: "Archive", created: "2025-12-01 09:00", objs: [{ name: "2025.tar", size: 2147483648, created: "2025-12-31 23:00" }] }] };
   var regionSubs = { 1: ["ap-tokyo-1", "ap-osaka-1"], 2: ["ap-seoul-1"] };
   var ALL_REGIONS = [["ap-tokyo-1", "NRT"], ["ap-osaka-1", "KIX"], ["ap-seoul-1", "ICN"], ["ap-chuncheon-1", "YNY"], ["ap-singapore-1", "SIN"], ["us-ashburn-1", "IAD"], ["us-phoenix-1", "PHX"], ["us-sanjose-1", "SJC"], ["eu-frankfurt-1", "FRA"], ["uk-london-1", "LHR"]];
   var reserved = { 1: [{ id: "res-demo1", ip: "203.0.113.200", name: "reserved-1", state: "AVAILABLE", assigned: false }] };
@@ -327,11 +344,12 @@
         var nip = "203.0.113." + (60 + rnd(30)); return { ok: true, task_id: addTask("net500m", id, "下行 500Mbps · " + i5.name, { extra: ["准备 NAT 网关…", "创建网络负载均衡器（保留源地址，TCP+UDP 全端口转发）…", "创建 NAT 路由表并绑定到实例网卡…"], done: "已开启，新入口 IP " + nip, onDone: function () { nlb500[i5.id] = nip; } }) }; }
       return { ok: true, task_id: addTask("net500m", id, "关闭 500Mbps · " + i5.name, { extra: ["还原实例网卡路由…", "删除网络负载均衡器…"], done: "已关闭并还原原公网 IP 入站", onDone: function () { delete nlb500[i5.id]; } }) }; }
     // v1.6 保号账单（仅 PAYG）：演示里 1 秒约 1 GiB，真实上传按 VPS 到 OCI 的带宽
+    if (p.match(/\/oci\/billing-keep\/scan$/)) { if ((ACCT_TYPES[id] || {}).plan_type !== "PAYG") return { __status: 400, detail: "演示：仅 PAYG 账号检测" }; return bkScan(id); }
     if (p.match(/\/oci\/billing-keep$/)) { var plan = (ACCT_TYPES[id] || {}).plan_type, bks = bkeep[id] = bkeep[id] || { exists: false, size: 0, task: null };
-      var bkPlan = plan === "PAYG" ? "paid" : plan === "FREE_TIER" ? "free" : "unknown", BKN = "会在主区域标准层私有 Bucket tricloud-billing-keep 里存放约 11 GB 的全零对象，超出 10 GB 免费额度，每月约 $0.02–0.03 账单；上传走入网流量，不计费，也不会产生出网流量。";
+      var bkPlan = plan === "PAYG" ? "paid" : plan === "FREE_TIER" ? "free" : "unknown", BKN = "会在主区域标准层私有 Bucket tricloud-billing-keep 里存放全零对象，让标准层总量（含已有 Bucket）补足到约 11 GB、超出 10 GB 免费额度，每月约 $0.02–0.03 账单；上传走入网流量，不计费，也不会产生出网流量。";
       var bkT = bks.task && tasks.find(function (x) { return x.id === bks.task.id; });
       var bkView = bkT ? { id: bkT.id, status: bkT.status, message: bkT.message, updated: bkT.updated, uploaded: bks.task.uploaded, total: bks.task.total, size: bks.exists ? bks.size : null } : null;
-      if (method === "GET") { var bo = { plan: bkPlan, eligible: bkPlan === "paid", note: BKN, default_gb: 11, min_gb: 10.5, max_gb: 20, task: bkView };
+      if (method === "GET") { var bo = { plan: bkPlan, eligible: bkPlan === "paid", note: BKN, default_gb: 11, min_gb: 0.5, max_gb: 20, task: bkView };
         if (bkPlan === "free") { bo.hint = "免费号 20GB 内不收费，无需操作"; return bo; }
         if (bkPlan !== "paid") { bo.hint = "未能识别账号类型（需 osp-gateway 读权限），无法确认是 PAYG 升级号，暂不开放"; return bo; }
         return Object.assign(bo, { region: (ACCT_TYPES[id] || {}).home_region || "ap-tokyo-1", namespace: "demonamespace", bucket: "tricloud-billing-keep", object: "billing-keep.bin",
@@ -339,7 +357,7 @@
       if (method === "DELETE") { if (q.get("confirm") !== "true") return { __status: 400, detail: "删除保号对象需确认" }; if (bkT && bkT.status === "running") return { __status: 409, detail: "上传任务仍在运行，请先在任务里停止" };
         var had = bks.exists; bks.exists = false; bks.size = 0; bks.task = null; return { ok: true, deleted: had, aborted: 0, bucket_deleted: true, region: "ap-tokyo-1" }; }
       var sg = body.size_gb === undefined || body.size_gb === "" ? 11 : +body.size_gb;
-      if (!(sg >= 10.5 && sg <= 20)) return { __status: 400, detail: "size_gb 范围 10.5–20" };
+      if (!(sg >= 0.5 && sg <= 20)) return { __status: 400, detail: "size_gb 范围 0.5–20" };
       if (bkPlan === "free") return { __status: 400, detail: "该账号是免费号：免费号 20GB 内不收费，无需操作" };
       if (bkPlan !== "paid") return { __status: 400, detail: "未能识别账号类型（需 osp-gateway 读权限），无法确认是 PAYG 升级号" };
       if (!body.confirm) return { __status: 400, detail: "会产生每月约 $0.02–0.03 的账单，需确认" };
@@ -350,7 +368,7 @@
       bks.task = { id: tidk, uploaded: 0, total: tot };
       var bkIv = setInterval(function () { var tt = tasks.find(function (x) { return x.id === tidk; }); if (!tt || tt.status !== "running" || !bks.task || bks.task.id !== tidk) return clearInterval(bkIv); bks.task.uploaded = Math.min(tot, bks.task.uploaded + Math.round(tot / 6)); }, 900);
       return { ok: true, task_id: tidk, total: tot, resumed: false, resumed_from: 0 }; }
-    if (p.match(/\/oci\/buckets$/) && method === "GET") return { namespace: "demonamespace", buckets: (buckets[id] || []).map(function (b) { return { name: b.name, created: b.created }; }), free_gb: 20 };
+    if (p.match(/\/oci\/buckets$/) && method === "GET") return { namespace: "demonamespace", buckets: (buckets[id] || []).map(bucketRow), free_gb: 20 };
     if (p.match(/\/oci\/buckets$/)) { var B = buckets[id] = buckets[id] || [];
       if (body.op === "create") { if (!/^[A-Za-z0-9_.-]{1,256}$/.test(body.name || "")) return { __status: 400, detail: "Bucket 名称只能包含字母、数字、- _ ." }; B.push({ name: body.name, created: new Date().toISOString().slice(0, 16).replace("T", " "), objs: [] }); return { ok: true }; }
       if (body.op === "delete") { var bb = B.find(function (x) { return x.name === body.name; }); if (bb && bb.objs.length) return { __status: 400, detail: "Bucket 不为空，请先删除其中的对象" }; buckets[id] = B.filter(function (x) { return x !== bb; }); return { ok: true }; } }

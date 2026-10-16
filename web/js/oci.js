@@ -242,8 +242,10 @@ export async function tabOciObjects(acc, box, bucket, prefix = "") {
     let d;
     try { d = await api(`/accounts/${acc.id}/oci/buckets?${rq(acc)}`); } catch (e) { $("#lb", box).innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
     $("#ns", box).textContent = `命名空间 ${d.namespace} · Always Free 共 ${d.free_gb} GB`;
-    $("#lb", box).innerHTML = `<div class="card"><table><tr><th>Bucket</th><th>创建时间</th><th></th></tr>${d.buckets.map((b) => `<tr><td><a href="javascript:void 0" data-open="${esc(b.name)}">📁 ${esc(b.name)}</a></td><td class="mono">${esc(b.created)}</td>
-      <td><button class="btn sm" data-open="${esc(b.name)}">打开</button> <button class="btn sm danger" data-delb="${esc(b.name)}">删除</button></td></tr>`).join("") || `<tr><td colspan=3 class="muted">暂无 Bucket</td></tr>`}</table></div>`;
+    $("#lb", box).innerHTML = `<div class="card"><table id="bkList"><tr><th>Bucket</th><th>大小</th><th>对象数</th><th>存储层</th><th>创建时间</th><th></th></tr>${d.buckets.map((b) => `<tr><td><a href="javascript:void 0" data-open="${esc(b.name)}">📁 ${esc(b.name)}</a></td>
+      <td${b.error ? ` title="${esc(b.error)}"` : ""}>${b.size == null ? "—" : fmtBytes(b.size)}</td><td>${b.count == null ? "—" : esc(b.count)}</td><td>${tierLabel(b)}</td><td class="mono">${esc(b.created)}</td>
+      <td><button class="btn sm" data-open="${esc(b.name)}">打开</button> <button class="btn sm danger" data-delb="${esc(b.name)}">删除</button></td></tr>`).join("") || `<tr><td colspan=6 class="muted">暂无 Bucket</td></tr>`}</table>
+      ${d.buckets.length ? `<p class="muted">大小、对象数为 OCI 定期统计的近似值，可能有几小时延迟。</p>` : ""}</div>`;
     $("#nb", box).onclick = async () => {
       const r = await modal("新建 Bucket", `<label>名称（字母、数字、- _ .）</label><input name="name" placeholder="backup">
         <label><input type="checkbox" name="public" style="width:auto"> 公开读取（任何人知道链接都能下载对象，慎用）</label>`, (bg) => post(`/accounts/${acc.id}/oci/buckets`, { op: "create", region: regionOf(acc) || undefined, ...form(bg) }), "创建");
@@ -285,12 +287,36 @@ export async function tabOciObjects(acc, box, bucket, prefix = "") {
   }));
 }
 
-// ---------- 18b. 保号账单（仅 PAYG 升级号）：主区域标准层存约 11 GB 全零对象，超出 10 GB 免费额度，每月约 $0.02–0.03 ----------
+// ---------- 18b. 保号账单（仅 PAYG 升级号）：先检测已有存储（所有已订阅区域的 Bucket），标准层补足到约 11 GB，超出 10 GB 免费额度，每月约 $0.02–0.03 ----------
 export const BK_TITLE = "一键生成保号账单";
 const gib = (n) => `${((+n || 0) / 1024 ** 3).toFixed(2)} GiB`;
-export async function billingKeepCard(acc, el, again) {
+const gb1 = (v) => `${(+v || 0).toFixed(2)} GB`;
+export function tierLabel(b) {
+  const t = b.tier || (b.storage_tier === "Archive" ? "archive" : b.storage_tier === "Standard" ? (b.auto_tiering && b.auto_tiering !== "Disabled" ? "autotier" : "standard") : "unknown");
+  return { standard: "标准", autotier: `标准 <span class="badge pending" title="开了自动分层：久未访问的对象会转到低频层">自动分层</span>`, archive: "归档", unknown: "—" }[t] || "—";
+}
+// 补足大小：11 − 已用，向上取 0.1，最小 0.5（与后端 fill_size_gb 一致）
+export function bkFill(used, target = 11) { return Math.max(0.5, Math.ceil(Math.round((target - (+used || 0)) * 1e6) / 1e5) / 10); }
+function bkScanHtml(s) {
+  const head = `<div>标准层已用 <b id="bkStd">${gb1(s.standard_gb)}</b> / 免费 ${s.free_gb} GB <span class="muted">（${s.regions.length} 个区域 · ${s.buckets.length} 个 Bucket${s.cached ? ` · ${Math.round(s.age / 60)} 分钟前检测` : ""}）</span>
+    <button class="btn sm" id="bkRescan">重新检测</button></div>`;
+  const verdict = s.over_free
+    ? `<p id="bkVerdict" class="al warn">✅ 已满足：标准层已超出 10 GB 免费额度，已经会产生小额账单，无需生成。</p>`
+    : `<p id="bkVerdict" class="al">还差 <b>${s.short_gb} GB</b> 才超出 10 GB 免费额度；建议补足 <b>${s.fill_gb} GB</b>，补足后标准层合计约 <b>${(s.standard_gb + s.fill_gb).toFixed(2)} GB</b>。</p>`;
+  const extra = [s.autotier_gb > 0 ? `另有 ${gb1(s.autotier_gb)} 在开了自动分层的标准层 Bucket 里（久未访问的对象会转低频层，未计入标准层）` : "",
+    s.archive_gb > 0 ? `归档层 ${gb1(s.archive_gb)}（归档层单独计免费额度，不计入标准层）` : "",
+    s.unknown_count ? `${s.unknown_count} 个 Bucket 读不到大小（显示 —，未计入）` : "",
+    (s.errors || []).length ? `部分区域读取失败：${s.errors.map((e) => esc(e.region)).join("、")}` : "",
+    s.compartments_truncated ? `区间太多，只检测了前 ${s.compartments} 个` : ""].filter(Boolean);
+  const rows = s.buckets.map((b) => `<tr><td class="mono">${esc(b.name)}${b.billing_keep ? ` <span class="badge">保号</span>` : ""}</td><td class="mono">${esc(b.region)}</td><td>${tierLabel(b)}</td>
+    <td>${b.size == null ? "—" : fmtBytes(b.size)}</td><td>${b.count == null ? "—" : esc(b.count)}</td></tr>`).join("");
+  return head + verdict + (extra.length ? `<p class="muted">${extra.join("；")}。</p>` : "")
+    + (rows ? `<details id="bkBuckets"><summary>已有 Bucket（${s.buckets.length}）</summary><table><tr><th>Bucket</th><th>区域</th><th>存储层</th><th>大小</th><th>对象数</th></tr>${rows}</table></details>` : `<p class="muted">没有找到已有 Bucket。</p>`)
+    + `<p class="muted">大小为 OCI 定期统计的近似值（approximateSize），刚上传的数据可能要几小时后才计入。</p>`;
+}
+export async function billingKeepCard(acc, el, again, rescan) {
   if (!el || !el.isConnected) return;
-  const reload = () => billingKeepCard(acc, el, true);
+  const reload = (rs) => billingKeepCard(acc, el, true, rs);
   let d;
   try { d = await api(`/accounts/${acc.id}/oci/billing-keep`); } catch (e) { el.innerHTML = `<h3>${BK_TITLE}</h3><div>❌ ${esc(e.message)}</div>`; return; }
   if (!el.isConnected) return;
@@ -302,31 +328,51 @@ export async function billingKeepCard(acc, el, again) {
     const pct = t.total ? Math.floor((t.uploaded * 100) / t.total) : 0;
     body += `<div id="bkProg"><progress max="100" value="${pct}" style="width:100%"></progress>
       <div>上传中：${gib(t.uploaded)} / ${gib(t.total)}（${pct}%） · <a href="javascript:void 0" id="bkTask">任务 #${t.id}</a></div></div>`;
-  } else if (d.exists) {
+    el.innerHTML = head + body;
+    const tl = $("#bkTask", el); if (tl) tl.onclick = () => window.TaskDrawer && window.TaskDrawer.open(t.id);
+    el.dataset.wasRunning = "1";
+    setTimeout(() => billingKeepCard(acc, el, true), again ? 3000 : 2000);
+    return;
+  }
+  // 先检测已有存储（上传刚结束或点了「重新检测」时跳过 5 分钟缓存）
+  const fresh = rescan || el.dataset.wasRunning === "1";
+  delete el.dataset.wasRunning;
+  el.innerHTML = head + body + `<div id="bkScan"><span class="spin"></span> 正在检测已有存储…</div>`;
+  let s = null, scanErr = "";
+  try { s = await api(`/accounts/${acc.id}/oci/billing-keep/scan${fresh ? "?refresh=true" : ""}`); } catch (e) { scanErr = e.message; }
+  if (!el.isConnected) return;
+  const scanHtml = s ? bkScanHtml(s) : `<p class="al warn">⚠️ 检测已有存储失败：${esc(scanErr)}。无法确认标准层已用量，默认按 ${d.default_gb} GB 生成。</p><button class="btn sm" id="bkRescan">重新检测</button>`;
+  const over = !!(s && s.over_free), used = s ? +s.standard_gb : 0, defGb = s ? s.fill_gb : d.default_gb;
+  if (d.exists) {
     body += `<div id="bkDone">✅ 已存在保号对象 <span class="mono">${esc(d.bucket)}/${esc(d.object)}</span>：<b>${gib(d.size)}</b>（${esc(d.region)} · ${esc(d.storage_tier || "Standard")}）</div>
-      <div class="bar"><button class="btn danger" id="bkDel">删除</button></div>`;
+      <div id="bkScan">${scanHtml}</div><div class="bar"><button class="btn danger" id="bkDel">删除</button></div>`;
   } else {
     const pend = (d.pending_uploads || []).length, resumable = pend && t && ["failed", "stopped", "interrupted"].includes(t.status) && t.uploaded;
-    body += (t && t.status !== "done" ? `<p class="muted">上次任务 #${t.id}：${esc(t.status)} · ${esc(t.message || "")}</p>` : "")
-      + `<div class="bar"><label style="margin:0">大小 GB</label><input id="bkSize" type="number" step="0.5" min="${d.min_gb}" max="${d.max_gb}" value="${d.default_gb}" style="width:6em">
-      <button class="btn primary" id="bkGo">${resumable ? `继续上传（已传 ${gib(t.uploaded)}）` : "生成保号账单"}</button>
-      ${pend ? `<button class="btn danger" id="bkDel">删除未完成的上传</button>` : ""}</div>`;
+    body += `<div id="bkScan">${scanHtml}</div>` + (t && t.status !== "done" ? `<p class="muted">上次任务 #${t.id}：${esc(t.status)} · ${esc(t.message || "")}</p>` : "")
+      + `<div class="bar"><label style="margin:0">大小 GB</label><input id="bkSize" type="number" step="0.1" min="${d.min_gb}" max="${d.max_gb}" value="${defGb}" style="width:6em">
+      <button class="btn ${over ? "" : "primary"}" id="bkGo">${resumable ? `继续上传（已传 ${gib(t.uploaded)}）` : over ? "仍要生成" : "生成保号账单"}</button>
+      ${pend ? `<button class="btn danger" id="bkDel">删除未完成的上传</button>` : ""}<span class="muted" id="bkAfter"></span></div>`;
   }
   el.innerHTML = head + body;
-  const tl = $("#bkTask", el); if (tl) tl.onclick = () => window.TaskDrawer && window.TaskDrawer.open(t.id);
+  const rs = $("#bkRescan", el); if (rs) rs.onclick = () => reload(true);
+  const sz = $("#bkSize", el), after = $("#bkAfter", el);
+  const upd = () => { if (after && s) after.textContent = `补足后标准层合计约 ${(used + (+sz.value || 0)).toFixed(2)} GB`; };
+  if (sz) { sz.addEventListener("input", upd); upd(); }
   const go = $("#bkGo", el);
   if (go) go.onclick = async () => {
-    const size = +$("#bkSize", el).value || d.default_gb;
-    if (!(await confirmBox(BK_TITLE, `${esc(d.note)}<br><br>本次大小：<b>${size} GB</b>（标准层超出 10 GB 的部分按量计费）。删除对象即停止计费。确认开始？`))) return;
+    const size = +sz.value || defGb;
+    if (!(size >= d.min_gb && size <= d.max_gb)) { toast(`大小范围 ${d.min_gb}–${d.max_gb} GB`, true); return; }
+    if (over && !(await confirmBox("无需生成", `标准层已用 ${gb1(used)}，已超出 10 GB 免费额度，已经会产生小额账单，<b>无需生成</b>。<br>再生成会让账单变多，仍要继续？`, true))) return;
+    const tot = s ? `，补足后标准层合计约 <b>${(used + size).toFixed(2)} GB</b>` : "";
+    if (!(await confirmBox(BK_TITLE, `${esc(d.note)}<br><br>本次大小：<b>${size} GB</b>${tot}（标准层超出 10 GB 的部分按量计费）。删除对象即停止计费。确认开始？`))) return;
     const r = await act(go, () => post(`/accounts/${acc.id}/oci/billing-keep`, { size_gb: size, confirm: true }));
     if (r) { if (r.existed) toast(`对象已存在：${gib(r.size)}，未重复上传`); reload(); }
   };
   const dl = $("#bkDel", el);
   if (dl) dl.onclick = async () => {
     if (!(await confirmBox("删除保号对象", "删除 tricloud-billing-keep 里的保号对象并中止未完成的上传（Bucket 空了一并删除）？之后不再产生这笔账单。", true))) return;
-    if (await act(dl, () => del(`/accounts/${acc.id}/oci/billing-keep?confirm=true`), "已删除")) reload();
+    if (await act(dl, () => del(`/accounts/${acc.id}/oci/billing-keep?confirm=true`), "已删除")) reload(true);
   };
-  if (running) setTimeout(() => billingKeepCard(acc, el, true), again ? 3000 : 2000);
 }
 
 // ---------- OCI 流量：本区域实例本月出站 / 入站（OCI Monitoring，免费） ----------

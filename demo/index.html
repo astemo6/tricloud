@@ -218,7 +218,24 @@
   var vols = { 1: [{ id: "ocid1.volume.demo1", name: "data-1", size_gb: 50, vpus_per_gb: 10, state: "AVAILABLE", attached_to: "ocid1.instance.oc1.ap-tokyo-1.demo1", attachment_id: "att-demo1", device: "/dev/oracleoci/oraclevdb" }] };
   var boots = { 1: [{ id: "bv1", name: "arm-main (Boot Volume)", size_gb: 100, vpus_per_gb: 10, state: "AVAILABLE" }, { id: "bv2", name: "amd-micro (Boot Volume)", size_gb: 47, vpus_per_gb: 10, state: "AVAILABLE" }] };
   var bkeep = {};
-  var buckets = { 1: [{ name: "backup", created: "2026-03-02 10:11", objs: [{ name: "db/2026-10-01.sql.gz", size: 12582912, created: "2026-10-01 03:00" }, { name: "db/2026-10-08.sql.gz", size: 13107200, created: "2026-10-08 03:00" }, { name: "readme.txt", size: 312, created: "2026-03-02 10:12" }] }] };
+  // v1.6 保号账单「先检测已有存储」：其他区域已有的 Bucket（演示：类似用户手动建的 alive）
+  var bucketsOther = { 1: [{ name: "alive", region: "us-sanjose-1", created: "2025-06-27 08:30", size: Math.round(3.2 * 1073741824), count: 1, storage_tier: "Standard", auto_tiering: "Disabled" },
+    { name: "media", region: "us-sanjose-1", created: "2025-11-02 14:05", size: Math.round(1.5 * 1073741824), count: 37, storage_tier: "Standard", auto_tiering: "InfrequentAccess" }] };
+  function bucketRow(b) { var sz = b.objs.reduce(function (a, o) { return a + (+o.size || 0); }, 0); return { name: b.name, created: b.created, size: sz, count: b.objs.length, storage_tier: b.tier || "Standard", auto_tiering: "Disabled" }; }
+  function bkTier(b) { return b.size == null ? "unknown" : b.storage_tier === "Archive" ? "archive" : b.storage_tier === "Standard" ? (b.auto_tiering && b.auto_tiering !== "Disabled" ? "autotier" : "standard") : "unknown"; }
+  function bkFillGb(used) { return Math.round(Math.max(0.5, Math.ceil(Math.round((11 - used) * 1e6) / 1e5) / 10) * 10) / 10; }
+  function bkScan(id) { var home = (ACCT_TYPES[id] || {}).home_region || "ap-tokyo-1", G = 1073741824, bks = bkeep[id] || {};
+    var rows = (buckets[id] || []).map(function (b) { return Object.assign(bucketRow(b), { region: home }); }).concat(bucketsOther[id] || []);
+    if (bks.exists || bks.task) rows.push({ name: "tricloud-billing-keep", region: home, created: "2026-10-16 15:00", size: bks.exists ? bks.size : 0, count: bks.exists ? 1 : 0, storage_tier: "Standard", auto_tiering: "Disabled", billing_keep: true });
+    var by = { standard: 0, autotier: 0, archive: 0, unknown: 0 };
+    rows.forEach(function (r) { r.tier = bkTier(r); if (r.size != null) by[r.tier] += r.size; });
+    rows.sort(function (a, b) { return (b.size || 0) - (a.size || 0); });
+    var std = by.standard / G, over = std > 10, r3 = function (v) { return Math.round(v * 1000) / 1000; };
+    return { buckets: rows, bytes: by, standard_gb: r3(std), autotier_gb: r3(by.autotier / G), archive_gb: r3(by.archive / G), unknown_count: 0, free_gb: 10, over_free: over,
+      short_gb: over ? 0 : Math.max(0.1, Math.ceil(Math.round((10 - std) * 1e6) / 1e5) / 10), fill_gb: bkFillGb(std), target_gb: 11,
+      regions: [home, "us-sanjose-1"], home: home, compartments: 1, compartments_truncated: false, errors: [], requests: 2 + rows.length, scanned_at: new Date().toISOString().slice(0, 19).replace("T", " "), cached: false, age: 0 }; }
+  var buckets = { 1: [{ name: "backup", created: "2026-03-02 10:11", objs: [{ name: "db/2026-10-01.sql.gz", size: 12582912, created: "2026-10-01 03:00" }, { name: "db/2026-10-08.sql.gz", size: 13107200, created: "2026-10-08 03:00" }, { name: "readme.txt", size: 312, created: "2026-03-02 10:12" }] },
+    { name: "logs-archive", tier: "Archive", created: "2025-12-01 09:00", objs: [{ name: "2025.tar", size: 2147483648, created: "2025-12-31 23:00" }] }] };
   var regionSubs = { 1: ["ap-tokyo-1", "ap-osaka-1"], 2: ["ap-seoul-1"] };
   var ALL_REGIONS = [["ap-tokyo-1", "NRT"], ["ap-osaka-1", "KIX"], ["ap-seoul-1", "ICN"], ["ap-chuncheon-1", "YNY"], ["ap-singapore-1", "SIN"], ["us-ashburn-1", "IAD"], ["us-phoenix-1", "PHX"], ["us-sanjose-1", "SJC"], ["eu-frankfurt-1", "FRA"], ["uk-london-1", "LHR"]];
   var reserved = { 1: [{ id: "res-demo1", ip: "203.0.113.200", name: "reserved-1", state: "AVAILABLE", assigned: false }] };
@@ -333,11 +350,12 @@
         var nip = "203.0.113." + (60 + rnd(30)); return { ok: true, task_id: addTask("net500m", id, "下行 500Mbps · " + i5.name, { extra: ["准备 NAT 网关…", "创建网络负载均衡器（保留源地址，TCP+UDP 全端口转发）…", "创建 NAT 路由表并绑定到实例网卡…"], done: "已开启，新入口 IP " + nip, onDone: function () { nlb500[i5.id] = nip; } }) }; }
       return { ok: true, task_id: addTask("net500m", id, "关闭 500Mbps · " + i5.name, { extra: ["还原实例网卡路由…", "删除网络负载均衡器…"], done: "已关闭并还原原公网 IP 入站", onDone: function () { delete nlb500[i5.id]; } }) }; }
     // v1.6 保号账单（仅 PAYG）：演示里 1 秒约 1 GiB，真实上传按 VPS 到 OCI 的带宽
+    if (p.match(/\/oci\/billing-keep\/scan$/)) { if ((ACCT_TYPES[id] || {}).plan_type !== "PAYG") return { __status: 400, detail: "演示：仅 PAYG 账号检测" }; return bkScan(id); }
     if (p.match(/\/oci\/billing-keep$/)) { var plan = (ACCT_TYPES[id] || {}).plan_type, bks = bkeep[id] = bkeep[id] || { exists: false, size: 0, task: null };
-      var bkPlan = plan === "PAYG" ? "paid" : plan === "FREE_TIER" ? "free" : "unknown", BKN = "会在主区域标准层私有 Bucket tricloud-billing-keep 里存放约 11 GB 的全零对象，超出 10 GB 免费额度，每月约 $0.02–0.03 账单；上传走入网流量，不计费，也不会产生出网流量。";
+      var bkPlan = plan === "PAYG" ? "paid" : plan === "FREE_TIER" ? "free" : "unknown", BKN = "会在主区域标准层私有 Bucket tricloud-billing-keep 里存放全零对象，让标准层总量（含已有 Bucket）补足到约 11 GB、超出 10 GB 免费额度，每月约 $0.02–0.03 账单；上传走入网流量，不计费，也不会产生出网流量。";
       var bkT = bks.task && tasks.find(function (x) { return x.id === bks.task.id; });
       var bkView = bkT ? { id: bkT.id, status: bkT.status, message: bkT.message, updated: bkT.updated, uploaded: bks.task.uploaded, total: bks.task.total, size: bks.exists ? bks.size : null } : null;
-      if (method === "GET") { var bo = { plan: bkPlan, eligible: bkPlan === "paid", note: BKN, default_gb: 11, min_gb: 10.5, max_gb: 20, task: bkView };
+      if (method === "GET") { var bo = { plan: bkPlan, eligible: bkPlan === "paid", note: BKN, default_gb: 11, min_gb: 0.5, max_gb: 20, task: bkView };
         if (bkPlan === "free") { bo.hint = "免费号 20GB 内不收费，无需操作"; return bo; }
         if (bkPlan !== "paid") { bo.hint = "未能识别账号类型（需 osp-gateway 读权限），无法确认是 PAYG 升级号，暂不开放"; return bo; }
         return Object.assign(bo, { region: (ACCT_TYPES[id] || {}).home_region || "ap-tokyo-1", namespace: "demonamespace", bucket: "tricloud-billing-keep", object: "billing-keep.bin",
@@ -345,7 +363,7 @@
       if (method === "DELETE") { if (q.get("confirm") !== "true") return { __status: 400, detail: "删除保号对象需确认" }; if (bkT && bkT.status === "running") return { __status: 409, detail: "上传任务仍在运行，请先在任务里停止" };
         var had = bks.exists; bks.exists = false; bks.size = 0; bks.task = null; return { ok: true, deleted: had, aborted: 0, bucket_deleted: true, region: "ap-tokyo-1" }; }
       var sg = body.size_gb === undefined || body.size_gb === "" ? 11 : +body.size_gb;
-      if (!(sg >= 10.5 && sg <= 20)) return { __status: 400, detail: "size_gb 范围 10.5–20" };
+      if (!(sg >= 0.5 && sg <= 20)) return { __status: 400, detail: "size_gb 范围 0.5–20" };
       if (bkPlan === "free") return { __status: 400, detail: "该账号是免费号：免费号 20GB 内不收费，无需操作" };
       if (bkPlan !== "paid") return { __status: 400, detail: "未能识别账号类型（需 osp-gateway 读权限），无法确认是 PAYG 升级号" };
       if (!body.confirm) return { __status: 400, detail: "会产生每月约 $0.02–0.03 的账单，需确认" };
@@ -356,7 +374,7 @@
       bks.task = { id: tidk, uploaded: 0, total: tot };
       var bkIv = setInterval(function () { var tt = tasks.find(function (x) { return x.id === tidk; }); if (!tt || tt.status !== "running" || !bks.task || bks.task.id !== tidk) return clearInterval(bkIv); bks.task.uploaded = Math.min(tot, bks.task.uploaded + Math.round(tot / 6)); }, 900);
       return { ok: true, task_id: tidk, total: tot, resumed: false, resumed_from: 0 }; }
-    if (p.match(/\/oci\/buckets$/) && method === "GET") return { namespace: "demonamespace", buckets: (buckets[id] || []).map(function (b) { return { name: b.name, created: b.created }; }), free_gb: 20 };
+    if (p.match(/\/oci\/buckets$/) && method === "GET") return { namespace: "demonamespace", buckets: (buckets[id] || []).map(bucketRow), free_gb: 20 };
     if (p.match(/\/oci\/buckets$/)) { var B = buckets[id] = buckets[id] || [];
       if (body.op === "create") { if (!/^[A-Za-z0-9_.-]{1,256}$/.test(body.name || "")) return { __status: 400, detail: "Bucket 名称只能包含字母、数字、- _ ." }; B.push({ name: body.name, created: new Date().toISOString().slice(0, 16).replace("T", " "), objs: [] }); return { ok: true }; }
       if (body.op === "delete") { var bb = B.find(function (x) { return x.name === body.name; }); if (bb && bb.objs.length) return { __status: 400, detail: "Bucket 不为空，请先删除其中的对象" }; buckets[id] = B.filter(function (x) { return x !== bb; }); return { ok: true }; } }
@@ -2352,8 +2370,10 @@ async function tabOciObjects(acc, box, bucket, prefix = "") {
     let d;
     try { d = await api(`/accounts/${acc.id}/oci/buckets?${rq(acc)}`); } catch (e) { $("#lb", box).innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
     $("#ns", box).textContent = `命名空间 ${d.namespace} · Always Free 共 ${d.free_gb} GB`;
-    $("#lb", box).innerHTML = `<div class="card"><table><tr><th>Bucket</th><th>创建时间</th><th></th></tr>${d.buckets.map((b) => `<tr><td><a href="javascript:void 0" data-open="${esc(b.name)}">📁 ${esc(b.name)}</a></td><td class="mono">${esc(b.created)}</td>
-      <td><button class="btn sm" data-open="${esc(b.name)}">打开</button> <button class="btn sm danger" data-delb="${esc(b.name)}">删除</button></td></tr>`).join("") || `<tr><td colspan=3 class="muted">暂无 Bucket</td></tr>`}</table></div>`;
+    $("#lb", box).innerHTML = `<div class="card"><table id="bkList"><tr><th>Bucket</th><th>大小</th><th>对象数</th><th>存储层</th><th>创建时间</th><th></th></tr>${d.buckets.map((b) => `<tr><td><a href="javascript:void 0" data-open="${esc(b.name)}">📁 ${esc(b.name)}</a></td>
+      <td${b.error ? ` title="${esc(b.error)}"` : ""}>${b.size == null ? "—" : fmtBytes(b.size)}</td><td>${b.count == null ? "—" : esc(b.count)}</td><td>${tierLabel(b)}</td><td class="mono">${esc(b.created)}</td>
+      <td><button class="btn sm" data-open="${esc(b.name)}">打开</button> <button class="btn sm danger" data-delb="${esc(b.name)}">删除</button></td></tr>`).join("") || `<tr><td colspan=6 class="muted">暂无 Bucket</td></tr>`}</table>
+      ${d.buckets.length ? `<p class="muted">大小、对象数为 OCI 定期统计的近似值，可能有几小时延迟。</p>` : ""}</div>`;
     $("#nb", box).onclick = async () => {
       const r = await modal("新建 Bucket", `<label>名称（字母、数字、- _ .）</label><input name="name" placeholder="backup">
         <label><input type="checkbox" name="public" style="width:auto"> 公开读取（任何人知道链接都能下载对象，慎用）</label>`, (bg) => post(`/accounts/${acc.id}/oci/buckets`, { op: "create", region: regionOf(acc) || undefined, ...form(bg) }), "创建");
@@ -2395,12 +2415,36 @@ async function tabOciObjects(acc, box, bucket, prefix = "") {
   }));
 }
 
-// ---------- 18b. 保号账单（仅 PAYG 升级号）：主区域标准层存约 11 GB 全零对象，超出 10 GB 免费额度，每月约 $0.02–0.03 ----------
+// ---------- 18b. 保号账单（仅 PAYG 升级号）：先检测已有存储（所有已订阅区域的 Bucket），标准层补足到约 11 GB，超出 10 GB 免费额度，每月约 $0.02–0.03 ----------
 const BK_TITLE = "一键生成保号账单";
 const gib = (n) => `${((+n || 0) / 1024 ** 3).toFixed(2)} GiB`;
-async function billingKeepCard(acc, el, again) {
+const gb1 = (v) => `${(+v || 0).toFixed(2)} GB`;
+function tierLabel(b) {
+  const t = b.tier || (b.storage_tier === "Archive" ? "archive" : b.storage_tier === "Standard" ? (b.auto_tiering && b.auto_tiering !== "Disabled" ? "autotier" : "standard") : "unknown");
+  return { standard: "标准", autotier: `标准 <span class="badge pending" title="开了自动分层：久未访问的对象会转到低频层">自动分层</span>`, archive: "归档", unknown: "—" }[t] || "—";
+}
+// 补足大小：11 − 已用，向上取 0.1，最小 0.5（与后端 fill_size_gb 一致）
+function bkFill(used, target = 11) { return Math.max(0.5, Math.ceil(Math.round((target - (+used || 0)) * 1e6) / 1e5) / 10); }
+function bkScanHtml(s) {
+  const head = `<div>标准层已用 <b id="bkStd">${gb1(s.standard_gb)}</b> / 免费 ${s.free_gb} GB <span class="muted">（${s.regions.length} 个区域 · ${s.buckets.length} 个 Bucket${s.cached ? ` · ${Math.round(s.age / 60)} 分钟前检测` : ""}）</span>
+    <button class="btn sm" id="bkRescan">重新检测</button></div>`;
+  const verdict = s.over_free
+    ? `<p id="bkVerdict" class="al warn">✅ 已满足：标准层已超出 10 GB 免费额度，已经会产生小额账单，无需生成。</p>`
+    : `<p id="bkVerdict" class="al">还差 <b>${s.short_gb} GB</b> 才超出 10 GB 免费额度；建议补足 <b>${s.fill_gb} GB</b>，补足后标准层合计约 <b>${(s.standard_gb + s.fill_gb).toFixed(2)} GB</b>。</p>`;
+  const extra = [s.autotier_gb > 0 ? `另有 ${gb1(s.autotier_gb)} 在开了自动分层的标准层 Bucket 里（久未访问的对象会转低频层，未计入标准层）` : "",
+    s.archive_gb > 0 ? `归档层 ${gb1(s.archive_gb)}（归档层单独计免费额度，不计入标准层）` : "",
+    s.unknown_count ? `${s.unknown_count} 个 Bucket 读不到大小（显示 —，未计入）` : "",
+    (s.errors || []).length ? `部分区域读取失败：${s.errors.map((e) => esc(e.region)).join("、")}` : "",
+    s.compartments_truncated ? `区间太多，只检测了前 ${s.compartments} 个` : ""].filter(Boolean);
+  const rows = s.buckets.map((b) => `<tr><td class="mono">${esc(b.name)}${b.billing_keep ? ` <span class="badge">保号</span>` : ""}</td><td class="mono">${esc(b.region)}</td><td>${tierLabel(b)}</td>
+    <td>${b.size == null ? "—" : fmtBytes(b.size)}</td><td>${b.count == null ? "—" : esc(b.count)}</td></tr>`).join("");
+  return head + verdict + (extra.length ? `<p class="muted">${extra.join("；")}。</p>` : "")
+    + (rows ? `<details id="bkBuckets"><summary>已有 Bucket（${s.buckets.length}）</summary><table><tr><th>Bucket</th><th>区域</th><th>存储层</th><th>大小</th><th>对象数</th></tr>${rows}</table></details>` : `<p class="muted">没有找到已有 Bucket。</p>`)
+    + `<p class="muted">大小为 OCI 定期统计的近似值（approximateSize），刚上传的数据可能要几小时后才计入。</p>`;
+}
+async function billingKeepCard(acc, el, again, rescan) {
   if (!el || !el.isConnected) return;
-  const reload = () => billingKeepCard(acc, el, true);
+  const reload = (rs) => billingKeepCard(acc, el, true, rs);
   let d;
   try { d = await api(`/accounts/${acc.id}/oci/billing-keep`); } catch (e) { el.innerHTML = `<h3>${BK_TITLE}</h3><div>❌ ${esc(e.message)}</div>`; return; }
   if (!el.isConnected) return;
@@ -2412,31 +2456,51 @@ async function billingKeepCard(acc, el, again) {
     const pct = t.total ? Math.floor((t.uploaded * 100) / t.total) : 0;
     body += `<div id="bkProg"><progress max="100" value="${pct}" style="width:100%"></progress>
       <div>上传中：${gib(t.uploaded)} / ${gib(t.total)}（${pct}%） · <a href="javascript:void 0" id="bkTask">任务 #${t.id}</a></div></div>`;
-  } else if (d.exists) {
+    el.innerHTML = head + body;
+    const tl = $("#bkTask", el); if (tl) tl.onclick = () => window.TaskDrawer && window.TaskDrawer.open(t.id);
+    el.dataset.wasRunning = "1";
+    setTimeout(() => billingKeepCard(acc, el, true), again ? 3000 : 2000);
+    return;
+  }
+  // 先检测已有存储（上传刚结束或点了「重新检测」时跳过 5 分钟缓存）
+  const fresh = rescan || el.dataset.wasRunning === "1";
+  delete el.dataset.wasRunning;
+  el.innerHTML = head + body + `<div id="bkScan"><span class="spin"></span> 正在检测已有存储…</div>`;
+  let s = null, scanErr = "";
+  try { s = await api(`/accounts/${acc.id}/oci/billing-keep/scan${fresh ? "?refresh=true" : ""}`); } catch (e) { scanErr = e.message; }
+  if (!el.isConnected) return;
+  const scanHtml = s ? bkScanHtml(s) : `<p class="al warn">⚠️ 检测已有存储失败：${esc(scanErr)}。无法确认标准层已用量，默认按 ${d.default_gb} GB 生成。</p><button class="btn sm" id="bkRescan">重新检测</button>`;
+  const over = !!(s && s.over_free), used = s ? +s.standard_gb : 0, defGb = s ? s.fill_gb : d.default_gb;
+  if (d.exists) {
     body += `<div id="bkDone">✅ 已存在保号对象 <span class="mono">${esc(d.bucket)}/${esc(d.object)}</span>：<b>${gib(d.size)}</b>（${esc(d.region)} · ${esc(d.storage_tier || "Standard")}）</div>
-      <div class="bar"><button class="btn danger" id="bkDel">删除</button></div>`;
+      <div id="bkScan">${scanHtml}</div><div class="bar"><button class="btn danger" id="bkDel">删除</button></div>`;
   } else {
     const pend = (d.pending_uploads || []).length, resumable = pend && t && ["failed", "stopped", "interrupted"].includes(t.status) && t.uploaded;
-    body += (t && t.status !== "done" ? `<p class="muted">上次任务 #${t.id}：${esc(t.status)} · ${esc(t.message || "")}</p>` : "")
-      + `<div class="bar"><label style="margin:0">大小 GB</label><input id="bkSize" type="number" step="0.5" min="${d.min_gb}" max="${d.max_gb}" value="${d.default_gb}" style="width:6em">
-      <button class="btn primary" id="bkGo">${resumable ? `继续上传（已传 ${gib(t.uploaded)}）` : "生成保号账单"}</button>
-      ${pend ? `<button class="btn danger" id="bkDel">删除未完成的上传</button>` : ""}</div>`;
+    body += `<div id="bkScan">${scanHtml}</div>` + (t && t.status !== "done" ? `<p class="muted">上次任务 #${t.id}：${esc(t.status)} · ${esc(t.message || "")}</p>` : "")
+      + `<div class="bar"><label style="margin:0">大小 GB</label><input id="bkSize" type="number" step="0.1" min="${d.min_gb}" max="${d.max_gb}" value="${defGb}" style="width:6em">
+      <button class="btn ${over ? "" : "primary"}" id="bkGo">${resumable ? `继续上传（已传 ${gib(t.uploaded)}）` : over ? "仍要生成" : "生成保号账单"}</button>
+      ${pend ? `<button class="btn danger" id="bkDel">删除未完成的上传</button>` : ""}<span class="muted" id="bkAfter"></span></div>`;
   }
   el.innerHTML = head + body;
-  const tl = $("#bkTask", el); if (tl) tl.onclick = () => window.TaskDrawer && window.TaskDrawer.open(t.id);
+  const rs = $("#bkRescan", el); if (rs) rs.onclick = () => reload(true);
+  const sz = $("#bkSize", el), after = $("#bkAfter", el);
+  const upd = () => { if (after && s) after.textContent = `补足后标准层合计约 ${(used + (+sz.value || 0)).toFixed(2)} GB`; };
+  if (sz) { sz.addEventListener("input", upd); upd(); }
   const go = $("#bkGo", el);
   if (go) go.onclick = async () => {
-    const size = +$("#bkSize", el).value || d.default_gb;
-    if (!(await confirmBox(BK_TITLE, `${esc(d.note)}<br><br>本次大小：<b>${size} GB</b>（标准层超出 10 GB 的部分按量计费）。删除对象即停止计费。确认开始？`))) return;
+    const size = +sz.value || defGb;
+    if (!(size >= d.min_gb && size <= d.max_gb)) { toast(`大小范围 ${d.min_gb}–${d.max_gb} GB`, true); return; }
+    if (over && !(await confirmBox("无需生成", `标准层已用 ${gb1(used)}，已超出 10 GB 免费额度，已经会产生小额账单，<b>无需生成</b>。<br>再生成会让账单变多，仍要继续？`, true))) return;
+    const tot = s ? `，补足后标准层合计约 <b>${(used + size).toFixed(2)} GB</b>` : "";
+    if (!(await confirmBox(BK_TITLE, `${esc(d.note)}<br><br>本次大小：<b>${size} GB</b>${tot}（标准层超出 10 GB 的部分按量计费）。删除对象即停止计费。确认开始？`))) return;
     const r = await act(go, () => post(`/accounts/${acc.id}/oci/billing-keep`, { size_gb: size, confirm: true }));
     if (r) { if (r.existed) toast(`对象已存在：${gib(r.size)}，未重复上传`); reload(); }
   };
   const dl = $("#bkDel", el);
   if (dl) dl.onclick = async () => {
     if (!(await confirmBox("删除保号对象", "删除 tricloud-billing-keep 里的保号对象并中止未完成的上传（Bucket 空了一并删除）？之后不再产生这笔账单。", true))) return;
-    if (await act(dl, () => del(`/accounts/${acc.id}/oci/billing-keep?confirm=true`), "已删除")) reload();
+    if (await act(dl, () => del(`/accounts/${acc.id}/oci/billing-keep?confirm=true`), "已删除")) reload(true);
   };
-  if (running) setTimeout(() => billingKeepCard(acc, el, true), again ? 3000 : 2000);
 }
 
 // ---------- OCI 流量：本区域实例本月出站 / 入站（OCI Monitoring，免费） ----------

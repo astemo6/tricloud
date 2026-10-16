@@ -10,6 +10,7 @@
 所有改动都只调用 OCI 官方 SDK；不在实例里执行任意命令（Run Command 只下发本文件里的固定脚本）。
 """
 import base64
+import concurrent.futures as cf
 import datetime as dt
 import hashlib
 import re
@@ -457,10 +458,28 @@ class OCIMore:
             raise RuntimeError("Bucket 名称只能包含字母、数字、- _ .")
         return b
 
+    BUCKET_FIELDS = ["approximateSize", "approximateCount", "autoTiering"]
+
+    @classmethod
+    def _bucket_info(cls, c, ns, name):
+        """GetBucket(fields=approximateSize,approximateCount)：大小 / 对象数是 OCI 定期统计的近似值（有延迟）。失败返回 None 值，不抛出。"""
+        try:
+            b = c.get_bucket(ns, name, fields=cls.BUCKET_FIELDS).data
+        except Exception as e:
+            return {"size": None, "count": None, "storage_tier": None, "auto_tiering": None, "error": str(getattr(e, "message", None) or e)[:120]}
+        sz, cnt = getattr(b, "approximate_size", None), getattr(b, "approximate_count", None)
+        return {"size": int(sz) if sz is not None else None, "count": int(cnt) if cnt is not None else None,
+                "storage_tier": getattr(b, "storage_tier", None), "auto_tiering": getattr(b, "auto_tiering", None)}
+
     def buckets(self):
-        out = []
-        for b in oci.pagination.list_call_get_all_results(self.os_client.list_buckets, self.namespace, self.compartment).data:
-            out.append({"name": b.name, "created": str(b.time_created)[:16]})
+        """Bucket 列表 + 每个 Bucket 的近似大小 / 对象数 / 存储层（并发 GetBucket，最多 8 路；单个失败显示 —）。"""
+        lst = oci.pagination.list_call_get_all_results(self.os_client.list_buckets, self.namespace, self.compartment).data
+        out = [{"name": b.name, "created": str(b.time_created)[:16]} for b in lst]
+        if out:
+            c, ns = self.os_client, self.namespace
+            with cf.ThreadPoolExecutor(max_workers=min(8, len(out))) as ex:
+                for row, info in zip(out, ex.map(lambda r: self._bucket_info(c, ns, r["name"]), out)):
+                    row.update(info)
         return {"namespace": self.namespace, "buckets": out, "free_gb": FREE["object_gb"]}
 
     def create_bucket(self, name, public=False):
@@ -558,6 +577,57 @@ class OCIMore:
                 raise
         out["pending_uploads"] = [{"upload_id": u.upload_id, "created": str(u.time_created)[:16]} for u in self._bk_uploads(c, ns)]
         return out
+
+    SCAN_MAX_COMPARTMENTS = 50
+
+    def _scan_compartments(self):
+        """租户根 + 所有 ACTIVE 子区间（对象存储额度按租户算，Bucket 可能在任意区间）。无 inspect 权限时只扫账号配置的区间。"""
+        ten = self.cfg["tenancy"]
+        comps = [ten]
+        try:
+            for x in oci.pagination.list_call_get_all_results(self.identity.list_compartments, ten, compartment_id_in_subtree=True,
+                                                              access_level="ACCESSIBLE", lifecycle_state="ACTIVE").data:
+                if x.id not in comps:
+                    comps.append(x.id)
+        except Exception:
+            pass
+        if self.compartment not in comps:
+            comps.append(self.compartment)
+        return comps[:self.SCAN_MAX_COMPARTMENTS], len(comps) > self.SCAN_MAX_COMPARTMENTS
+
+    def storage_scan(self):
+        """遍历所有已订阅区域 × 区间的 Bucket，用 GetBucket 的 approximateSize 汇总各存储层已用量（只读）。
+        请求量：每区域每区间 1 次 ListBuckets + 每个 Bucket 1 次 GetBucket（不列对象）。"""
+        try:
+            subs = self.identity.list_region_subscriptions(self.cfg["tenancy"]).data
+            regions = [s.region_name for s in subs if (getattr(s, "status", None) or "READY") == "READY"]
+            home = next((s.region_name for s in subs if s.is_home_region), None)
+        except Exception:
+            regions, home = [self.cfg["region"]], None
+        regions = sorted(set(regions) or {self.cfg["region"]}, key=lambda r: (r != home, r))
+        comps, truncated = self._scan_compartments()
+        _, ns, _ = self._bk_os(home or regions[0])
+        errors, found = [], []
+
+        def lb(rc):
+            region, comp = rc
+            c = self._c(oci.object_storage.ObjectStorageClient, dict(self.cfg, region=region))
+            try:
+                bs = oci.pagination.list_call_get_all_results(c.list_buckets, ns, comp).data
+                return [(region, c, b.name, str(b.time_created)[:16]) for b in bs]
+            except Exception as e:
+                if getattr(e, "status", None) not in (404,):
+                    errors.append({"region": region, "error": str(getattr(e, "message", None) or e)[:160]})
+                return []
+        with cf.ThreadPoolExecutor(max_workers=8) as ex:
+            for rows in ex.map(lb, [(r, cp) for r in regions for cp in comps]):
+                found.extend(rows)
+            infos = list(ex.map(lambda x: self._bucket_info(x[1], ns, x[2]), found))
+        buckets = []
+        for (region, _c, name, created), info in zip(found, infos):
+            buckets.append(dict(info, name=name, region=region, created=created, billing_keep=name == self.BK_BUCKET))
+        return dict(summarize_storage(buckets), regions=regions, home=home, compartments=len(comps),
+                    compartments_truncated=truncated, errors=errors, requests=len(regions) * len(comps) + len(found))
 
     def _bk_bucket(self, c, ns):
         """建（或复用）标准层私有 bucket，并关闭自动分层（否则对象会被转到低频层，不再产生账单）。"""
@@ -713,3 +783,47 @@ class OCIMore:
                 "micro": {"count": len(micro), "limit": FREE["micro"]},
                 "storage": {"used_gb": st, "limit": FREE["storage_gb"]}, "paid": paid,
                 "ok": not issues, "issues": issues, "suggestions": sugg}
+
+
+# ---------- 已有对象存储用量汇总（保号账单「先检测」用；纯函数，便于测试） ----------
+GIB = 1024 ** 3
+PAYG_STD_FREE_GB = 10        # PAYG：标准层 10 GB、低频 10 GB、归档 10 GB 各自免费（按租户合计）
+BK_TARGET_GB = 11            # 补足目标：标准层总量约 11 GB，超出免费额度 ~1 GB
+
+
+def bucket_tier(b):
+    """standard / autotier（标准层但开了自动分层，久未访问的对象会转低频，不能算作稳定的标准层用量）/ archive / unknown"""
+    t = (b.get("storage_tier") or "").lower()
+    if t == "archive":
+        return "archive"
+    if t == "standard":
+        return "autotier" if (b.get("auto_tiering") or "Disabled") not in ("Disabled",) else "standard"
+    return "unknown"
+
+
+def summarize_storage(buckets, free_gb=PAYG_STD_FREE_GB, target_gb=BK_TARGET_GB):
+    tiers = {"standard": 0, "autotier": 0, "archive": 0, "unknown": 0}
+    rows = []
+    for b in buckets:
+        tier = bucket_tier(b) if b.get("size") is not None else "unknown"
+        if b.get("size") is not None:
+            tiers[tier] += int(b["size"])
+        rows.append(dict(b, tier=tier))
+    rows.sort(key=lambda r: (-(r.get("size") or 0), r.get("region") or "", r.get("name") or ""))
+    std_gb = tiers["standard"] / GIB
+    over = std_gb > free_gb
+    return {"buckets": rows, "bytes": tiers,
+            "standard_gb": round(std_gb, 3), "autotier_gb": round(tiers["autotier"] / GIB, 3),
+            "archive_gb": round(tiers["archive"] / GIB, 3), "unknown_count": sum(1 for r in rows if r.get("size") is None),
+            "free_gb": free_gb, "over_free": over, "short_gb": 0 if over else max(0.1, ceil01(free_gb - std_gb)),
+            "fill_gb": fill_size_gb(std_gb, target_gb), "target_gb": target_gb}
+
+
+def ceil01(x):
+    import math
+    return max(0.0, math.ceil(round(x * 10, 6)) / 10)
+
+
+def fill_size_gb(used_gb, target_gb=BK_TARGET_GB, min_gb=0.5):
+    """补足到约 target_gb：target − 已用，向上取 0.1，最小 0.5。"""
+    return round(max(min_gb, ceil01(target_gb - (used_gb or 0))), 1)

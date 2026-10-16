@@ -1,7 +1,8 @@
 # Changelog
 
 ## 1.6.0 后端 + Web（2026-10-16，App 未变，仍为 build 18）
-- 新增 OCI「一键生成保号账单」（仅 PAYG 升级号）：对象存储页顶部卡片。在主区域建（或复用）私有标准层 Bucket `tricloud-billing-keep`（关闭自动分层），用 multipart 串行 64 MiB 分片流式上传全零对象（默认 11 GiB，可选 10.5–20），不落盘，内存约一片大小；后台任务显示进度，失败 / 停止后再次发起会续传，删除会中止未完成上传并清理 Bucket。超出 10 GB 标准层免费额度，每月约 $0.02–0.03；上传是入网流量，不计费。免费号直接提示「免费号 20GB 内不收费，无需操作」。新接口：`GET/POST/DELETE /api/accounts/{id}/oci/billing-keep`。
+- 保号账单「先检测已有存储」：新接口 `GET /api/accounts/{id}/oci/billing-keep/scan[?refresh=true]`（只读，缓存 5 分钟）遍历所有已订阅区域 × 租户根和子区间的 Bucket，用 GetBucket `approximateSize/approximateCount` 按标准层 / 标准层+自动分层 / 归档层汇总，给出「已满足 / 还差 X GB」和补足大小（11 − 已用，向上取 0.1，最小 0.5）。卡片先显示「正在检测已有存储…」；标准层已 >10 GB 时提示无需生成，按钮降为次要并需额外确认。`size_gb` 范围放宽为 0.5–20（仍需 confirm、仍仅 PAYG）。对象存储 Bucket 列表新增「大小」「对象数」「存储层」列（并发 GetBucket，失败显示 —）。
+- 新增 OCI「一键生成保号账单」（仅 PAYG 升级号）：对象存储页顶部卡片。在主区域建（或复用）私有标准层 Bucket `tricloud-billing-keep`（关闭自动分层），用 multipart 串行 64 MiB 分片流式上传全零对象（默认 11 GiB；现按已有存储补足，可选 0.5–20），不落盘，内存约一片大小；后台任务显示进度，失败 / 停止后再次发起会续传，删除会中止未完成上传并清理 Bucket。超出 10 GB 标准层免费额度，每月约 $0.02–0.03；上传是入网流量，不计费。免费号直接提示「免费号 20GB 内不收费，无需操作」。新接口：`GET/POST/DELETE /api/accounts/{id}/oci/billing-keep`。
 - 修复：弹窗里在输入框拖选文字、松开时指针落在遮罩上会误关弹窗；现在只有按下和点击都在遮罩上才关闭。
 - 修复：编辑 Azure 账号显示「区域」且留空保存报「区域不能为空」；Azure 订阅没有默认区域，编辑不再显示 / 要求区域（已存区域的旧账号保持不变）；OCI / AWS 仍必填。
 

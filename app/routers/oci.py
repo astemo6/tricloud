@@ -373,6 +373,7 @@ async def oci_buckets(acc_id: int, region: str = None):
 async def oci_bucket_op(acc_id: int, body: dict = Body(...)):
     need_acc(acc_id, "oci")
     p = P(acc_id, body.get("region"))
+    bk_scan_invalidate(acc_id)          # Bucket 增删后保号检测结果作废
     if body.get("op") == "create":
         return await call(p.create_bucket, body.get("name"), bool(body.get("public")))
     if body.get("op") == "delete":
@@ -450,9 +451,9 @@ async def oci_free_check():
 # PAYG 账号对象存储标准层免费 10 GB：在主区域的私有标准层 bucket 里放一个约 11 GiB 的全零对象，
 # 超出部分每月约 $0.02–0.03，让账号每月有一笔小额账单。上传是入网流量，不计费。
 BK_GIB = 1024 ** 3
-BK_MIN_GB, BK_MAX_GB, BK_DEFAULT_GB = 10.5, 20, 11
+BK_MIN_GB, BK_MAX_GB, BK_DEFAULT_GB = 0.5, 20, 11      # 先检测已有存储后按「补足到约 11 GB」给默认值，所以下限放宽到 0.5
 BK_FREE_HINT = "免费号 20GB 内不收费，无需操作"
-BK_NOTE = ("会在主区域标准层私有 Bucket tricloud-billing-keep 里存放约 11 GB 的全零对象，超出 10 GB 免费额度，"
+BK_NOTE = ("会在主区域标准层私有 Bucket tricloud-billing-keep 里存放全零对象，让标准层总量（含已有 Bucket）补足到约 11 GB、超出 10 GB 免费额度，"
            "每月约 $0.02–0.03 账单；上传走入网流量，不计费，也不会产生出网流量。")
 
 
@@ -492,6 +493,27 @@ async def _bk_oci(fn, *a):
         raise
     except Exception as e:      # oci.exceptions.ServiceError 等：给出明确原因而不是 500
         raise HTTPException(400, str(getattr(e, "message", None) or e)[:300])
+
+
+BK_SCAN_TTL = 300           # 检测结果缓存 5 分钟（每次扫描 = 区域数×区间数 次 ListBuckets + Bucket 数 次 GetBucket）
+_BK_SCAN = {}               # acc_id -> (ts, result)
+
+
+def bk_scan_invalidate(acc_id):
+    _BK_SCAN.pop(acc_id, None)
+
+
+@router.get("/api/accounts/{acc_id}/oci/billing-keep/scan")
+async def oci_billing_keep_scan(acc_id: int, refresh: bool = False):
+    """先检测已有存储：所有已订阅区域的 Bucket 近似大小，按存储层汇总，并给出「已满足 / 还差 X GB」与补足大小。只读，缓存 5 分钟。"""
+    need_acc(acc_id, "oci")
+    hit = _BK_SCAN.get(acc_id)
+    if hit and not refresh and time.time() - hit[0] < BK_SCAN_TTL:
+        return dict(hit[1], cached=True, age=int(time.time() - hit[0]))
+    r = await _bk_oci(P(acc_id).storage_scan)
+    r["scanned_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    _BK_SCAN[acc_id] = (time.time(), r)
+    return dict(r, cached=False, age=0)
 
 
 @router.get("/api/accounts/{acc_id}/oci/billing-keep")
@@ -541,6 +563,7 @@ async def oci_billing_keep_start(acc_id: int, body: dict = Body(default={})):
             resume = {"upload_id": res["upload_id"], "total": int(res.get("total") or 0)}
     total = int((resume or {}).get("total") or round(size_gb * BK_GIB))
     tid = tasks.create_task("billing_keep", acc_id, {"name": "保号账单", "size_bytes": total, "resume": resume})
+    bk_scan_invalidate(acc_id)
     return {"ok": True, "task_id": tid, "total": total, "resumed": bool(resume),
             "resumed_from": tv["uploaded"] if resume and tv else 0}
 
@@ -553,4 +576,5 @@ async def oci_billing_keep_delete(acc_id: int, confirm: bool = False):
     t = _bk_last_task(acc_id)
     if t and t["status"] == "running":
         raise HTTPException(409, "上传任务仍在运行，请先在任务里停止")
+    bk_scan_invalidate(acc_id)
     return await _bk_oci(P(acc_id).billing_keep_delete)

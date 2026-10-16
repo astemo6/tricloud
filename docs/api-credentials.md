@@ -20,7 +20,7 @@ TriCloud 面板通过各云官方 API 管理资源，需要先在对应云平台
    ```
 
 2. **上传公钥到 OCI**：
-   - 登录 OCI 控制台 → 右上角头像 → **用户设置**（User settings）→ 顶部 **令牌和密钥**（Tokens and keys）标签 → **添加 API 密钥**（Add API key）
+   - 登录 OCI 控制台 → 右上角头像（Profile）→ **User settings**，会进入 Identity & Security 下的 **My profile** 页 → 顶部 **Tokens and keys** 标签 → API keys 区域点 **Add API key**
    - 旧版控制台：右上角头像 → **我的概要信息** → 左下「资源」里的 **API 密钥**；管理员给别人加：身份和安全 → 用户 → 点用户名 → API 密钥
    - 选择「粘贴公钥」，把 `oci_api_key_public.pem` 的内容粘贴进去 → 添加
    - 添加成功后页面会显示三样东西，**复制保存**：

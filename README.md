@@ -43,7 +43,7 @@ bash <(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercon
 
 ## 凭证与最小权限
 
-**OCI**：控制台右上角头像 → 用户设置（User settings）→ 令牌和密钥（Tokens and keys）→ 添加 API 密钥，填入 user / tenancy OCID、指纹、区域与私钥 PEM。账单需要 Usage 读权限（租户管理员默认具备）。
+**OCI**：控制台右上角头像 → User settings（进入 Identity & Security → My profile）→ Tokens and keys 标签 → Add API key，填入 user / tenancy OCID、指纹、区域与私钥 PEM。账单需要 Usage 读权限（租户管理员默认具备）。
 
 **AWS**（IAM 用户策略示例）：
 

@@ -34,7 +34,7 @@ final class AddAccountModel: ObservableObject {
         CredField(key: "proxy_user", label: "代理用户名", def: "", type: "text"),
         CredField(key: "proxy_pass", label: "代理密码", def: "", type: "password")]
     static let HINT: [String: String] = [
-        "oci": "OCI 控制台右上角头像 →「用户设置」(User settings) →「令牌和密钥」(Tokens and keys) →「添加 API 密钥」生成。",
+        "oci": "OCI 控制台右上角头像 → User settings（进入 My profile）→ Tokens and keys 标签 → Add API key 生成。",
         "aws": "建议使用仅含 EC2 / Lightsail / CloudFront / Service Quotas / CE 权限的 IAM 用户。",
         "azure": "用服务主体（应用注册）创建，并给订阅授予 Contributor 角色。"]
 

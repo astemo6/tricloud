@@ -1588,7 +1588,7 @@ async function addAccount() {
 document.addEventListener("change", (e) => {
   if (e.target.id !== "np") return;
   const p = e.target.value;
-  const hint = { oci: "OCI 控制台右上角头像 →「用户设置」(User settings) →「令牌和密钥」(Tokens and keys) →「添加 API 密钥」生成。", aws: "建议使用仅含 EC2/Lightsail/CloudFront/Service Quotas/CE 权限的 IAM 用户。", azure: "az ad sp create-for-rbac --role Contributor --scopes /subscriptions/<id> 生成。", ...PROV_HINT }[p];
+  const hint = { oci: "OCI 控制台右上角头像 → User settings（进入 My profile）→ Tokens and keys 标签 → Add API key 生成。", aws: "建议使用仅含 EC2/Lightsail/CloudFront/Service Quotas/CE 权限的 IAM 用户。", azure: "az ad sp create-for-rbac --role Contributor --scopes /subscriptions/<id> 生成。", ...PROV_HINT }[p];
   $("#cf").innerHTML = CRED_FIELDS[p].map(credInput).join("");
   $("#hint").textContent = hint;
 });

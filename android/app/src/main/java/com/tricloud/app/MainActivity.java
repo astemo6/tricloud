@@ -91,7 +91,7 @@ public class MainActivity extends BaseActivity {
                 JSONObject acc = a.optJSONObject(i);
                 LinearLayout c = card(acc.optString("name") + (acc.optInt("disabled") == 1 ? "  [已停用]" : ""));
                 String reg = noRegion(acc.optString("provider")) ? "" : regionOf(acc);
-                muted(c, pname(acc.optString("provider")) + (reg.isEmpty() ? "" : " · " + reg) + ageOf(acc));
+                muted(c, pname(acc.optString("provider")) + (reg.isEmpty() ? "" : " · " + Regions.label(reg)) + ageOf(acc));
                 TextView cnt = text(c, "实例：查询中…", 13, false);
                 String rq = noRegion(acc.optString("provider")) ? "" : "?region=" + Api.enc(reg);
                 if (acc.optInt("disabled") == 1) cnt.setText("实例：账号已停用");

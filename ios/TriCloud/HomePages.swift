@@ -83,7 +83,7 @@ final class HomePage: Page {
             for acc in list {
                 let region = p == "azure" ? "" : Prefs.get("region_\(acc.optInt("id"))", str(acc, "region", ""))
                 let age = HomePage.ageDays(acc)
-                let headDetail = (region.isEmpty ? "" : region + " · ") + (age.isEmpty ? "" : age + " · ")
+                let headDetail = (region.isEmpty ? "" : Regions.label(region) + " · ") + (age.isEmpty ? "" : age + " · ")
                 let off = acc.optInt("disabled") == 1
                 let n = nav(Brand.icon(p), acc.optString("name") + (off ? "（已停用）" : ""), headDetail + "实例读取中…",
                             tint: off ? .gray : Brand.color(p)) {
@@ -178,7 +178,7 @@ final class AccountsPage: Page {
                 self.section(MainPage.pname(p) + " · \(list.count)")
                 for acc in list {
                     let off = acc.optInt("disabled") == 1
-                    var d = p == "azure" ? "" : str(acc, "region", "-")
+                    var d = p == "azure" ? "" : Regions.label(str(acc, "region", "-"))
                     if off { d += (d.isEmpty ? "" : " · ") + "已停用" }
                     else if !acc.isNull("last_test_ok") {
                         d += (d.isEmpty ? "" : " · ") + (acc.optInt("last_test_ok") == 1 ? "连通 \(acc.optInt("last_test_ms")) ms" : "测活失败")

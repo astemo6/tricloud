@@ -1,6 +1,6 @@
 import SwiftUI
 
-// AccountActivity：OCI 安全组（v1.5）。
+// AccountActivity：OCI 流量、安全组（build 19 起按子网选择，可改子网 / VCN 名称）。
 
 extension AccountPage {
     // MARK: - OCI 流量：本区域实例本月出站 / 入站（OCI Monitoring，免费）
@@ -24,7 +24,7 @@ extension AccountPage {
             c.muted(String(format: "已用 %.2f%%", free > 0 ? out / free * 100 : 0) + " · 入站 " + AccountPage.gb(d, "in_gb") + "（不计费）· " + d.optString("period") + " UTC")
             c.muted("10TB 免费出站按整个租户所有区域合计。需要超量提醒或自动停机，用「流量守护」。")
             let items = d.optJSONArray("items") ?? []
-            if items.isEmpty { self.card("本区域没有实例").muted(self.region()); return }
+            if items.isEmpty { self.card("本区域没有实例").muted(Regions.label(self.region())); return }
             for i in 0..<items.count {
                 let it = items.obj(i)
                 let ic = self.card(it.optString("name") + " · " + it.optString("state"))
@@ -36,46 +36,116 @@ extension AccountPage {
         }
     }
 
+    /// 「VCN / 子网 CIDR · 实例1、实例2」，实例多于 4 台时「… 等 N 台」，与 Web subnetLabel 一致。
+    static func subnetLabel(_ s: JObj) -> String {
+        let ins = s.optJSONArray("instances") ?? []
+        let names = (0..<min(ins.count, 4)).map { str(ins.obj($0), "name", "?") }
+        let tail: String = ins.isEmpty ? "无实例" : names.joined(separator: "、") + (ins.count > 4 ? " 等 \(ins.count) 台" : "")
+        let vcn = str(s, "vcn_name", "")
+        return (vcn.isEmpty ? "" : vcn + " / ") + str(s, "name", "子网") + " " + str(s, "cidr", "") + " · " + tail
+    }
+
+    /// build 19：安全组按子网选择（安全列表挂在子网上，同子网实例共享）；查看 / 添加 / 删除都带 subnet_id。
     func secgroup() {
         let g = gen
-        get("/accounts/\(id)/instances?kind=vm&" + rq()) { r in
+        get("/accounts/\(id)/oci/security-subnets?" + rq()) { r in
             guard self.cur(g) else { return }
-            let a = jarr(r)
-            if a.isEmpty { self.card("该区域没有实例").muted(self.region()); return }
-            let ids = (0..<a.count).map { a.obj($0).optString("id") }
-            let names = (0..<a.count).map { a.obj($0).optString("name") }
-            if self.sgInst == nil || !ids.contains(self.sgInst!) { self.sgInst = Prefs.get("sg_\(self.id)", ids[0]) }
-            if !ids.contains(self.sgInst!) { self.sgInst = ids[0] }
-            let inst = self.sgInst!
-            let curName = names[ids.firstIndex(of: inst) ?? 0]
-            let top = self.row()
-            top.button("实例：" + curName) {
-                self.choose("选择实例", names) { i in
-                    self.sgInst = ids[i]
-                    Prefs.set("sg_\(self.id)", ids[i])
+            let a = jobj(r).optJSONArray("subnets") ?? []
+            if a.isEmpty { self.card("该区域没有子网").muted(Regions.label(self.region())); return }
+            let subs = (0..<a.count).map { a.obj($0) }
+            let ids = subs.map { $0.optString("id") }
+            let labels = subs.map { AccountPage.subnetLabel($0) }
+            var chosen = self.sgSub ?? Prefs.get("sgsub_\(self.id)", "")
+            if !ids.contains(chosen) {   // 旧版记的是实例：换成该实例所在的子网
+                let li = Prefs.get("sg_\(self.id)", "")
+                chosen = ids[0]
+                for s in subs {
+                    let ins = s.optJSONArray("instances") ?? []
+                    if (0..<ins.count).contains(where: { ins.obj($0).optString("id") == li }) { chosen = s.optString("id") }
+                }
+            }
+            self.sgSub = chosen
+            Prefs.set("sgsub_\(self.id)", chosen)
+            let idx = ids.firstIndex(of: chosen) ?? 0
+            let sub = subs[idx]
+            let sc = self.card("子网")
+            sc.text(labels[idx], 14, true)
+            sc.muted("安全列表跟着子网走：规则对该子网里的所有实例生效；不支持对 0.0.0.0/0 放行全部端口")
+            let top = sc.row()
+            top.button("切换子网") {
+                self.choose("选择子网", labels) { i in
+                    self.sgSub = ids[i]
+                    Prefs.set("sgsub_\(self.id)", ids[i])
                     self.refresh()
                 }
             }
+            top.button("改名") { self.renameSubnet(sub) }
             top.button("＋ 添加规则") { self.sgAdd() }
-            self.get("/accounts/\(self.id)/security-rules?instance_id=" + enc(inst) + "&" + self.rq()) { x in
+            // 实例另挂的 NSG：只读提示
+            let ins = sub.optJSONArray("instances") ?? []
+            var nsgLines: [String] = []
+            for i in 0..<ins.count {
+                let it = ins.obj(i)
+                let gs = it.optJSONArray("nsgs") ?? []
+                if gs.isEmpty { continue }
+                let gn = (0..<gs.count).map { str(gs.obj($0), "name", "?") }.joined(separator: "、")
+                nsgLines.append(str(it, "name", "?") + "：此实例另挂 NSG：" + gn)
+            }
+            let sid = chosen
+            let nsgText = nsgLines.joined(separator: "\n")
+            self.get("/accounts/\(self.id)/security-rules?subnet_id=" + enc(sid) + "&" + self.rq()) { x in
                 guard self.cur(g) else { return }
-                let o = jobj(x)
-                let ra = o.optJSONArray("rules") ?? []
+                let ra = jobj(x).optJSONArray("rules") ?? []
                 let rules = (0..<ra.count).map { ra.obj($0) }
-                self.card("规则作用于实例所在子网的安全列表").muted("同子网实例共享；不支持对 0.0.0.0/0 放行全部端口")
                 // 全部 / 入站 / 出站 分段切换（始终显示）；规则超过 10 条时显示筛选框（端口、IP/CIDR、协议、描述）
-                self.view(AnyView(SgRulesView(f: self.sgFilter, rules: rules, onDelete: { ru in self.sgDelete(inst, ru) })))
+                self.view(AnyView(SgRulesView(f: self.sgFilter, rules: rules, onDelete: { ru in self.sgDelete(sid, ru) })))
+                if !nsgText.isEmpty {
+                    let nc = self.card("网络安全组（NSG，只读）")
+                    nc.text(nsgText, 13)
+                    nc.muted("NSG 规则与安全列表同时生效（取并集），App 不修改 NSG，请到 OCI 控制台查看。")
+                }
             }
         }
     }
 
-    func sgDelete(_ inst: String, _ ru: JObj) {
+    /// 子网 / VCN 改名：只改显示名称（display_name），不影响实例、IP、安全规则；保存后刷新并保持选中。
+    func renameSubnet(_ s: JObj) {
+        let sid = s.optString("id"), vid = str(s, "vcn_id", "")
+        let oldS = str(s, "name", ""), oldV = str(s, "vcn_name", "")
+        var f: [Field] = [Field.text("subnet", "子网名称", oldS)]
+        if !vid.isEmpty { f.append(Field.text("vcn", "所属 VCN 名称（可一并修改）", oldV)) }
+        form("子网改名", "只修改显示名称，不影响子网里的实例、IP 和安全规则。" + str(s, "cidr", ""), f, "保存") { v in
+            let ns = v.optString("subnet").trimmingCharacters(in: .whitespacesAndNewlines)
+            let nv = v.optString("vcn").trimmingCharacters(in: .whitespacesAndNewlines)
+            if ns.isEmpty || (!vid.isEmpty && nv.isEmpty) { self.toast("名称不能为空"); return }
+            if ns.count > 255 || nv.count > 255 { self.toast("名称最多 255 个字符"); return }
+            let chS = ns != oldS
+            let chV = !vid.isEmpty && nv != oldV
+            if !chS && !chV { self.toast("名称没有变化"); return }
+            let done: () -> Void = {
+                self.toast("已改名")
+                self.sgSub = sid
+                Prefs.set("sgsub_\(self.id)", sid)
+                self.refresh()
+            }
+            let vcnStep: () -> Void = {
+                if chV { self.patchName("/oci/vcns/" + enc(vid), nv, done) } else { done() }
+            }
+            if chS { self.patchName("/oci/subnets/" + enc(sid), ns, vcnStep) } else { vcnStep() }
+        }
+    }
+
+    func patchName(_ path: String, _ name: String, _ then: @escaping () -> Void) {
+        request("PATCH", "/accounts/\(id)" + path, ["display_name": name, "region": region()]) { _ in then() }
+    }
+
+    func sgDelete(_ subnetId: String, _ ru: JObj) {
         let inbound = ru.optString("direction") == "ingress"
         let warn22: String = inbound && ru.optString("port") == "22" ? "\n⚠️ 删除 22 端口规则可能导致无法 SSH 登录。" : ""
         confirm("删除规则", "删除这条规则？" + warn22) {
             let p = ru.optString("protocol")
             let proto = p == "全部" ? "all" : p.lowercased()
-            var b: JObj = ["instance_id": inst, "region": self.region(), "sl_id": ru.optString("sl_id"),
+            var b: JObj = ["subnet_id": subnetId, "region": self.region(), "sl_id": ru.optString("sl_id"),
                            "direction": ru.optString("direction"), "protocol": proto, "cidr": ru.optString("cidr")]
             if let pm = ru.opt("port_min") { b["port_min"] = pm }
             if let px = ru.opt("port_max") { b["port_max"] = px }
@@ -91,7 +161,7 @@ extension AccountPage {
             Field.multi("ports", "端口（TCP / UDP）", ""),
             Field.text("description", "描述（可选）", "")], "添加") { v in
             var b = v
-            b["instance_id"] = self.sgInst ?? ""
+            b["subnet_id"] = self.sgSub ?? ""
             b["region"] = self.region()
             let cidr = v.optString("cidr").replacingOccurrences(of: " ", with: "")
             let isPublic = v.optString("direction") == "ingress" && (cidr == "0.0.0.0/0" || cidr == "::/0")

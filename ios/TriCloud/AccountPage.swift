@@ -8,8 +8,11 @@ final class AccountPage: Page {
     let id: Int
     var tab: String
     var defaults: JObj = [:]
-    var sgInst: String?
     var fdRegion = "swedencentral"
+    /// build 19：Lightsail 支持的区域（GET /regions?service=lightsail，成功才缓存）。
+    var lsRegs: [String]?
+    /// build 19：安全组按子网选择（记住上次子网）。
+    var sgSub: String?
     /// 对象存储：当前 Bucket 与前缀（nil = Bucket 列表）。
     var objBucket: String?
     var objPrefix = ""
@@ -70,21 +73,64 @@ final class AccountPage: Page {
             self.refresh()
         }
         if prov != "azure" && !["cloudfront", "quota", "billing", "subscription", "regions"].contains(tab) {
-            nav("globe.asia.australia.fill", "区域", region(), tint: .teal) { self.pickRegion() }
+            nav("globe.asia.australia.fill", "区域", Regions.label(region()), tint: .teal) { self.pickRegion() }
         }
     }
 
     func pickRegion() {
+        if tab == "lightsail" {   // build 19：Lightsail 只列它支持的区域（如台北 ap-east-2 没有）
+            withLsRegions { rs in self.pickRegion(rs) }
+            return
+        }
         get("/accounts/\(id)/regions") { x in
             let a = jarr(x)
-            let rs = (0..<a.count).map { a.string($0) }
-            if rs.isEmpty { self.toast("没有可选区域"); return }
-            self.choose("选择区域（当前 " + self.region() + "）", rs) { i in
-                Prefs.set("region_\(self.id)", rs[i])
-                self.objBucket = nil
-                self.objPrefix = ""
-                self.refresh()
+            self.pickRegion((0..<a.count).map { a.string($0) })
+        }
+    }
+
+    /// GET /regions?service=lightsail（账号已启用 ∩ Lightsail 支持）；失败回调空数组（不做过滤）。
+    func withLsRegions(_ cb: @escaping ([String]) -> Void) {
+        if let l = lsRegs { cb(l); return }
+        setBusy(true)
+        Api.call("GET", "/accounts/\(id)/regions?service=lightsail", nil) { res in
+            self.setBusy(false)
+            var l: [String] = []
+            switch res {
+            case .success(let x):
+                let a = jarr(x)
+                l = (0..<a.count).map { a.string($0) }
+                if !l.isEmpty { self.lsRegs = l }
+            case .failure(let e):
+                if let ae = e as? ApiError, ae.code == 401 { self.toLogin(); return }
             }
+            cb(l)
+        }
+    }
+
+    /// 当前保存的区域 Lightsail 不支持时：切到账号默认区域（若支持）或第一个可用区域，并提示。
+    func lsEnsure(_ then: @escaping () -> Void) {
+        let g = gen
+        withLsRegions { l in
+            guard self.cur(g), self.tab == "lightsail" else { return }
+            let curR = self.region()
+            if !l.isEmpty && !l.contains(curR) {
+                let def = str(self.acc, "region", "")
+                let to = l.contains(def) ? def : l[0]
+                Prefs.set("region_\(self.id)", to)
+                self.toast("Lightsail 不支持 " + Regions.label(curR) + "，已切换到 " + Regions.label(to))
+                self.header()
+            }
+            then()
+        }
+    }
+
+    func pickRegion(_ rs: [String]) {
+        if rs.isEmpty { toast("没有可选区域"); return }
+        choose("选择区域（当前 " + Regions.label(region()) + "）", rs.map { Regions.label($0) }) { i in
+            Prefs.set("region_\(self.id)", rs[i])
+            self.objBucket = nil
+            self.objPrefix = ""
+            self.refresh()
         }
     }
 
@@ -103,7 +149,7 @@ final class AccountPage: Page {
         header()
         switch tab {
         case "instances", "ec2", "vms": instances("vm")
-        case "lightsail": instances("lightsail")
+        case "lightsail": lsEnsure { self.instances("lightsail") }
         case "create": ociCreate(false)
         case "snatch": ociCreate(true)
         case "cloudfront": cloudfront()
@@ -135,7 +181,7 @@ final class AccountPage: Page {
         get("/accounts/\(id)/instances?kind=\(kind)&" + rq()) { r in
             guard self.cur(g) else { return }
             let a = jarr(r)
-            if a.isEmpty { self.card(self.prov == "azure" ? "订阅里没有虚拟机" : "该区域没有实例").muted(self.prov == "azure" ? "" : self.region()) }
+            if a.isEmpty { self.card(self.prov == "azure" ? "订阅里没有虚拟机" : "该区域没有实例").muted(self.prov == "azure" ? "" : Regions.label(self.region())) }
             for i in 0..<a.count { self.instCard(a.obj(i), kind) }
             if kind == "lightsail" { self.lsStaticIps(a) }
         }
@@ -147,7 +193,7 @@ final class AccountPage: Page {
         let spec = prov == "oci" ? inst.optString("shape") + " " + str(inst, "ocpus", "?") + "C/" + str(inst, "memory_gb", "?") + "G" : inst.optString("shape")
         c.text("公网 IP：" + str(inst, "public_ip", "-") + "\n内网 IP：" + str(inst, "private_ip", "-")
                + "\nIPv6：" + ((v6?.count ?? 0) > 0 ? join(v6) : "-")
-               + "\n规格：" + spec + "\n可用区：" + str(inst, "zone", "-"), 13)
+               + "\n规格：" + spec + "\n可用区：" + Regions.label(str(inst, "zone", "-")), 13)
         if kind == "lightsail" { c.muted("镜像 " + str(inst, "blueprint", "-") + " · 静态 IP " + (inst.optBoolean("static_ip") ? "是" : "否")) }
         if prov == "azure" && !inst.isNull("resource_group") { c.muted("资源组 " + inst.optString("resource_group")) }
         let r = c.row()

@@ -30,13 +30,13 @@ extension AccountPage {
             guard self.cur(g) else { return }
             let d = jobj(r)
             let top = self.card("Foundry（Azure AI）")
-            top.muted("创建 AI Services 资源并部署 GPT 等模型，拿到 Endpoint 和 Key 可按 OpenAI 接口调用。按调用量计费，会消耗订阅额度。\n当前区域：" + self.fdRegion)
+            top.muted("创建 AI Services 资源并部署 GPT 等模型，拿到 Endpoint 和 Key 可按 OpenAI 接口调用。按调用量计费，会消耗订阅额度。\n当前区域：" + Regions.label(self.fdRegion))
             let tr = top.row()
             let regs = d.optJSONArray("regions")
             tr.button("切换区域") {
                 guard let regs = regs else { return }
                 let l = (0..<regs.count).map { regs.string($0) }
-                self.choose("区域", l) { idx in self.fdRegion = l[idx]; self.refresh() }
+                self.choose("区域", l.map { Regions.label($0) }) { idx in self.fdRegion = l[idx]; self.refresh() }
             }
             tr.button("＋ 新建资源并部署") { self.fdDeploy(nil, d.optJSONArray("models")) }
             let res = d.optJSONArray("resources") ?? []
@@ -44,7 +44,7 @@ extension AccountPage {
             for i in 0..<res.count {
                 let x = res.obj(i)
                 let c = self.card(x.optString("name") + "  [" + x.optString("kind") + "]")
-                var sb = x.optString("region") + " · " + x.optString("resource_group") + "\n" + str(x, "endpoint", "-")
+                var sb = Regions.label(x.optString("region")) + " · " + x.optString("resource_group") + "\n" + str(x, "endpoint", "-")
                 let deps = x.optJSONArray("deployments") ?? []
                 for j in 0..<deps.count {
                     let dp = deps.obj(j)

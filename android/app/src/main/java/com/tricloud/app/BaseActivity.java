@@ -464,7 +464,7 @@ public abstract class BaseActivity extends AppCompatActivity {
             line.setOrientation(LinearLayout.HORIZONTAL);
             p.addView(line);
         } else line = (LinearLayout) p.getChildAt(p.getChildCount() - 1);
-        boolean danger = label.contains("删除") || label.contains("终止") || label.contains("销毁");
+        boolean danger = label.contains("删除") || label.contains("终止") || label.contains("销毁") || label.contains("清空");
         MaterialButton b = new MaterialButton(new ContextThemeWrapper(this,
                 danger ? R.style.ThemeOverlay_TriCloud_Danger : R.style.ThemeOverlay_TriCloud_Tonal));
         b.setText(label);

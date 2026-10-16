@@ -94,13 +94,65 @@ public class AccountActivity extends BaseActivity {
         clear();
         if (!MainActivity.noRegion(prov) && !Arrays.asList("cloudfront", "quota", "billing", "subscription", "regions").contains(tab)) {
             LinearLayout r2 = row(body);
-            button(r2, "区域：" + region(), v -> Api.get(this, "/accounts/" + id + "/regions", x -> {
-                JSONArray a = Api.arr(x);
-                String[] rs = new String[a.length()];
-                for (int i = 0; i < rs.length; i++) rs[i] = a.optString(i);
-                choose("选择区域", rs, i -> { Api.setPref("region_" + id, rs[i]); refresh(); });
-            }));
+            boolean ls = "lightsail".equals(tab);   // build 19：Lightsail 只列它支持的区域（如台北 ap-east-2 没有）
+            button(r2, "区域：" + Regions.label(region()), v -> {
+                if (ls) withLsRegions(this::pickRegion);
+                else Api.get(this, "/accounts/" + id + "/regions", this::pickRegion);
+            });
         }
+    }
+
+    /** 区域选择：显示「代码 · 城市」，保存纯代码。 */
+    private void pickRegion(Object x) {
+        JSONArray a = Api.arr(x);
+        if (a.length() == 0) { toast("没有可选区域"); return; }
+        String[] rs = new String[a.length()];
+        for (int i = 0; i < rs.length; i++) rs[i] = a.optString(i);
+        choose("选择区域（当前 " + Regions.label(region()) + "）", Regions.labels(rs), i -> { Api.setPref("region_" + id, rs[i]); refresh(); });
+    }
+
+    // ---------------- Lightsail 区域（build 19） ----------------
+    private JSONArray lsRegs;
+
+    /** GET /regions?service=lightsail（账号已启用 ∩ Lightsail 支持）；失败回调空列表（不做过滤），成功才缓存。 */
+    private void withLsRegions(Api.Cb cb) {
+        if (lsRegs != null) { cb.ok(lsRegs); return; }
+        Api.job(this, () -> {
+            try { return Api.call("GET", "/accounts/" + id + "/regions?service=lightsail", null); }
+            catch (Api.ApiError e) { if (e.code == 401) throw e; return new JSONArray(); }
+            catch (Exception e) { return new JSONArray(); }
+        }, r -> {
+            JSONArray a = Api.arr(r);
+            if (a.length() > 0) lsRegs = a;
+            cb.ok(a);
+        });
+    }
+
+    /** 当前保存的区域 Lightsail 不支持时：切到账号默认区域（若支持）或第一个可用区域，并提示。 */
+    private void lsEnsure(Runnable then) {
+        withLsRegions(x -> {
+            if (!"lightsail".equals(tab)) return;
+            JSONArray a = Api.arr(x);
+            List<String> l = new ArrayList<>();
+            for (int i = 0; i < a.length(); i++) l.add(a.optString(i));
+            String cur = region();
+            if (!l.isEmpty() && !l.contains(cur)) {
+                String def = str(acc, "region", "");
+                String to = l.contains(def) ? def : l.get(0);
+                Api.setPref("region_" + id, to);
+                toast("Lightsail 不支持 " + Regions.label(cur) + "，已切换到 " + Regions.label(to));
+                header();
+            }
+            then.run();
+        });
+    }
+
+    /** 区域下拉字段：值为纯代码，显示带城市名。 */
+    private Field regionSel(String k, String label, String def, JSONArray a) {
+        int n = a == null ? 0 : a.length();
+        String[] ids = new String[n];
+        for (int i = 0; i < n; i++) ids[i] = a.optString(i);
+        return Field.select(k, label, def, ids, Regions.labels(ids));
     }
 
     @Override
@@ -108,7 +160,7 @@ public class AccountActivity extends BaseActivity {
         header();
         switch (tab) {
             case "instances": case "ec2": case "vms": instances("vm"); break;
-            case "lightsail": instances("lightsail"); break;
+            case "lightsail": lsEnsure(() -> instances("lightsail")); break;
             case "create": ociCreate(false); break;
             case "snatch": ociCreate(true); break;
             case "cloudfront": cloudfront(); break;
@@ -136,7 +188,7 @@ public class AccountActivity extends BaseActivity {
         if ("azure".equals(prov)) bigButton("＋ 创建 Azure VM", v -> azureCreate());
         Api.get(this, "/accounts/" + id + "/instances?kind=" + kind + "&" + rq(), r -> {
             JSONArray a = Api.arr(r);
-            if (a.length() == 0) muted(card("该区域没有实例"), region());
+            if (a.length() == 0) muted(card("该区域没有实例"), Regions.label(region()));
             for (int i = 0; i < a.length(); i++) instCard(a.optJSONObject(i), kind);
             if ("lightsail".equals(kind)) lsStaticIps(a);
         });
@@ -148,7 +200,7 @@ public class AccountActivity extends BaseActivity {
         String spec = "oci".equals(prov) ? inst.optString("shape") + " " + str(inst, "ocpus", "?") + "C/" + str(inst, "memory_gb", "?") + "G" : inst.optString("shape");
         text(c, "公网 IP：" + str(inst, "public_ip", "-") + "\n内网 IP：" + str(inst, "private_ip", "-")
                 + "\nIPv6：" + (v6 != null && v6.length() > 0 ? join(v6) : "-")
-                + "\n规格：" + spec + "\n可用区：" + str(inst, "zone", "-"), 13, false);
+                + "\n规格：" + spec + "\n可用区：" + Regions.label(str(inst, "zone", "-")), 13, false);
         LinearLayout r = row(c);
         button(r, "启动", v -> simple(inst, kind, "start", "启动"));
         button(r, "azure".equals(prov) ? "停止(释放)" : "停止", v -> simple(inst, kind, "stop", "停止"));
@@ -397,7 +449,7 @@ public class AccountActivity extends BaseActivity {
             f.add(Field.check("password_login", "生成随机 root 密码（可在「开机密码」查看）", true));
             f.add(scriptField());
             f.add(Field.multi("script", "或直接填写开机脚本（可选）", ""));
-            form("创建 EC2（" + region() + "）", null, f, "创建", v -> {
+            form("创建 EC2（" + Regions.label(region()) + "）", null, f, "创建", v -> {
                 try { Api.post(this, "/accounts/" + id + "/aws/ec2-create", v.put("region", region()), x -> { created(Api.obj(x)); body.postDelayed(this::refresh, 4000); }); }
                 catch (Exception ignored) { }
             });
@@ -410,7 +462,7 @@ public class AccountActivity extends BaseActivity {
             if (d == null) d = new JSONObject();
             List<Field> f = new ArrayList<>();
             f.add(Field.text("name", "名称", "vm-" + Long.toString(System.currentTimeMillis() / 1000, 36)));
-            f.add(sel("location", "区域", Api.pref("azloc_" + id, d.optString("location", "eastasia")), Api.arr(r), false));
+            f.add(regionSel("location", "区域", Api.pref("azloc_" + id, d.optString("location", "eastasia")), Api.arr(r)));
             String[] sizes = {"Standard_B1s", "Standard_B1ms", "Standard_B2ats_v2", "Standard_B2pts_v2", "Standard_B2s", "Standard_D2as_v5"};
             String ds = d.optString("size", "Standard_B1s");
             if (!Arrays.asList(sizes).contains(ds)) { sizes = Arrays.copyOf(sizes, sizes.length + 1); sizes[sizes.length - 1] = ds; }
@@ -440,7 +492,7 @@ public class AccountActivity extends BaseActivity {
             if (d == null) d = new JSONObject();
             List<Field> f = new ArrayList<>();
             f.add(Field.text("name", "名称", "ls-" + Long.toString(System.currentTimeMillis() / 1000, 36)));
-            f.add(sel("zone", "可用区", d.optString("zone"), o.optJSONArray("zones"), false));
+            f.add(regionSel("zone", "可用区", d.optString("zone"), o.optJSONArray("zones")));
             f.add(sel("blueprint", "系统镜像", d.optString("blueprint"), o.optJSONArray("blueprints"), true));
             f.add(sel("bundle", "套餐", d.optString("bundle"), o.optJSONArray("bundles"), true));
             f.add(Field.select("ip_type", "网络", "dualstack", new String[]{"dualstack", "ipv6"}, new String[]{"IPv4 + IPv6", "仅 IPv6"}));
@@ -472,17 +524,41 @@ public class AccountActivity extends BaseActivity {
             "E2.1.Micro · AMD 1/8 OCPU · 1 GB · ✅ Always Free（最多 2 台）",
             "E4.Flex · AMD · 💰 付费，非 Always Free",
             "Standard3.Flex · Intel · 💰 付费，非 Always Free"};
+    /** A1 免费额度按账号类型（与后端 core.oci_a1_free 一致）：plan_type 为 FREE_TIER → free，其他非空 → paid，未知 → unknown。 */
+    String a1Basis() {
+        JSONObject a = acc;
+        if (Api.accounts != null)
+            for (int i = 0; i < Api.accounts.length(); i++) if (Api.accounts.optJSONObject(i).optInt("id") == id) a = Api.accounts.optJSONObject(i);
+        try {
+            String raw = str(a, "acct_type", "");
+            String plan = raw.isEmpty() ? "" : str(new JSONObject(raw), "plan_type", "");
+            return plan.isEmpty() ? "unknown" : "FREE_TIER".equals(plan) ? "free" : "paid";
+        } catch (Exception e) { return "unknown"; }
+    }
+
+    String[] shapeLabels() {
+        String[] l = SHAPE_LABELS.clone();
+        String b = a1Basis();
+        if ("free".equals(b)) l[0] = "A1.Flex · ARM · ✅ Always Free（免费号合计 2 OCPU / 12 GB）";
+        else if ("paid".equals(b)) l[0] = "A1.Flex · ARM · ✅ Always Free（PAYG 合计 4 OCPU / 24 GB）";
+        return l;
+    }
+
     private void ociCreate(boolean snatch) {
         JSONObject d = defaults.optJSONObject("oci");
         if (d == null) d = new JSONObject();
+        boolean freeA1 = !"paid".equals(a1Basis());   // 免费号 / 未知按 2 OCPU / 12 GB 给默认值
         LinearLayout c = card(snatch ? "自动抢机" : "创建实例");
         muted(c, snatch ? "容量不足时按间隔重试，成功/失败/停止推送 Telegram。" : "默认值来自 设置 → 默认创建参数");
+        String b0 = a1Basis();
+        muted(c, "A1 免费额度：" + ("paid".equals(b0) ? "PAYG 账号 4 OCPU / 24 GB" : "free".equals(b0) ? "免费号 2 OCPU / 12 GB（2026-06 起）"
+                : "免费号 2 OCPU / 12 GB，PAYG 4 OCPU / 24 GB（未识别账号类型，可在云账号页「类型」里刷新）") + "，超出部分计费。");
         String[] shapes = SHAPES;
         List<Field> f = new ArrayList<>(Arrays.asList(
                 Field.text("name", "实例名称", "oci-" + Long.toString(System.currentTimeMillis() / 1000, 36)),
-                Field.select("shape", "规格", d.optString("shape", shapes[0]), shapes, SHAPE_LABELS),
-                Field.num("ocpus", "OCPU", d.optString("ocpus", "4")),
-                Field.num("memory_gb", "内存 GB", d.optString("memory_gb", "24")),
+                Field.select("shape", "规格", d.optString("shape", shapes[0]), shapes, shapeLabels()),
+                Field.num("ocpus", "OCPU", d.optString("ocpus", freeA1 ? "2" : "4")),
+                Field.num("memory_gb", "内存 GB", d.optString("memory_gb", freeA1 ? "12" : "24")),
                 Field.num("disk_gb", "引导卷 GB", d.optString("disk_gb", "50")),
                 osImageField(d.optString("os", "Canonical Ubuntu"), str(d, "os_version", "")),
                 Field.text("ad", "可用域（留空=第一个）", str(d, "ad", "")),
@@ -644,29 +720,94 @@ public class AccountActivity extends BaseActivity {
         });
     }
 
-    // ---------------- OCI 安全组（v1.5） ----------------
-    private String sgInst;
+    // ---------------- OCI 安全组：按子网选择（build 19，安全列表挂在子网上，同子网实例共享） ----------------
+    private String sgSub;
+
+    /** 「VCN / 子网 CIDR · 实例1、实例2」，实例多于 4 台时「… 等 N 台」，与 Web subnetLabel 一致。 */
+    static String subnetLabel(JSONObject s) {
+        JSONArray ins = s.optJSONArray("instances");
+        int n = ins == null ? 0 : ins.length();
+        StringBuilder names = new StringBuilder();
+        for (int i = 0; i < Math.min(n, 4); i++) { if (i > 0) names.append("、"); names.append(str(ins.optJSONObject(i), "name", "?")); }
+        String tail = n == 0 ? "无实例" : names + (n > 4 ? " 等 " + n + " 台" : "");
+        String vcn = str(s, "vcn_name", "");
+        return (vcn.isEmpty() ? "" : vcn + " / ") + str(s, "name", "子网") + " " + str(s, "cidr", "") + " · " + tail;
+    }
 
     private void secgroup() {
-        Api.get(this, "/accounts/" + id + "/instances?kind=vm&" + rq(), r -> {
-            JSONArray a = Api.arr(r);
-            if (a.length() == 0) { muted(card("该区域没有实例"), region()); return; }
-            String[] ids = new String[a.length()], names = new String[a.length()];
-            for (int i = 0; i < a.length(); i++) { ids[i] = a.optJSONObject(i).optString("id"); names[i] = a.optJSONObject(i).optString("name"); }
-            if (sgInst == null || !Arrays.asList(ids).contains(sgInst)) sgInst = Api.pref("sg_" + id, ids[0]);
-            if (!Arrays.asList(ids).contains(sgInst)) sgInst = ids[0];
-            String cur = names[Arrays.asList(ids).indexOf(sgInst)];
-            LinearLayout top = row(body);
-            button(top, "实例：" + cur, v -> choose("选择实例", names, i -> { sgInst = ids[i]; Api.setPref("sg_" + id, sgInst); refresh(); }));
+        Api.get(this, "/accounts/" + id + "/oci/security-subnets?" + rq(), r -> {
+            if (!"secgroup".equals(tab)) return;
+            JSONArray a = Api.obj(r).optJSONArray("subnets");
+            if (a == null || a.length() == 0) { muted(card("该区域没有子网"), Regions.label(region())); return; }
+            String[] ids = new String[a.length()], labels = new String[a.length()];
+            for (int i = 0; i < a.length(); i++) { ids[i] = a.optJSONObject(i).optString("id"); labels[i] = subnetLabel(a.optJSONObject(i)); }
+            List<String> idl = Arrays.asList(ids);
+            if (sgSub == null || !idl.contains(sgSub)) sgSub = Api.pref("sgsub_" + id, "");
+            if (!idl.contains(sgSub)) {   // 旧版记的是实例：换成该实例所在的子网
+                String li = Api.pref("sg_" + id, "");
+                sgSub = ids[0];
+                for (int i = 0; i < a.length(); i++) {
+                    JSONArray ins = a.optJSONObject(i).optJSONArray("instances");
+                    for (int j = 0; ins != null && j < ins.length(); j++) if (li.equals(ins.optJSONObject(j).optString("id"))) sgSub = ids[i];
+                }
+            }
+            Api.setPref("sgsub_" + id, sgSub);
+            int si = idl.indexOf(sgSub);
+            JSONObject sub = a.optJSONObject(si);
+            LinearLayout sc = card("子网");
+            text(sc, labels[si], 14, true);
+            muted(sc, "安全列表跟着子网走：规则对该子网里的所有实例生效；不支持对 0.0.0.0/0 放行全部端口");
+            LinearLayout top = row(sc);
+            button(top, "切换子网", v -> choose("选择子网", labels, i -> { sgSub = ids[i]; Api.setPref("sgsub_" + id, sgSub); refresh(); }));
+            button(top, "改名", v -> renameSubnet(sub));
             button(top, "＋ 添加规则", v -> sgAdd());
-            Api.get(this, "/accounts/" + id + "/security-rules?instance_id=" + Api.enc(sgInst) + "&" + rq(), x -> {
-                JSONObject o = Api.obj(x);
-                JSONArray rules = o.optJSONArray("rules");
-                muted(card("规则作用于实例所在子网的安全列表"), "同子网实例共享；不支持对 0.0.0.0/0 放行全部端口");
+            // 实例另挂的 NSG：只读提示
+            StringBuilder ns = new StringBuilder();
+            JSONArray ins = sub.optJSONArray("instances");
+            for (int i = 0; ins != null && i < ins.length(); i++) {
+                JSONObject in = ins.optJSONObject(i);
+                JSONArray g = in.optJSONArray("nsgs");
+                if (g == null || g.length() == 0) continue;
+                StringBuilder gn = new StringBuilder();
+                for (int j = 0; j < g.length(); j++) { if (j > 0) gn.append("、"); gn.append(str(g.optJSONObject(j), "name", "?")); }
+                ns.append(str(in, "name", "?")).append("：此实例另挂 NSG：").append(gn).append("\n");
+            }
+            if (ns.length() > 0) {
+                LinearLayout nc = card("网络安全组（NSG，只读）");
+                text(nc, ns.toString().trim(), 13, false);
+                muted(nc, "NSG 规则与安全列表同时生效（取并集），App 不修改 NSG，请到 OCI 控制台查看。");
+            }
+            Api.get(this, "/accounts/" + id + "/security-rules?subnet_id=" + Api.enc(sgSub) + "&" + rq(), x -> {
+                if (!"secgroup".equals(tab)) return;
+                JSONArray rules = Api.obj(x).optJSONArray("rules");
                 sgRules = rules == null ? new JSONArray() : rules;
                 sgFilterBar();
             });
         });
+    }
+
+    /** 子网 / VCN 改名：只改显示名称（display_name），不影响实例、IP、安全规则；保存后刷新并保持选中。 */
+    private void renameSubnet(JSONObject s) {
+        String sid = s.optString("id"), vid = str(s, "vcn_id", "");
+        String oldS = str(s, "name", ""), oldV = str(s, "vcn_name", "");
+        List<Field> f = new ArrayList<>();
+        f.add(Field.text("subnet", "子网名称", oldS));
+        if (!vid.isEmpty()) f.add(Field.text("vcn", "所属 VCN 名称（可一并修改）", oldV));
+        form("子网改名", "只修改显示名称，不影响子网里的实例、IP 和安全规则。" + str(s, "cidr", ""), f, "保存", v -> {
+            String nsub = v.optString("subnet").trim(), nvcn = v.optString("vcn").trim();
+            if (nsub.isEmpty() || (!vid.isEmpty() && nvcn.isEmpty())) { toast("名称不能为空"); return; }
+            if (nsub.length() > 255 || nvcn.length() > 255) { toast("名称最多 255 个字符"); return; }
+            boolean chS = !nsub.equals(oldS), chV = !vid.isEmpty() && !nvcn.equals(oldV);
+            if (!chS && !chV) { toast("名称没有变化"); return; }
+            Runnable done = () -> { toast("已改名"); sgSub = sid; Api.setPref("sgsub_" + id, sid); refresh(); };
+            Runnable vcnStep = () -> { if (chV) patchName("/oci/vcns/" + Api.enc(vid), nvcn, done); else done.run(); };
+            if (chS) patchName("/oci/subnets/" + Api.enc(sid), nsub, vcnStep); else vcnStep.run();
+        });
+    }
+
+    private void patchName(String path, String name, Runnable then) {
+        try { Api.async(this, "PATCH", "/accounts/" + id + path, new JSONObject().put("display_name", name).put("region", region()), x -> then.run()); }
+        catch (Exception ignored) { }
     }
 
     // ---------- 安全组规则轻量筛选：方向分段切换（始终显示）+ 超过 10 条时显示关键词框 ----------
@@ -745,7 +886,7 @@ public class AccountActivity extends BaseActivity {
                 try {
                     String p = ru.optString("protocol");
                     String proto = "全部".equals(p) ? "all" : p.toLowerCase(Locale.ROOT);
-                    JSONObject b = new JSONObject().put("instance_id", sgInst).put("region", region()).put("sl_id", ru.optString("sl_id"))
+                    JSONObject b = new JSONObject().put("subnet_id", sgSub).put("region", region()).put("sl_id", ru.optString("sl_id"))
                             .put("direction", ru.optString("direction")).put("protocol", proto).put("cidr", ru.optString("cidr"))
                             .put("port_min", ru.opt("port_min")).put("port_max", ru.opt("port_max"));
                     Api.async(this, "DELETE", "/accounts/" + id + "/security-rules", b, y -> { toast("已删除"); refresh(); });
@@ -767,7 +908,7 @@ public class AccountActivity extends BaseActivity {
                 Field.multi("ports", "端口（TCP / UDP）", ""),
                 Field.text("description", "描述（可选）", "")), "添加", v -> {
             try {
-                JSONObject b = new JSONObject(v.toString()).put("instance_id", sgInst).put("region", region());
+                JSONObject b = new JSONObject(v.toString()).put("subnet_id", sgSub).put("region", region());
                 String cidr = v.optString("cidr").replace(" ", "");
                 Runnable send = () -> Api.post(this, "/accounts/" + id + "/security-rules", b, x -> {
                     JSONObject o = Api.obj(x);
@@ -801,7 +942,7 @@ public class AccountActivity extends BaseActivity {
             muted(c, String.format(java.util.Locale.US, "已用 %.2f%% · 入站 %s（不计费）· %s UTC", free > 0 ? out / free * 100 : 0, gb(d, "in_gb"), d.optString("period")));
             muted(c, "10TB 免费出站按整个租户所有区域合计。需要超量提醒或自动停机，用「流量守护」。");
             JSONArray items = d.optJSONArray("items");
-            if (items == null || items.length() == 0) { muted(card("本区域没有实例"), region()); return; }
+            if (items == null || items.length() == 0) { muted(card("本区域没有实例"), Regions.label(region())); return; }
             java.util.Map<String, android.widget.TextView> gtv = new java.util.HashMap<>();
             java.util.Map<String, LinearLayout> grow = new java.util.HashMap<>();
             for (int i = 0; i < items.length(); i++) {
@@ -844,7 +985,7 @@ public class AccountActivity extends BaseActivity {
             JSONObject v = q.optJSONObject("standard_vcpu"), cf = q.optJSONObject("cloudfront_distributions");
             LinearLayout c1 = card("Standard vCPU 上限");
             text(c1, v == null ? "-" : v.optString("value") + " " + v.optString("unit"), 26, true);
-            muted(c1, "全区域最大值，来自 " + (v == null ? "-" : v.optString("region")) + "（L-1216C47A）");
+            muted(c1, "全区域最大值，来自 " + (v == null ? "-" : Regions.label(v.optString("region"))) + "（L-1216C47A）");
             LinearLayout c2 = card("CloudFront 分发数上限");
             text(c2, cf == null ? "-" : str(cf, "value", "-") + " " + cf.optString("unit"), 26, true);
             muted(c2, "每账号（L-24B04930）· 更新于 " + q.optString("updated_at"));
@@ -863,7 +1004,7 @@ public class AccountActivity extends BaseActivity {
             int n = items == null ? 0 : items.length();
             LinearLayout c = card("闲置资源月费估算");
             text(c, "$" + d.optString("monthly_total"), 26, true);
-            muted(c, "区域 " + d.optString("region") + " · " + n + " 项 · 按公示单价估算，实际以账单为准");
+            muted(c, "区域 " + Regions.label(d.optString("region")) + " · " + n + " 项 · 按公示单价估算，实际以账单为准");
             LinearLayout b = card("账单参考（缓存）");
             text(b, d.isNull("month_to_date") ? "—" : "$" + d.optString("month_to_date"), 22, true);
             muted(b, "本月已产生 · 数据更新于 " + d.optString("billing_updated_at"));
@@ -993,14 +1134,14 @@ public class AccountActivity extends BaseActivity {
         Api.get(this, "/accounts/" + id + "/azure/foundry?region=" + fdRegion, r -> {
             JSONObject d = Api.obj(r);
             LinearLayout top = card("Foundry（Azure AI）");
-            muted(top, "创建 AI Services 资源并部署 GPT 等模型，拿到 Endpoint 和 Key 可按 OpenAI 接口调用。按调用量计费，会消耗订阅额度。\n当前区域：" + fdRegion);
+            muted(top, "创建 AI Services 资源并部署 GPT 等模型，拿到 Endpoint 和 Key 可按 OpenAI 接口调用。按调用量计费，会消耗订阅额度。\n当前区域：" + Regions.label(fdRegion));
             LinearLayout tr = row(top);
             JSONArray regs = d.optJSONArray("regions");
             button(tr, "切换区域", v -> {
                 if (regs == null) return;
                 String[] l = new String[regs.length()];
                 for (int i = 0; i < l.length; i++) l[i] = regs.optString(i);
-                choose("区域", l, idx -> { fdRegion = l[idx]; refresh(); });
+                choose("区域", Regions.labels(l), idx -> { fdRegion = l[idx]; refresh(); });
             });
             button(tr, "＋ 新建资源并部署", v -> fdDeploy(null, d.optJSONArray("models")));
             JSONArray res = d.optJSONArray("resources");
@@ -1008,7 +1149,7 @@ public class AccountActivity extends BaseActivity {
             for (int i = 0; res != null && i < res.length(); i++) {
                 JSONObject x = res.optJSONObject(i);
                 LinearLayout c = card(x.optString("name") + "  [" + x.optString("kind") + "]");
-                StringBuilder sb = new StringBuilder(x.optString("region") + " · " + x.optString("resource_group") + "\n" + str(x, "endpoint", "-"));
+                StringBuilder sb = new StringBuilder(Regions.label(x.optString("region")) + " · " + x.optString("resource_group") + "\n" + str(x, "endpoint", "-"));
                 JSONArray deps = x.optJSONArray("deployments");
                 for (int j = 0; deps != null && j < deps.length(); j++) {
                     JSONObject dp = deps.optJSONObject(j);
@@ -1044,7 +1185,7 @@ public class AccountActivity extends BaseActivity {
                     catch (Exception ignored) { }
                 }));
             }
-            LinearLayout qc = card("模型配额 · " + fdRegion);
+            LinearLayout qc = card("模型配额 · " + Regions.label(fdRegion));
             JSONArray q = d.optJSONArray("quotas");
             StringBuilder qs = new StringBuilder();
             for (int i = 0; q != null && i < q.length(); i++) qs.append(q.optJSONObject(i).optString("name")).append("：").append(q.optJSONObject(i).optInt("used")).append(" / ").append(q.optJSONObject(i).optInt("limit")).append("\n");
@@ -1066,7 +1207,7 @@ public class AccountActivity extends BaseActivity {
         f.add(Field.select("sku", "部署类型", "GlobalStandard", new String[]{"GlobalStandard", "Standard"}, new String[]{"Global Standard", "Standard（仅本区域）"}));
         f.add(Field.num("capacity", "容量（千 TPM）", "10"));
         f.add(Field.text("deployment", "部署名（可选，默认模型名）", ""));
-        form(rid == null ? "新建资源并部署模型（" + fdRegion + "）" : "部署模型", "容量受配额限制；完成后在「Endpoint / Key」里拿调用地址。", f, "开始部署", v -> {
+        form(rid == null ? "新建资源并部署模型（" + Regions.label(fdRegion) + "）" : "部署模型", "容量受配额限制；完成后在「Endpoint / Key」里拿调用地址。", f, "开始部署", v -> {
             try {
                 String[] mm = v.optString("model").split("\\|", -1);
                 JSONObject b = new JSONObject().put("op", "deploy").put("model", mm[0]).put("sku", v.optString("sku")).put("capacity", v.optString("capacity", "10"));
@@ -1508,6 +1649,9 @@ public class AccountActivity extends BaseActivity {
 
     private void ociObjects() {
         if (objBucket == null) {
+            LinearLayout bk = card(BK_TITLE);
+            muted(bk, "加载中…");
+            billingKeep(bk, false, false);
             Api.get(this, "/accounts/" + id + "/oci/buckets?" + rq(), r -> {
                 JSONObject d = Api.obj(r);
                 LinearLayout top = card("对象存储");
@@ -1519,11 +1663,13 @@ public class AccountActivity extends BaseActivity {
                 }));
                 JSONArray bs = d.optJSONArray("buckets");
                 if (bs == null || bs.length() == 0) muted(card("暂无 Bucket"), "");
+                else muted(top, "大小、对象数为 OCI 定期统计的近似值，可能有几小时延迟。");
                 for (int i = 0; bs != null && i < bs.length(); i++) {
                     JSONObject b = bs.optJSONObject(i);
                     String nm = b.optString("name");
                     LinearLayout c = card("📁 " + nm);
-                    muted(c, "创建于 " + b.optString("created"));
+                    muted(c, "大小 " + (b.isNull("size") || !b.has("size") ? "—" : fmtBytes(b.optLong("size")))
+                            + " · 对象 " + str(b, "count", "—") + " · 存储层 " + tierLabel(b) + "\n创建于 " + b.optString("created"));
                     LinearLayout rr = row(c);
                     button(rr, "打开", v -> { objBucket = nm; objPrefix = ""; refresh(); });
                     button(rr, "删除", v -> confirm("删除 Bucket", "删除「" + nm + "」？Bucket 需为空。", () -> {
@@ -1582,6 +1728,202 @@ public class AccountActivity extends BaseActivity {
         });
     }
 
+    // ---------------- 保号账单（仅 PAYG，build 19 补到 App）：先检测已有存储，标准层补足到约 11 GB ----------------
+    static final String BK_TITLE = "一键生成保号账单";
+
+    static String tierLabel(JSONObject b) {
+        String t = str(b, "tier", "");
+        if (t.isEmpty()) {
+            String st = str(b, "storage_tier", ""), at = str(b, "auto_tiering", "Disabled");
+            t = "Archive".equals(st) ? "archive" : "Standard".equals(st) ? (!"Disabled".equals(at) ? "autotier" : "standard") : "unknown";
+        }
+        switch (t) {
+            case "standard": return "标准";
+            case "autotier": return "标准 · 自动分层";
+            case "archive": return "归档";
+            default: return "—";
+        }
+    }
+
+    private static String gib(long n) { return String.format(Locale.US, "%.2f GiB", n / 1073741824.0); }
+    private static String gb2(double v) { return String.format(Locale.US, "%.2f GB", v); }
+    private static String numStr(double v) { return new java.math.BigDecimal(String.valueOf(v)).stripTrailingZeros().toPlainString(); }
+
+    /** 卡片仍在当前页面上（切换标签 / 打开 Bucket 后丢弃过期回调）。 */
+    private boolean bkAlive(LinearLayout el) {
+        return "objects".equals(tab) && objBucket == null && el.getParent() != null && el.getParent().getParent() == body;
+    }
+
+    private static JSONObject errObj(Exception e) {
+        try { return new JSONObject().put("__error", e.getMessage() == null ? e.toString() : e.getMessage()); } catch (Exception x) { return new JSONObject(); }
+    }
+
+    /** 红色确认（危险操作）：确认按钮用 colorError。 */
+    private void dangerConfirm(String title, String msg, String okText, Runnable ok) {
+        androidx.appcompat.app.AlertDialog dlg = new com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle(title).setMessage(msg)
+                .setNegativeButton("取消", null).setPositiveButton(okText, (d, w) -> ok.run()).show();
+        android.widget.Button pb = dlg.getButton(android.content.DialogInterface.BUTTON_POSITIVE);
+        if (pb != null) pb.setTextColor(attr(com.google.android.material.R.attr.colorError));
+    }
+
+    private void billingKeep(LinearLayout el, boolean wasRunning, boolean rescan) {
+        Api.job(this, () -> {
+            try { return Api.call("GET", "/accounts/" + id + "/oci/billing-keep", null); }
+            catch (Api.ApiError e) { if (e.code == 401) throw e; return errObj(e); }
+        }, r -> {
+            if (!bkAlive(el)) return;
+            JSONObject d = Api.obj(r);
+            el.removeAllViews();
+            if (d.has("__error")) { text(el, BK_TITLE, 16, true); muted(el, "❌ " + d.optString("__error")); return; }
+            String plan = d.optString("plan");
+            text(el, BK_TITLE + " · " + ("paid".equals(plan) ? "PAYG" : "free".equals(plan) ? "免费号" : "类型未知"), 16, true);
+            if (!d.optBoolean("eligible")) { muted(el, str(d, "hint", "")); return; }   // 免费号：「免费号 20GB 内不收费，无需操作」
+            muted(el, d.optString("note"));
+            JSONObject t = d.optJSONObject("task");
+            if (t != null && "running".equals(t.optString("status"))) {
+                long up = t.optLong("uploaded"), tot = t.optLong("total");
+                int pct = tot > 0 ? (int) (up * 100 / tot) : 0;
+                com.google.android.material.progressindicator.LinearProgressIndicator pi = new com.google.android.material.progressindicator.LinearProgressIndicator(this);
+                pi.setMax(100);
+                pi.setProgressCompat(pct, false);
+                el.addView(pi, new LinearLayout.LayoutParams(-1, -2));
+                text(el, "上传中：" + gib(up) + " / " + gib(tot) + "（" + pct + "%）", 13, false);
+                int tid = t.optInt("id");
+                button(row(el), "查看任务 #" + tid, v -> openTask(tid));
+                body.postDelayed(() -> { if (!isFinishing() && bkAlive(el)) billingKeep(el, true, false); }, 3000);
+                return;
+            }
+            android.widget.TextView wait = muted(el, "正在检测已有存储…");
+            boolean fresh = rescan || wasRunning;
+            Api.job(this, () -> {
+                try { return Api.call("GET", "/accounts/" + id + "/oci/billing-keep/scan" + (fresh ? "?refresh=true" : ""), null); }
+                catch (Api.ApiError e) { if (e.code == 401) throw e; return errObj(e); }
+            }, sr -> {
+                if (!bkAlive(el)) return;
+                el.removeView(wait);
+                JSONObject sj = Api.obj(sr);
+                JSONObject sc = sj.has("__error") ? null : sj;
+                bkRender(el, d, sc, sc == null ? sj.optString("__error") : "");
+            });
+        });
+    }
+
+    private void bkRender(LinearLayout el, JSONObject d, JSONObject s, String scanErr) {
+        boolean over = s != null && s.optBoolean("over_free");
+        double used = s != null ? s.optDouble("standard_gb", 0) : 0;
+        double defGb = s != null ? s.optDouble("fill_gb", d.optDouble("default_gb", 11)) : d.optDouble("default_gb", 11);
+        if (s != null) {
+            JSONArray regs = s.optJSONArray("regions"), bks = s.optJSONArray("buckets");
+            int nb = bks == null ? 0 : bks.length();
+            text(el, "标准层已用 " + gb2(used) + " / 免费 " + numStr(s.optDouble("free_gb", 10)) + " GB", 14, true);
+            muted(el, (regs == null ? 0 : regs.length()) + " 个区域 · " + nb + " 个 Bucket" + (s.optBoolean("cached") ? " · " + Math.round(s.optInt("age") / 60.0) + " 分钟前检测" : ""));
+            text(el, over ? "✅ 已满足：标准层已超出 10 GB 免费额度，已经会产生小额账单，无需生成。"
+                    : "还差 " + numStr(s.optDouble("short_gb")) + " GB 才超出 10 GB 免费额度；建议补足 " + numStr(defGb) + " GB，补足后标准层合计约 " + gb2(used + defGb) + "。", 13, false);
+            List<String> extra = new ArrayList<>();
+            if (s.optDouble("autotier_gb", 0) > 0) extra.add("另有 " + gb2(s.optDouble("autotier_gb")) + " 在开了自动分层的标准层 Bucket 里（久未访问的对象会转低频层，未计入标准层）");
+            if (s.optDouble("archive_gb", 0) > 0) extra.add("归档层 " + gb2(s.optDouble("archive_gb")) + "（归档层单独计免费额度，不计入标准层）");
+            if (s.optInt("unknown_count") > 0) extra.add(s.optInt("unknown_count") + " 个 Bucket 读不到大小（显示 —，未计入）");
+            JSONArray errs = s.optJSONArray("errors");
+            if (errs != null && errs.length() > 0) {
+                StringBuilder eb = new StringBuilder();
+                for (int i = 0; i < errs.length(); i++) { if (i > 0) eb.append("、"); eb.append(Regions.label(errs.optJSONObject(i) == null ? errs.optString(i) : errs.optJSONObject(i).optString("region"))); }
+                extra.add("部分区域读取失败：" + eb);
+            }
+            if (s.optBoolean("compartments_truncated")) extra.add("区间太多，只检测了前 " + s.optInt("compartments") + " 个");
+            if (!extra.isEmpty()) muted(el, android.text.TextUtils.join("；", extra) + "。");
+            if (nb > 0) {
+                StringBuilder lb = new StringBuilder();
+                for (int i = 0; i < nb; i++) {
+                    JSONObject b = bks.optJSONObject(i);
+                    lb.append("• ").append(b.optString("name")).append(b.optBoolean("billing_keep") ? " [保号]" : "").append(" · ").append(Regions.label(b.optString("region")))
+                            .append(" · ").append(tierLabel(b)).append(" · ").append(b.isNull("size") || !b.has("size") ? "—" : fmtBytes(b.optLong("size")))
+                            .append(" · ").append(str(b, "count", "—")).append(" 个对象\n");
+                }
+                android.widget.TextView lt = text(el, lb.toString().trim(), 12, false);
+                lt.setVisibility(android.view.View.GONE);
+                android.widget.Button tg = button(row(el), "已有 Bucket（" + nb + "）", null);
+                tg.setOnClickListener(v -> lt.setVisibility(lt.getVisibility() == android.view.View.VISIBLE ? android.view.View.GONE : android.view.View.VISIBLE));
+            } else muted(el, "没有找到已有 Bucket。");
+            muted(el, "大小为 OCI 定期统计的近似值（approximateSize），刚上传的数据可能要几小时后才计入。");
+        } else {
+            text(el, "⚠️ 检测已有存储失败：" + scanErr + "。无法确认标准层已用量，默认按 " + numStr(defGb) + " GB 生成。", 13, false);
+        }
+        JSONObject t = d.optJSONObject("task");
+        if (d.optBoolean("exists")) {
+            text(el, "✅ 已存在保号对象 " + d.optString("bucket") + "/" + d.optString("object") + "：" + gib(d.optLong("size"))
+                    + "（" + Regions.label(d.optString("region")) + " · " + str(d, "storage_tier", "Standard") + "）", 13, false);
+            LinearLayout rr = row(el);
+            button(rr, "重新检测", v -> billingKeep(el, false, true));
+            button(rr, "删除", v -> bkDelete(el));
+            return;
+        }
+        JSONArray pend = d.optJSONArray("pending_uploads");
+        int np = pend == null ? 0 : pend.length();
+        boolean resumable = np > 0 && t != null && Arrays.asList("failed", "stopped", "interrupted").contains(t.optString("status")) && t.optLong("uploaded") > 0;
+        if (t != null && !"done".equals(t.optString("status"))) muted(el, "上次任务 #" + t.optInt("id") + "：" + t.optString("status") + " · " + str(t, "message", ""));
+        double minGb = d.optDouble("min_gb", 0.5), maxGb = d.optDouble("max_gb", 20);
+        com.google.android.material.textfield.TextInputLayout til = inputLayout("大小 GB（" + numStr(minGb) + "–" + numStr(maxGb) + "）", null,
+                android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        android.widget.EditText sz = til.getEditText();
+        sz.setText(numStr(defGb));
+        el.addView(til);
+        android.widget.TextView after = muted(el, "");
+        Runnable upd = () -> {
+            if (s == null) { after.setVisibility(android.view.View.GONE); return; }
+            double v;
+            try { v = Double.parseDouble(sz.getText().toString().trim()); } catch (Exception e) { v = 0; }
+            after.setText("补足后标准层合计约 " + gb2(used + v));
+        };
+        sz.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence q, int x, int y, int z) { }
+            @Override public void onTextChanged(CharSequence q, int x, int y, int z) { }
+            @Override public void afterTextChanged(android.text.Editable q) { upd.run(); }
+        });
+        upd.run();
+        String goText = resumable ? "继续上传（已传 " + gib(t.optLong("uploaded")) + "）" : over ? "仍要生成" : "生成保号账单";
+        android.view.View.OnClickListener go = v -> {
+            double size;
+            try { size = Double.parseDouble(sz.getText().toString().trim()); } catch (Exception e) { size = defGb; }
+            if (!(size >= minGb && size <= maxGb)) { toast("大小范围 " + numStr(minGb) + "–" + numStr(maxGb) + " GB"); return; }
+            double fs = size;
+            Runnable start = () -> confirm(BK_TITLE, d.optString("note") + "\n\n本次大小：" + numStr(fs) + " GB" + (s != null ? "，补足后标准层合计约 " + gb2(used + fs) : "")
+                    + "（标准层超出 10 GB 的部分按量计费）。删除对象即停止计费。确认开始？", () -> {
+                try {
+                    Api.post(this, "/accounts/" + id + "/oci/billing-keep", new JSONObject().put("size_gb", fs).put("confirm", true), x -> {
+                        JSONObject o = Api.obj(x);
+                        if (o.optBoolean("existed")) toast("对象已存在：" + gib(o.optLong("size")) + "，未重复上传");
+                        else toast(o.optBoolean("resumed") ? "已继续上传" : "已开始上传");
+                        if (bkAlive(el)) billingKeep(el, false, false);
+                    });
+                } catch (Exception ignored) { }
+            });
+            if (over) dangerConfirm("无需生成", "标准层已用 " + gb2(used) + "，已超出 10 GB 免费额度，已经会产生小额账单，无需生成。\n再生成会让账单变多，仍要继续？", "仍要继续", start);
+            else start.run();
+        };
+        if (over) {
+            LinearLayout rr = row(el);
+            button(rr, goText, go);
+            button(rr, "重新检测", v -> billingKeep(el, false, true));
+            if (np > 0) button(rr, "删除未完成的上传", v -> bkDelete(el));
+        } else {
+            com.google.android.material.button.MaterialButton gb = new com.google.android.material.button.MaterialButton(this);   // Filled：主操作
+            gb.setText(goText);
+            gb.setAllCaps(false);
+            gb.setOnClickListener(go);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.setMargins(0, dp(6), 0, dp(2));
+            el.addView(gb, lp);
+            LinearLayout rr = row(el);
+            button(rr, "重新检测", v -> billingKeep(el, false, true));
+            if (np > 0) button(rr, "删除未完成的上传", v -> bkDelete(el));
+        }
+    }
+
+    private void bkDelete(LinearLayout el) {
+        dangerConfirm("删除保号对象", "删除 tricloud-billing-keep 里的保号对象并中止未完成的上传（Bucket 空了一并删除）？之后不再产生这笔账单。", "删除",
+                () -> Api.del(this, "/accounts/" + id + "/oci/billing-keep?confirm=true", x -> { toast("已删除"); if (bkAlive(el)) billingKeep(el, false, true); }));
+    }
+
     static String fmtBytes(long b) {
         if (b < 1024) return b + " B";
         if (b < 1024 * 1024) return String.format(Locale.US, "%.1f KB", b / 1024.0);
@@ -1629,14 +1971,14 @@ public class AccountActivity extends BaseActivity {
         button(row(nc), "自动创建网络", v -> confirm("自动创建网络", "新建 VCN（含 IPv6）、互联网网关、路由和公有子网，安全列表默认只放行 22 与 ICMP。确定？", () -> {
             try { Api.post(this, "/accounts/" + id + "/oci/network", rb(), x -> taskOrToast(x, "已提交")); } catch (Exception ignored) { }
         }));
-        LinearLayout c = card("计算配额 · " + region());
+        LinearLayout c = card("计算配额 · " + Regions.label(region()));
         android.widget.TextView cLoading = muted(c, "加载中…");
         ociRegionSubSection();   // 页面最底部：默认折叠的「高级 · 区域订阅」
         Api.get(this, "/accounts/" + id + "/oci/limits?" + rq(), r -> {
             JSONObject d = Api.obj(r);
             JSONArray items = d.optJSONArray("items");
             c.removeView(cLoading);
-            ((android.widget.TextView) c.getChildAt(0)).setText("计算配额 · " + d.optString("region"));
+            ((android.widget.TextView) c.getChildAt(0)).setText("计算配额 · " + Regions.label(d.optString("region")));
             if (items == null || items.length() == 0) muted(c, "无数据");
             for (int i = 0; items != null && i < items.length(); i++) {
                 JSONObject it = items.optJSONObject(i);
@@ -1680,12 +2022,12 @@ public class AccountActivity extends BaseActivity {
             JSONArray rs = d.optJSONArray("regions");
             int sub = 0;
             for (int i = 0; rs != null && i < rs.length(); i++) if (rs.optJSONObject(i).optBoolean("subscribed")) sub++;
-            text(box, "已订阅 " + sub + " 个区域 · 主区域 " + str(d, "home", "-"), 14, true);
+            text(box, "已订阅 " + sub + " 个区域 · 主区域 " + Regions.label(str(d, "home", "-")), 14, true);
             muted(box, str(d, "limit_hint", "") + "。订阅不可撤销，订阅后可在区域选择里切换。");
             for (int i = 0; rs != null && i < rs.length(); i++) {
                 JSONObject x = rs.optJSONObject(i);
                 boolean s = x.optBoolean("subscribed");
-                text(box, x.optString("name") + (x.optBoolean("home") ? "  [主区域]" : ""), 14, true);
+                text(box, Regions.label(x.optString("name")) + (x.optBoolean("home") ? "  [主区域]" : ""), 14, true);
                 muted(box, x.optString("key") + " · " + (s ? str(x, "status", "已订阅") : "未订阅"));
                 if (!s) button(row(box), "订阅", v -> confirm("订阅区域", "订阅 " + x.optString("name") + "（" + x.optString("key") + "）？\n⚠️ 订阅后无法取消，免费账号的额外区域名额通常只有 1 个；Always Free 资源仍只在主区域。",
                         () -> typeKeyConfirm(x.optString("name"), x.optString("key"), () -> {
@@ -1739,7 +2081,7 @@ public class AccountActivity extends BaseActivity {
                 JSONObject x = rs.optJSONObject(i);
                 String status = x.optString("status");
                 boolean on = "ENABLED_BY_DEFAULT".equals(status) || "ENABLED".equals(status);
-                sb.append(on ? "✅ " : "DISABLED".equals(status) ? "⛔ " : "⏳ ").append(x.optString("region")).append("  ").append(status).append("\n");
+                sb.append(on ? "✅ " : "DISABLED".equals(status) ? "⛔ " : "⏳ ").append(Regions.label(x.optString("region"))).append("  ").append(status).append("\n");
                 if ("DISABLED".equals(status)) button(rr, "激活 " + x.optString("region"), v -> {
                     try { Api.post(this, "/accounts/" + id + "/aws/enable-region", new JSONObject().put("region", x.optString("region")), y -> { toast(str(Api.obj(y), "hint", "已提交")); refresh(); }); }
                     catch (Exception ignored) { }
@@ -1762,7 +2104,7 @@ public class AccountActivity extends BaseActivity {
                 if (x.optInt("ec2") == 0 && x.optInt("lightsail") == 0) continue;
                 n++;
                 String reg = x.optString("region");
-                text(sc, reg + " · EC2 " + x.optInt("ec2") + "（运行 " + x.optInt("ec2_running") + "）· Lightsail " + str(x, "lightsail", "-"), 13, false);
+                text(sc, Regions.label(reg) + " · EC2 " + x.optInt("ec2") + "（运行 " + x.optInt("ec2_running") + "）· Lightsail " + str(x, "lightsail", "-"), 13, false);
                 button(row(sc), "查看 " + reg, v -> { Api.setPref("region_" + id, reg); selectTab("ec2"); });
             }
             if (n == 0) muted(sc, "所有区域都没有实例");
@@ -1793,7 +2135,7 @@ public class AccountActivity extends BaseActivity {
 
     private void azRgs() {
         bigButton("＋ 新建资源组", v -> withLocs(l -> form("新建资源组", null, Arrays.asList(Field.text("name", "名称", ""),
-                sel("location", "区域", Api.pref("azloc_" + id, "eastasia"), Api.arr(l), false)), "创建",
+                regionSel("location", "区域", Api.pref("azloc_" + id, "eastasia"), Api.arr(l))), "创建",
                 f -> Api.post(this, "/accounts/" + id + "/azure/rgs", f, x -> { toast("已创建"); refresh(); }))));
         Api.get(this, "/accounts/" + id + "/azure/rgs", r -> {
             JSONArray a = Api.arr(r);

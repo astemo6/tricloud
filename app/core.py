@@ -361,6 +361,11 @@ def list_accounts():
     return rows
 
 
+class LightsailRegionError(ValueError):
+    """Lightsail 不支持该区域（如台北 ap-east-2）：main.py 按 400 返回友好提示，而不是 EndpointConnectionError 原文。
+    放在 core 里，main 注册异常处理时不必提前导入 boto3。"""
+
+
 # ---------------- OCI Ampere A1 免费额度 ----------------
 # 2026-06 起 Oracle 调整：Always Free（免费）租户 A1 只含 1500 OCPU 时 + 9000 GB 时/月 = 2 OCPU / 12 GB；
 # 付费（PAYG 等）租户价格表仍为每月前 3000 OCPU 时 + 18000 GB 时免费 = 4 OCPU / 24 GB。

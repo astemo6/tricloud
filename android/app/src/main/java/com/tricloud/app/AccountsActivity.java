@@ -103,7 +103,7 @@ public class AccountsActivity extends BaseActivity {
             JSONObject t = str(acc, "acct_type", "").isEmpty() ? null : new JSONObject(acc.optString("acct_type"));
             if (t != null && !str(t, "label", "").isEmpty()) type = t.optString("label") + (t.has("age_days") && !t.isNull("age_days") ? " · " + t.optInt("age_days") + " 天" : "");
         } catch (Exception ignored) { }
-        muted(c, MainActivity.pname(acc.optString("provider")) + " · " + str(acc, "region", "-") + (type.isEmpty() ? "" : " · " + type)
+        muted(c, MainActivity.pname(acc.optString("provider")) + " · " + Regions.label(str(acc, "region", "-")) + (type.isEmpty() ? "" : " · " + type)
                 + MainActivity.ageOf(acc) + MainActivity.testOf(acc)
                 + "\n出口代理：" + str(acc, "proxy", "直连") + (str(acc, "proxy_user", "").isEmpty() ? "" : " · " + acc.optString("proxy_user") + (acc.optBoolean("proxy_pass_set") ? " · ●●●" : ""))
                 + (off && !str(acc, "disabled_reason", "").isEmpty() ? "\n停用原因：" + acc.optString("disabled_reason") : "")
@@ -429,7 +429,7 @@ public class AccountsActivity extends BaseActivity {
             JSONObject r = Api.obj(x);
             StringBuilder sb = new StringBuilder("类型：" + str(r, "label", "-"));
             String[][] kv = {{"plan_type", "计划"}, {"account_type", "账户"}, {"upgrade_state", "升级状态"}, {"time_start", "开户日期"}, {"home_region", "主区域"}, {"state", "订阅状态"}};
-            for (String[] k : kv) if (!str(r, k[0], "").isEmpty()) sb.append("\n").append(k[1]).append("：").append(r.optString(k[0]));
+            for (String[] k : kv) if (!str(r, k[0], "").isEmpty()) sb.append("\n").append(k[1]).append("：").append("home_region".equals(k[0]) ? Regions.label(r.optString(k[0])) : r.optString(k[0]));
             if (r.has("age_days") && !r.isNull("age_days")) sb.append("\n开户天数：").append(r.optInt("age_days")).append(" 天");
             String extra = str(r, "error", str(r, "hint", ""));
             if (!extra.isEmpty()) sb.append("\n\n").append(extra);

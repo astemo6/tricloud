@@ -24,6 +24,7 @@
     ],
     4: [{ id: "/subscriptions/demo/resourceGroups/rg-demo/providers/Microsoft.Compute/virtualMachines/az-b1s", name: "az-b1s", state: "running", public_ip: "192.0.2.44", private_ip: "10.2.0.4", ipv6: [], shape: "Standard_B1s", zone: "-", resource_group: "rg-demo", created: "2026-04-09 15:26" }],
   };
+  var subNames = { "ocid1.subnet.demo-a": "subnet-public", "ocid1.subnet.demo-b": "subnet-private" }, vcnName = "vcn-demo";   // 子网 / VCN 改名演示
   var lightsail = [{ id: "ls-debian", name: "ls-debian", state: "running", public_ip: "198.51.100.30", private_ip: "172.26.1.4", ipv6: ["2001:db8:1::30"], shape: "nano_3_0", blueprint: "debian_12", static_ip: true, zone: "ap-northeast-1a" }];
   var tasks = [
     { id: 12, type: "snatch", account_id: 1, account_name: "东京主号", provider: "oci", status: "running", attempts: 1384, message: "第 1384 次：容量不足", created: now - 86400, updated: now - 40, params: { name: "arm-main-2", create: { shape: "VM.Standard.A1.Flex", ocpus: 4, memory_gb: 24 }, interval: 60 } },
@@ -457,14 +458,25 @@
         seclists[0].rules.push({ direction: d0, protocol: pr0, cidr: c1, port: pt, idx: seclists[0].rules.length + 10 }); a0++; });
       audit1("POST /security-rules", "添加 " + a0 + " 条"); return { ok: true, sl_id: seclists[0].id, added: a0, skipped: k0 };
     }
+    if ((m = p.match(/^\/accounts\/(\d+)\/oci\/(subnets|vcns)\/([^/]+)$/)) && method === "PATCH") {
+      // 子网 / VCN 改名：只改显示名称
+      var nn = String((body && body.display_name) || "").trim(), oid = decodeURIComponent(m[3]), isSub = m[2] === "subnets";
+      if (!oid.startsWith(isSub ? "ocid1.subnet." : "ocid1.vcn.")) return { __status: 400, detail: isSub ? "subnet_id 不是子网 OCID" : "vcn_id 不是VCN OCID" };
+      if (!nn) return { __status: 400, detail: "名称不能为空" };
+      if (nn.length > 255) return { __status: 400, detail: "名称最多 255 个字符" };
+      var oldN = isSub ? (subNames[oid] || "") : vcnName;
+      if (isSub) subNames[oid] = nn; else vcnName = nn;
+      audit1("oci-" + (isSub ? "subnet" : "vcn") + "-rename", oldN + " → " + nn);
+      return { ok: true, id: oid, old_name: oldN, name: nn };
+    }
     if ((m = p.match(/^\/accounts\/(\d+)\/oci\/security-subnets$/))) {
       // 安全组页子网下拉：同子网实例合并，另有一个没有实例的私有子网；arm-main 演示挂了 NSG
       var si = (inst[m[1]] || []).filter(function (i) { return i.state !== "terminated"; });
       var nsgOf = function (i) { return i.name === "arm-main" ? [{ id: "ocid1.networksecuritygroup.demo", name: "web-nsg" }] : []; };
       return { errors: [], subnets: [
-        { id: "ocid1.subnet.demo-a", name: "subnet-public", cidr: "10.0.0.0/24", ipv6_cidrs: ["2603:c020::/64"], vcn_id: "ocid1.vcn.demo", vcn_name: "vcn-demo", security_list_count: 1,
+        { id: "ocid1.subnet.demo-a", name: subNames["ocid1.subnet.demo-a"], cidr: "10.0.0.0/24", ipv6_cidrs: ["2603:c020::/64"], vcn_id: "ocid1.vcn.demo", vcn_name: vcnName, security_list_count: 1,
           instances: si.map(function (i) { return { id: i.id, name: i.name, state: i.state, nsgs: nsgOf(i) }; }) },
-        { id: "ocid1.subnet.demo-b", name: "subnet-private", cidr: "10.0.1.0/24", ipv6_cidrs: [], vcn_id: "ocid1.vcn.demo", vcn_name: "vcn-demo", security_list_count: 1, instances: [] }] };
+        { id: "ocid1.subnet.demo-b", name: subNames["ocid1.subnet.demo-b"], cidr: "10.0.1.0/24", ipv6_cidrs: [], vcn_id: "ocid1.vcn.demo", vcn_name: vcnName, security_list_count: 1, instances: [] }] };
     }
     if ((m = p.match(/^\/accounts\/(\d+)\/security-rules$/))) {
       var subQ = (method === "GET" ? q.get("subnet_id") : (body && body.subnet_id)) || "";
@@ -846,7 +858,10 @@
     if ((m = p.match(/^\/tasks\/(\d+)\/stop$/))) { tasks.forEach(function (t) { if (t.id == m[1] && t.status === "running") { t.status = "stopped"; t.message = "已手动停止"; t.updated = Math.floor(Date.now() / 1000); tlog(t.id, "已手动停止", "warn"); } }); return { ok: true }; }
     if (p === "/monitors" && method === "GET") return monitors;
     if (p === "/logout") return { ok: true };
-    if ((m = p.match(/^\/accounts\/(\d+)\/regions$/))) { var pr = accounts.find(function (a) { return a.id == m[1]; }).provider; return pr === "oci" ? ["ap-tokyo-1", "ap-seoul-1", "ap-osaka-1"] : ["ap-northeast-1", "ap-southeast-1", "us-east-1", "us-west-2"]; }
+    if ((m = p.match(/^\/accounts\/(\d+)\/regions$/))) { var pr = accounts.find(function (a) { return a.id == m[1]; }).provider; if (pr === "aws" && q.get("service") === "lightsail") return ["ap-northeast-1", "ap-southeast-1", "us-east-1", "us-west-2"];   // Lightsail 不支持台北 ap-east-2
+      return pr === "oci" ? ["ap-tokyo-1", "ap-seoul-1", "ap-osaka-1"] : ["ap-east-2", "ap-northeast-1", "ap-southeast-1", "us-east-1", "us-west-2"]; }
+    if (/^\/accounts\/\d+\/(lightsail\/|instances$)/.test(p) && (q.get("kind") === "lightsail" || p.indexOf("/lightsail/") >= 0) && (q.get("region") || (body && body.region)) === "ap-east-2")
+      return { __status: 400, detail: "Lightsail 不支持该区域（台北 ap-east-2），请换区域" };
     if ((m = p.match(/^\/accounts\/(\d+)\/instances$/)) && method === "GET") return q.get("kind") === "lightsail" ? lightsail : (inst[m[1]] || []);
     if (p.match(/\/instances\/change-ip$/)) {
       var ca = accOf(p), cidrs = String(body.cidrs || "").split(/[,，\n]/).map(function (x) { return x.trim(); }).filter(Boolean);

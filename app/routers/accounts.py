@@ -391,8 +391,13 @@ def del_account(acc_id: int):
 
 
 @router.get("/api/accounts/{acc_id}/regions")
-async def regions(acc_id: int):
-    need_acc(acc_id)
+async def regions(acc_id: int, service: str = None):
+    """区域下拉。service=lightsail（仅 AWS）：只列账号已启用且 Lightsail 支持的区域（Lightsail 页 / 创建 / 静态 IP 用）。"""
+    acc = need_acc(acc_id)
+    if service == "lightsail" and acc["provider"] == "aws":
+        return await run(services.provider(acc_id).ls_regions)
+    if service not in (None, "", "lightsail"):
+        raise HTTPException(400, "service 只支持 lightsail")
     return await run(services.provider(acc_id).regions)
 
 

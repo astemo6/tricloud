@@ -40,8 +40,8 @@ telegram.poll_loop = noop
 
 # ================= 1. 路由拆分 =================
 api = [r for r in main.app.routes if getattr(r, "path", "").startswith("/api/")]
-ok("routers: 155 API routes + / + /login registered once each",
-   len(api) == 155 and len({(r.path, tuple(sorted(r.methods))) for r in api}) == 155
+ok("routers: 157 API routes + / + /login registered once each",
+   len(api) == 157 and len({(r.path, tuple(sorted(r.methods))) for r in api}) == 157
    and sum(1 for r in main.app.routes if getattr(r, "path", "") in ("/", "/login")) == 2)
 ok("routers: every route comes from app.routers.*",
    all(r.endpoint.__module__.startswith("app.routers.") for r in main.app.routes if hasattr(r, "endpoint")))

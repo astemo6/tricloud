@@ -167,14 +167,30 @@ export const regionLabel = (code) => { const c = regionCity(code); return c ? `$
 // 下拉选项：value 永远是纯代码，显示带城市名
 export const regionOpt = (code, selected) => `<option value="${esc(code)}"${selected ? " selected" : ""}>${esc(regionLabel(code))}</option>`;
 export const regionOf = (acc) => localStorage.getItem("tc_region_" + acc.id) || acc.region || "";
-export async function regionSelect(acc, onChange) {
+// Lightsail 只在部分区域提供服务（如台北 ap-east-2 没有）：区域下拉用 /regions?service=lightsail；当前区域不支持时自动切换并提示
+const LS_REGIONS = {};
+export async function lsRegions(acc) {
+  if (!LS_REGIONS[acc.id]) LS_REGIONS[acc.id] = api(`/accounts/${acc.id}/regions?service=lightsail`).catch((e) => { delete LS_REGIONS[acc.id]; throw e; });
+  return LS_REGIONS[acc.id];
+}
+export async function ensureLsRegion(acc) {
+  let rs;
+  try { rs = await lsRegions(acc); } catch (e) { return regionOf(acc); }
+  const cur = regionOf(acc);
+  if (!rs.length || rs.includes(cur)) return cur;
+  const to = rs.includes(acc.region) ? acc.region : rs[0];
+  localStorage.setItem("tc_region_" + acc.id, to);
+  toast(`Lightsail 不支持 ${regionLabel(cur)}，已切换到 ${regionLabel(to)}`);
+  return to;
+}
+export async function regionSelect(acc, onChange, service) {
   if (NOREG(acc)) return "";
   const id = "rg" + acc.id;
   setTimeout(async () => {
     const sel = document.getElementById(id);
     if (!sel) return;
     try {
-      const rs = await api(`/accounts/${acc.id}/regions`);
+      const rs = service === "lightsail" ? await lsRegions(acc) : await api(`/accounts/${acc.id}/regions`);
       const cur = regionOf(acc);
       sel.innerHTML = rs.map((r) => regionOpt(r, r === cur)).join("");
       if (!rs.includes(cur)) sel.insertAdjacentHTML("afterbegin", regionOpt(cur, true));

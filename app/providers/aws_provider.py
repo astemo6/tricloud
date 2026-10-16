@@ -12,10 +12,49 @@ import boto3
 from botocore.config import Config
 
 from .. import hostname
+from ..core import LightsailRegionError
 from .aws_more import AWSMore
 from ..cloudinit import cloud_init, gen_password
 
 _cfg = Config(retries={"max_attempts": 4, "mode": "standard"}, connect_timeout=10, read_timeout=30)
+
+# ---------------- Lightsail 区域 ----------------
+# Lightsail 只在部分区域提供服务（如台北 ap-east-2 没有），不能复用 EC2 的区域列表：
+# 静态表来自 botocore 端点数据（get_available_regions('lightsail')），再用 Lightsail GetRegions 校正并缓存。
+AWS_CITY = {"us-east-1": "弗吉尼亚北部", "us-east-2": "俄亥俄", "us-west-1": "加州北部", "us-west-2": "俄勒冈", "af-south-1": "开普敦",
+            "ap-east-1": "香港", "ap-east-2": "台北", "ap-south-1": "孟买", "ap-south-2": "海得拉巴", "ap-northeast-1": "东京",
+            "ap-northeast-2": "首尔", "ap-northeast-3": "大阪", "ap-southeast-1": "新加坡", "ap-southeast-2": "悉尼",
+            "ap-southeast-3": "雅加达", "ap-southeast-4": "墨尔本", "ap-southeast-5": "吉隆坡", "ap-southeast-6": "新西兰",
+            "ap-southeast-7": "曼谷", "ca-central-1": "蒙特利尔", "ca-west-1": "卡尔加里", "eu-central-1": "法兰克福",
+            "eu-central-2": "苏黎世", "eu-north-1": "斯德哥尔摩", "eu-south-1": "米兰", "eu-south-2": "西班牙", "eu-west-1": "爱尔兰",
+            "eu-west-2": "伦敦", "eu-west-3": "巴黎", "il-central-1": "特拉维夫", "me-central-1": "阿联酋", "me-south-1": "巴林",
+            "mx-central-1": "墨西哥", "sa-east-1": "圣保罗"}
+LS_REGIONS_TTL = 86400          # GetRegions 结果缓存 1 天（区域列表很少变）
+_LS_GETREGIONS = {}             # "names" -> (ts, set)；进程级，所有账号共用（Lightsail 区域与账号无关）
+_ls_static = None
+
+
+def ls_region_msg(region):
+    city = AWS_CITY.get(region)
+    return f"Lightsail 不支持该区域（{city + ' ' if city else ''}{region}），请换区域"
+
+
+def ls_static_regions():
+    global _ls_static
+    if _ls_static is None:
+        try:
+            _ls_static = frozenset(boto3.Session().get_available_regions("lightsail"))
+        except Exception:
+            _ls_static = frozenset()
+    return _ls_static
+
+
+def ls_supported(region):
+    """不发请求的快速判断：botocore 端点表里有，或最近一次 GetRegions 返回过。"""
+    hit = _LS_GETREGIONS.get("names")
+    if hit and time.time() - hit[0] < LS_REGIONS_TTL:
+        return region in hit[1]
+    return region in ls_static_regions()
 
 VCPU_QUOTA = "L-1216C47A"        # Running On-Demand Standard (A, C, D, H, I, M, R, T, Z) instances
 CF_DIST_QUOTA = "L-24B04930"     # Web distributions per AWS account
@@ -48,6 +87,8 @@ class AWSProvider(AWSMore):
     def c(self, svc, region=None):
         """按 (服务, 区域) 复用 boto3 客户端：每次新建客户端要重新加载服务模型，既慢又占内存。"""
         key = (svc, region or self.region)
+        if svc == "lightsail" and not ls_supported(key[1]):
+            raise LightsailRegionError(ls_region_msg(key[1]))
         cache = self.__dict__.setdefault("_clients", {})
         cl = cache.get(key)
         if cl is None:
@@ -63,6 +104,25 @@ class AWSProvider(AWSMore):
 
     def regions(self):
         return sorted(r["RegionName"] for r in self.c("ec2").describe_regions()["Regions"])
+
+    def ls_get_regions(self):
+        """Lightsail GetRegions（缓存 1 天）；失败返回 None。"""
+        hit = _LS_GETREGIONS.get("names")
+        if hit and time.time() - hit[0] < LS_REGIONS_TTL:
+            return hit[1]
+        try:
+            names = frozenset(r["name"] for r in self.c("lightsail", "us-east-1").get_regions()["regions"])
+        except Exception:
+            return None
+        if names:
+            _LS_GETREGIONS["names"] = (time.time(), names)
+        return names or None
+
+    def ls_regions(self):
+        """Lightsail 可用区域 = 账号已启用的区域 ∩ Lightsail 支持的区域（GetRegions 优先，失败用 botocore 端点表）。"""
+        enabled = set(self.regions())
+        sup = self.ls_get_regions() or ls_static_regions()
+        return sorted(enabled & set(sup))
 
     # ---------------- EC2 ----------------
     def list_instances(self):
@@ -283,11 +343,7 @@ class AWSProvider(AWSMore):
     def scan_all_regions(self):
         """逐区域统计 EC2 / Lightsail 数量（串行+间隔，免费 API）。"""
         out = []
-        ls_regions = set()
-        try:
-            ls_regions = {r["name"] for r in self.c("lightsail", "us-east-1").get_regions()["regions"]}
-        except Exception:
-            pass
+        ls_regions = set(self.ls_get_regions() or ls_static_regions())   # 不支持 Lightsail 的区域（如台北）跳过，显示 -
         for rg in self.regions():
             row = {"region": rg, "ec2": 0, "ec2_running": 0, "lightsail": None}
             try:
@@ -297,10 +353,13 @@ class AWSProvider(AWSMore):
                             if i["State"]["Name"] != "terminated":
                                 row["ec2"] += 1
                                 row["ec2_running"] += i["State"]["Name"] == "running"
-                if rg in ls_regions:
-                    row["lightsail"] = len(self.c("lightsail", rg).get_instances()["instances"])
             except Exception as e:
                 row["error"] = type(e).__name__
+            if rg in ls_regions:
+                try:
+                    row["lightsail"] = len(self.c("lightsail", rg).get_instances()["instances"])
+                except Exception as e:
+                    row.setdefault("error", type(e).__name__)
             out.append(row)
             time.sleep(0.2)
         return out

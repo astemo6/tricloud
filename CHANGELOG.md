@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0（build 19）(2026-10-16)
+- App 补齐今天只在后端 + Web 上线的功能（Android versionCode 19 / iOS build 19，versionName 仍 1.6.0）：
+  - OCI 对象存储页顶部「一键生成保号账单」卡片（仅 PAYG）：先检测已有存储（标准层已用 X GB / 免费 10 GB，已满足 / 还差 X GB，自动分层 / 归档另注，已有 Bucket 列表），大小默认填补足值（0.5–20 GB），显示补足后合计；已满足时按钮变次要「仍要生成」并多一次红色确认；上传进度、续传、删除（含未完成上传）。免费号显示「免费号 20GB 内不收费，无需操作」。Bucket 列表显示大小 / 对象数 / 存储层（自动分层单独标注）。
+  - 区域显示城市名（「ap-northeast-1 · 东京」）：AWS / OCI / Azure 区域、可用区、OCI AD 名都识别；提交仍用纯代码。映射与 Web `REGION_CITY` 相同（Android `Regions.java`、iOS `Regions.swift`）。
+  - OCI 安全组按子网选择（「VCN / 子网 CIDR · 实例名」，同子网一次，记住上次）；查看 / 添加 / 删除规则带 `subnet_id`；实例另挂 NSG 时只读提示。
+  - 设置 → 安全：审计日志「一键清空」（红色按钮 + 确认，`DELETE /api/audit?confirm=true`）。
+  - OCI 创建 / 抢机：A1 免费额度按账号类型显示（免费号 2 OCPU / 12 GB，PAYG 4 OCPU / 24 GB），免费号 / 未知类型默认填 2 / 12。
+- 新功能：OCI 子网改名（同时可改所属 VCN 名称）。`PATCH /api/accounts/{id}/oci/subnets/{subnet_id}`、`PATCH /api/accounts/{id}/oci/vcns/{vcn_id}`，body `{display_name}`（去首尾空格，1–255 字符），只改显示名称，不影响实例、IP、安全规则；写审计记录（旧名 → 新名）。Web 安全组页子网下拉旁「改名」按钮，保存后刷新下拉并保持选中；Android / iOS 安全组子网卡片里「改名」。
+- 修复：AWS Lightsail 页区域列表复用 EC2 区域，选到 Lightsail 不提供服务的区域（如台北 `ap-east-2`）报 `EndpointConnectionError`。现在 `GET /api/accounts/{id}/regions?service=lightsail` 只返回账号已启用且 Lightsail 支持的区域（Lightsail GetRegions 校正并缓存 1 天，失败时用 botocore 端点表）；Web / Android / iOS 的 Lightsail 页、创建、静态 IP 只列这些区域，保存的区域不支持时自动切换并提示「Lightsail 不支持 xxx，已切换到 yyy」；后端 Lightsail 接口遇到不支持的区域返回 400「Lightsail 不支持该区域（台北 ap-east-2），请换区域」；AWS「区域」页扫描跳过不支持 Lightsail 的区域（显示 -）。
+
 ## 1.6.0 后端 + Web（2026-10-16，App 未变，仍为 build 18）
 - 保号账单「先检测已有存储」：新接口 `GET /api/accounts/{id}/oci/billing-keep/scan[?refresh=true]`（只读，缓存 5 分钟）遍历所有已订阅区域 × 租户根和子区间的 Bucket，用 GetBucket `approximateSize/approximateCount` 按标准层 / 标准层+自动分层 / 归档层汇总，给出「已满足 / 还差 X GB」和补足大小（11 − 已用，向上取 0.1，最小 0.5）。卡片先显示「正在检测已有存储…」；标准层已 >10 GB 时提示无需生成，按钮降为次要并需额外确认。`size_gb` 范围放宽为 0.5–20（仍需 confirm、仍仅 PAYG）。对象存储 Bucket 列表新增「大小」「对象数」「存储层」列（并发 GetBucket，失败显示 —）。
 - 新增 OCI「一键生成保号账单」（仅 PAYG 升级号）：对象存储页顶部卡片。在主区域建（或复用）私有标准层 Bucket `tricloud-billing-keep`（关闭自动分层），用 multipart 串行 64 MiB 分片流式上传全零对象（默认 11 GiB；现按已有存储补足，可选 0.5–20），不落盘，内存约一片大小；后台任务显示进度，失败 / 停止后再次发起会续传，删除会中止未完成上传并清理 Bucket。超出 10 GB 标准层免费额度，每月约 $0.02–0.03；上传是入网流量，不计费。免费号直接提示「免费号 20GB 内不收费，无需操作」。新接口：`GET/POST/DELETE /api/accounts/{id}/oci/billing-keep`。

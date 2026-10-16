@@ -125,7 +125,7 @@ extension AccountPage {
             let v = q.optJSONObject("standard_vcpu"), cf = q.optJSONObject("cloudfront_distributions")
             let c1 = self.card("Standard vCPU 上限")
             c1.text(v == nil ? "-" : v!.optString("value") + " " + v!.optString("unit"), 26, true)
-            c1.muted("全区域最大值，来自 " + (v == nil ? "-" : v!.optString("region")) + "（L-1216C47A）")
+            c1.muted("全区域最大值，来自 " + (v == nil ? "-" : Regions.label(v!.optString("region"))) + "（L-1216C47A）")
             let c2 = self.card("CloudFront 分发数上限")
             c2.text(cf == nil ? "-" : str(cf, "value", "-") + " " + cf!.optString("unit"), 26, true)
             c2.muted("每账号（L-24B04930）· 更新于 " + q.optString("updated_at"))
@@ -146,7 +146,7 @@ extension AccountPage {
             let n = items.count
             let c = self.card("闲置资源月费估算")
             c.text("$" + d.optString("monthly_total"), 26, true)
-            c.muted("区域 " + d.optString("region") + " · \(n) 项 · 按公示单价估算，实际以账单为准")
+            c.muted("区域 " + Regions.label(d.optString("region")) + " · \(n) 项 · 按公示单价估算，实际以账单为准")
             let b = self.card("账单参考（缓存）")
             b.text(d.isNull("month_to_date") ? "—" : "$" + d.optString("month_to_date"), 22, true)
             b.muted("本月已产生 · 数据更新于 " + d.optString("billing_updated_at"))

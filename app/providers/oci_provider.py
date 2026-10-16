@@ -350,6 +350,18 @@ class OCIProvider(OCIMore):
             raise ValueError("请选择子网或实例")
         return self._subnet_of(inst_id)
 
+    def rename_subnet(self, subnet_id, name):
+        """子网改名：只改 display_name（UpdateSubnet），不影响实例、IP、安全列表 / 规则。返回旧名与新名。"""
+        old = self.vnet.get_subnet(subnet_id).data
+        new = self.vnet.update_subnet(subnet_id, oci.core.models.UpdateSubnetDetails(display_name=name)).data
+        return {"id": subnet_id, "old_name": getattr(old, "display_name", "") or "", "name": getattr(new, "display_name", None) or name}
+
+    def rename_vcn(self, vcn_id, name):
+        """VCN 改名：只改 display_name（UpdateVcn），不影响子网、实例、IP、安全规则。"""
+        old = self.vnet.get_vcn(vcn_id).data
+        new = self.vnet.update_vcn(vcn_id, oci.core.models.UpdateVcnDetails(display_name=name)).data
+        return {"id": vcn_id, "old_name": getattr(old, "display_name", "") or "", "name": getattr(new, "display_name", None) or name}
+
     def security_subnets(self):
         """安全组页的子网下拉：区间内所有子网（含没有实例的）+ 各子网里的实例名 + 实例 VNIC 上挂的 NSG（只读提示）。
         请求数：ListInstances + ListVnicAttachments + ListSubnets + ListVcns 各 1 次（分页），每个 VNIC 1 次 GetVnic，

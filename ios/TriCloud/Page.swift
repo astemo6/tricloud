@@ -353,7 +353,7 @@ struct CardView: View {
 }
 
 func isDanger(_ label: String) -> Bool {
-    label.contains("删除") || label.contains("终止") || label.contains("销毁")
+    label.contains("删除") || label.contains("终止") || label.contains("销毁") || label.contains("清空") || label.contains("仍要生成")
 }
 
 /// 触感反馈（iOS 15 兼容，用 UIKit 生成器）。

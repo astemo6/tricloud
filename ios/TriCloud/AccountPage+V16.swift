@@ -11,7 +11,7 @@ extension Page {
             var lines = ["类型：" + str(t, "label", "-")]
             for (k, l) in [("plan_type", "计划"), ("account_type", "账户"), ("upgrade_state", "升级状态"), ("time_start", "开户日期"),
                            ("home_region", "主区域"), ("state", "订阅状态")] where !str(t, k, "").isEmpty {
-                lines.append(l + "：" + t.optString(k))
+                lines.append(l + "：" + (k == "home_region" ? Regions.label(t.optString(k)) : t.optString(k)))
             }
             if !t.isNull("age_days") { lines.append("开户天数：\(t.optInt("age_days")) 天") }
             let note = str(t, "error", str(t, "hint", ""))
@@ -241,6 +241,10 @@ extension AccountPage {
     func ociObjects() {
         let g = gen
         guard let bucket = objBucket else {
+            // build 19：顶部「一键生成保号账单」卡片（仅 PAYG；先检测已有存储）
+            let bkm = BillingKeepModel(self, g)
+            view(AnyView(BillingKeepView(m: bkm)))
+            bkm.load()
             get("/accounts/\(id)/oci/buckets?" + rq()) { r in
                 guard self.cur(g) else { return }
                 let d = jobj(r)
@@ -257,12 +261,12 @@ extension AccountPage {
                     }
                 }
                 let bs = d.optJSONArray("buckets") ?? []
-                if bs.isEmpty { self.card("暂无 Bucket").muted("") }
+                if bs.isEmpty { self.card("暂无 Bucket").muted("") } else { c.muted("大小、对象数为 OCI 定期统计的近似值，可能有几小时延迟。") }
                 for i in 0..<bs.count {
                     let b = bs.obj(i)
                     let name = b.optString("name")
                     let bc = self.card("📁 " + name)
-                    bc.muted("创建于 " + b.optString("created"))
+                    bc.muted(AccountPage.bucketLine(b) + "\n创建于 " + b.optString("created"))
                     let row = bc.row()
                     row.button("打开") {
                         self.objBucket = name
@@ -362,11 +366,11 @@ extension AccountPage {
         let r0 = card("网络")
         r0.muted("自动创建：新建 VCN（含 IPv6）、互联网网关、路由和公有子网，安全列表默认只放行 22 与 ICMP。")
         r0.row().button("自动创建网络") {
-            self.confirm("自动创建网络", "在 " + self.region() + " 新建 VCN（含 IPv6）、互联网网关、路由和公有子网。确定？") {
+            self.confirm("自动创建网络", "在 " + Regions.label(self.region()) + " 新建 VCN（含 IPv6）、互联网网关、路由和公有子网。确定？") {
                 self.post("/accounts/\(self.id)/oci/network", ["region": self.region()]) { x in self.taskOrToast(x, "已提交") }
             }
         }
-        let c = card("计算配额 · " + region())
+        let c = card("计算配额 · " + Regions.label(region()))
         let note = c.live("加载中…")
         // 页面最底部：区域订阅的二级入口（订阅不可撤销，不放在标签栏里，防误点）
         section("高级")
@@ -375,7 +379,7 @@ extension AccountPage {
         get("/accounts/\(id)/oci/limits?" + rq()) { r in
             guard self.cur(g) else { return }
             let d = jobj(r)
-            c.title = "计算配额 · " + str(d, "region", self.region())
+            c.title = "计算配额 · " + Regions.label(str(d, "region", self.region()))
             let items = d.optJSONArray("items") ?? []
             let basis = d.optString("a1_basis")
             let a1 = basis == "paid" ? "付费号 4 OCPU / 24GB" : basis == "free" ? "免费号 2 OCPU / 12GB" : "免费号 2 OCPU / 12GB（未识别账号类型，可在右上角「账号类型」刷新）"
@@ -410,13 +414,13 @@ extension AccountPage {
                     let r = a.obj(i)
                     let s = r.optString("status")
                     let on = s == "ENABLED_BY_DEFAULT" || s == "ENABLED"
-                    lines.append((on ? "🟢 " : s == "DISABLED" ? "⚪️ " : "🟠 ") + r.optString("region") + "  " + s)
+                    lines.append((on ? "🟢 " : s == "DISABLED" ? "⚪️ " : "🟠 ") + Regions.label(r.optString("region")) + "  " + s)
                     if s == "DISABLED" { disabled.append(r.optString("region")) }
                 }
                 stl.text = lines.joined(separator: "\n")
                 if !disabled.isEmpty {
                     st.row().button("激活区域…") {
-                        self.choose("激活区域", disabled) { i in
+                        self.choose("激活区域", disabled.map { Regions.label($0) }) { i in
                             self.post("/accounts/\(self.id)/aws/enable-region", ["region": disabled[i]]) { y in
                                 self.toast(str(jobj(y), "hint", "已提交激活"))
                                 self.refresh()
@@ -439,7 +443,7 @@ extension AccountPage {
                     let r = rs.obj(i)
                     if r.optInt("ec2") == 0 && r.optInt("lightsail") == 0 { continue }
                     with.append(r.optString("region"))
-                    lines.append(r.optString("region") + "  EC2 \(r.optInt("ec2"))（运行 \(r.optInt("ec2_running"))）· Lightsail " + str(r, "lightsail", "-"))
+                    lines.append(Regions.label(r.optString("region")) + "  EC2 \(r.optInt("ec2"))（运行 \(r.optInt("ec2_running"))）· Lightsail " + str(r, "lightsail", "-"))
                 }
                 scl.text = (lines.isEmpty ? "所有区域都没有实例" : lines.joined(separator: "\n")) + "\n\n更新于 " + d.optString("updated_at")
                 let row = sc.row()
@@ -478,7 +482,7 @@ extension AccountPage {
                 let locs = (0..<a.count).map { a.string($0) }
                 let def = Prefs.get("azloc_\(self.id)", "eastasia")
                 self.form("新建资源组", nil, [Field.text("name", "名称", ""),
-                                            Field.select("location", "区域", locs.contains(def) ? def : (locs.first ?? ""), locs, nil)], "创建") { v in
+                                            Field.select("location", "区域", locs.contains(def) ? def : (locs.first ?? ""), locs, locs.map { Regions.label($0) })], "创建") { v in
                     if v.optString("name").isEmpty { self.toast("请填写名称"); return }
                     self.post("/accounts/\(self.id)/azure/rgs", v) { _ in self.toast("已创建"); self.refresh() }
                 }
@@ -493,7 +497,7 @@ extension AccountPage {
                 let x = a.obj(i)
                 let name = x.optString("name")
                 let c = self.card(name)
-                c.muted(x.optString("location") + " · " + x.optString("state"))
+                c.muted(Regions.label(x.optString("location")) + " · " + x.optString("state"))
                 c.row().button("删除") {
                     self.form("删除资源组", "⚠️ 将删除资源组「" + name + "」内的全部资源（VM、磁盘、IP、网络），不可恢复。", [Field.text("confirm", "输入资源组名称确认", "")], "删除") { v in
                         if v.optString("confirm") != name { self.toast("名称不一致"); return }
@@ -806,18 +810,18 @@ final class OciRegionSubPage: Page {
             let rs = d.optJSONArray("regions") ?? []
             var subd: [JObj] = [], unsub: [JObj] = []
             for i in 0..<rs.count { if rs.obj(i).optBoolean("subscribed") { subd.append(rs.obj(i)) } else { unsub.append(rs.obj(i)) } }
-            let c = self.card("已订阅 \(subd.count) 个区域 · 主区域 " + str(d, "home", "-"))
+            let c = self.card("已订阅 \(subd.count) 个区域 · 主区域 " + Regions.label(str(d, "home", "-")))
             c.muted(d.optString("limit_hint") + "。订阅不可撤销，订阅后可在实例等标签的「区域」里切换。")
             var lines: [String] = []
             for x in subd {
                 let home: String = x.optBoolean("home") ? " · 主区域" : ""
-                let head: String = x.optString("name") + " (" + x.optString("key") + ")"
+                let head: String = Regions.label(x.optString("name")) + " (" + x.optString("key") + ")"
                 lines.append(head + home + " · " + str(x, "status", "已订阅"))
             }
             c.text(lines.joined(separator: "\n"), 13)
             if !unsub.isEmpty {
                 c.row().button("订阅新区域…") {
-                    self.choose("订阅区域（不可撤销）", unsub.map { $0.optString("name") + " · " + $0.optString("key") }) { i in
+                    self.choose("订阅区域（不可撤销）", unsub.map { Regions.label($0.optString("name")) + " · " + $0.optString("key") }) { i in
                         self.subscribe(unsub[i])
                     }
                 }

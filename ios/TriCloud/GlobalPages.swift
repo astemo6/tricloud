@@ -336,6 +336,15 @@ final class SecurityPage: Page {
                          + "\n    " + l.optString("ip") + " · " + l.optString("actor"))
         }
         au.text(lines.isEmpty ? "暂无" : lines.joined(separator: "\n"), 12)
+        // build 19：一键清空（红色按钮 + 确认；清空后服务端自动留一条 audit-clear 记录）
+        au.row().button("一键清空") {
+            self.confirm("清空审计日志", "将删除全部审计记录，不可恢复。\n清空后会自动留下一条「audit-clear」记录（谁、何时、哪个 IP 清空的）。确定清空？") {
+                self.del("/audit?confirm=true") { y in
+                    self.toast("已清空 \(jobj(y).optInt("deleted")) 条审计记录")
+                    self.refresh()
+                }
+            }
+        }
     }
 
     private func setup2fa() {

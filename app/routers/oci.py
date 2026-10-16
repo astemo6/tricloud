@@ -6,8 +6,8 @@ import time
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from .. import cloudinit, core, dns, services, tasks
-from .common import _created, _public_guard, _req, call, guarded, need_acc, P, PUBLIC_CIDRS, run
+from .. import cloudinit, core, dns, security, services, tasks
+from .common import _created, _public_guard, _req, call, client_ip, guarded, need_acc, P, PUBLIC_CIDRS, run
 
 router = APIRouter()
 
@@ -185,6 +185,48 @@ async def oci_sec_subnets(acc_id: int, region: str = None):
     """安全组页子网下拉：子网（VCN / 名称 / CIDR）+ 子网里的实例名 + 实例 VNIC 上挂的 NSG（只读）。"""
     need_acc(acc_id, "oci")
     return await run(services.provider(acc_id, region).security_subnets)
+
+
+def _rename_name(body):
+    name = str((body or {}).get("display_name") or "").strip()
+    if not name:
+        raise HTTPException(400, "名称不能为空")
+    if len(name) > 255:
+        raise HTTPException(400, "名称最多 255 个字符")
+    return name
+
+
+async def _oci_rename(req, acc_id, kind, ocid, body):
+    """子网 / VCN 改名（只改 display_name，不影响实例、IP、安全规则）。写一条带新旧名的审计记录。"""
+    need_acc(acc_id, "oci")
+    prefix, label = {"subnet": ("ocid1.subnet.", "子网"), "vcn": ("ocid1.vcn.", "VCN")}[kind]
+    ocid = (ocid or "").strip()
+    if not ocid.startswith(prefix):
+        raise HTTPException(400, f"{kind}_id 不是{label} OCID")
+    name = _rename_name(body)
+    p = services.provider(acc_id, (body or {}).get("region"))
+    try:
+        r = await run(p.rename_subnet if kind == "subnet" else p.rename_vcn, ocid, name)
+    except HTTPException:
+        raise
+    except Exception as e:      # ServiceError（404 / 无权限等）给出明确原因
+        raise HTTPException(400, str(getattr(e, "message", None) or e)[:300])
+    try:
+        security.audit(client_ip(req), getattr(req.state, "actor", "session"), f"oci-{kind}-rename",
+                       f"账号 {acc_id} {label} …{ocid[-8:]}：{r.get('old_name') or '-'} → {r.get('name')}")
+    except Exception:
+        pass
+    return {"ok": True, **r}
+
+
+@router.patch("/api/accounts/{acc_id}/oci/subnets/{subnet_id}")
+async def oci_subnet_rename(req: Request, acc_id: int, subnet_id: str, body: dict = Body(default={})):
+    return await _oci_rename(req, acc_id, "subnet", subnet_id, body)
+
+
+@router.patch("/api/accounts/{acc_id}/oci/vcns/{vcn_id}")
+async def oci_vcn_rename(req: Request, acc_id: int, vcn_id: str, body: dict = Body(default={})):
+    return await _oci_rename(req, acc_id, "vcn", vcn_id, body)
 
 
 @router.get("/api/accounts/{acc_id}/security-rules")

@@ -70,6 +70,15 @@ public class SecurityActivity extends BaseActivity {
         }
 
         LinearLayout lg = card("审计日志（最近 100 条写操作，保留 180 天）");
+        // build 19：一键清空（红色按钮 + 确认；清空后服务端自动留一条 audit-clear 记录）
+        button(row(lg), "一键清空", v -> new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                .setTitle("清空审计日志")
+                .setMessage("将删除全部审计记录，不可恢复。\n清空后会自动留下一条「audit-clear」记录（谁、何时、哪个 IP 清空的）。确定清空？")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("清空", (d, w) -> Api.del(this, "/audit?confirm=true", y -> {
+                    toast("已清空 " + Api.obj(y).optInt("deleted") + " 条审计记录");
+                    refresh();
+                })).show());
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < logs.length(); i++) {
             JSONObject l = logs.optJSONObject(i);

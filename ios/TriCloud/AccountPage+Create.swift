@@ -43,6 +43,33 @@ extension AccountPage {
         return c
     }
 
+    /// 区域下拉字段：值为纯代码，显示带城市名（ap-northeast-1 · 东京）。
+    func regionSel(_ k: String, _ label: String, _ def: String, _ a: JArr?) -> Field {
+        let a = a ?? []
+        let ids = (0..<a.count).map { a.string($0) }
+        return Field.select(k, label, def, ids, ids.map { Regions.label($0) })
+    }
+
+    /// A1 免费额度按账号类型（与后端 core.oci_a1_free 一致）：plan_type 为 FREE_TIER → free，其他非空 → paid，未知 → unknown。
+    func a1Basis() -> String {
+        let raw = str(acc, "acct_type", "")
+        guard !raw.isEmpty, let data = raw.data(using: .utf8),
+              let t = (try? JSONSerialization.jsonObject(with: data)) as? JObj else { return "unknown" }
+        let plan = str(t, "plan_type", "")
+        if plan.isEmpty { return "unknown" }
+        return plan == "FREE_TIER" ? "free" : "paid"
+    }
+
+    func shapeLabels() -> [String] {
+        var l = AccountPage.SHAPE_LABELS
+        switch a1Basis() {
+        case "free": l[0] = "A1.Flex · ARM · ✅ Always Free（免费号合计 2 OCPU / 12 GB）"
+        case "paid": l[0] = "A1.Flex · ARM · ✅ Always Free（PAYG 合计 4 OCPU / 24 GB）"
+        default: break
+        }
+        return l
+    }
+
     func sel(_ k: String, _ label: String, _ def: String, _ a: JArr?, _ objs: Bool) -> Field {
         let a = a ?? []
         var ids: [String] = [], labels: [String] = []
@@ -109,7 +136,7 @@ extension AccountPage {
             self.loadScripts { ids, names in
             f += AccountPage.scriptFields(ids, names, "script")
             f.append(AccountPage.saveDefaultField("AWS"))
-            self.form("创建 EC2（" + self.region() + "）", nil, f, "创建") { v in
+            self.form("创建 EC2（" + Regions.label(self.region()) + "）", nil, f, "创建") { v in
                 var b = self.handleSaveDefault("aws", v)
                 b["region"] = self.region()
                 self.post("/accounts/\(self.id)/aws/ec2-create", b) { x in
@@ -126,7 +153,7 @@ extension AccountPage {
             let d = self.defaults.optJSONObject("azure") ?? [:]
             var f: [Field] = []
             f.append(Field.text("name", "名称", "vm-" + base36Now()))
-            f.append(self.sel("location", "区域", Prefs.get("azloc_\(self.id)", d.optString("location", "eastasia")), jarr(r), false))
+            f.append(self.regionSel("location", "区域", Prefs.get("azloc_\(self.id)", d.optString("location", "eastasia")), jarr(r)))
             f.append(Field.text("size", "大小", d.optString("size", "Standard_B1s")))
             f.append(Field.select("os", "系统", d.optString("os", "debian-12"), ["debian-12", "ubuntu-24.04", "ubuntu-22.04"], nil))
             f.append(Field.num("disk_gb", "系统盘 GB", d.optString("disk_gb", "30")))
@@ -156,7 +183,7 @@ extension AccountPage {
             let d = self.defaults.optJSONObject("lightsail") ?? [:]
             var f: [Field] = []
             f.append(Field.text("name", "名称", "ls-" + base36Now()))
-            f.append(self.sel("zone", "可用区", d.optString("zone"), o.optJSONArray("zones"), false))
+            f.append(self.regionSel("zone", "可用区", d.optString("zone"), o.optJSONArray("zones")))
             f.append(self.sel("blueprint", "系统镜像", d.optString("blueprint"), o.optJSONArray("blueprints"), true))
             f.append(self.sel("bundle", "套餐", d.optString("bundle"), o.optJSONArray("bundles"), true))
             f.append(Field.select("ip_type", "网络", "dualstack", ["dualstack", "ipv6"], ["IPv4 + IPv6", "仅 IPv6"]))
@@ -182,11 +209,16 @@ extension AccountPage {
         let d = defaults.optJSONObject("oci") ?? [:]
         let c = card(snatch ? "自动抢机" : "创建实例")
         c.muted(snatch ? "容量不足时按间隔重试，成功/失败/停止推送 Telegram。" : "默认值来自 设置 → 默认创建参数")
+        let basis = a1Basis()
+        let a1Note: String = basis == "paid" ? "PAYG 账号 4 OCPU / 24 GB" : basis == "free" ? "免费号 2 OCPU / 12 GB（2026-06 起）"
+            : "免费号 2 OCPU / 12 GB，PAYG 4 OCPU / 24 GB（未识别账号类型，可在右上角「账号类型」刷新）"
+        c.muted("A1 免费额度：" + a1Note + "，超出部分计费。")
+        let freeA1 = basis != "paid"   // 免费号 / 未知按 2 OCPU / 12 GB 给默认值
         var f: [Field] = [
             Field.text("name", "实例名称", "oci-" + base36Now()),
-            Field.select("shape", "规格", d.optString("shape", AccountPage.SHAPES[0]), AccountPage.SHAPES, AccountPage.SHAPE_LABELS),
-            Field.num("ocpus", "OCPU", d.optString("ocpus", "4")),
-            Field.num("memory_gb", "内存 GB", d.optString("memory_gb", "24")),
+            Field.select("shape", "规格", d.optString("shape", AccountPage.SHAPES[0]), AccountPage.SHAPES, shapeLabels()),
+            Field.num("ocpus", "OCPU", d.optString("ocpus", freeA1 ? "2" : "4")),
+            Field.num("memory_gb", "内存 GB", d.optString("memory_gb", freeA1 ? "12" : "24")),
             Field.num("disk_gb", "引导卷 GB", d.optString("disk_gb", "50")),
             AccountPage.osImageField(d.optString("os", "Canonical Ubuntu"), str(d, "os_version", "")),
             Field.text("ad", "可用域（留空=第一个）", str(d, "ad", "")),

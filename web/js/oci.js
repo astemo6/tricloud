@@ -123,7 +123,7 @@ export const subnetLabel = (s) => {
 export async function tabOciSecGroup(acc, box) {
   const reload = () => tabOciSecGroup(acc, box);
   box.innerHTML = `<div class="bar">${await regionSelect(acc, reload)}<select id="sgSub" title="子网"><option value="">加载子网…</option></select>
-    <button class="btn" id="sgRf">刷新</button><button class="btn primary" id="sgAdd" disabled>添加规则</button><span class="grow"></span>
+    <button class="btn" id="sgRen" disabled title="修改子网 / VCN 的显示名称">改名</button><button class="btn" id="sgRf">刷新</button><button class="btn primary" id="sgAdd" disabled>添加规则</button><span class="grow"></span>
     <span class="muted">安全列表跟着子网走：规则对该子网里的所有实例生效</span></div><div class="card" id="sgBox"><div class="empty">选择子网后显示安全规则</div></div><div id="sgNsg"></div>`;
   $("#sgRf", box).onclick = reload;
   let subs = [];
@@ -140,6 +140,7 @@ export async function tabOciSecGroup(acc, box) {
   const load = async () => {
     const sid = $("#sgSub", box).value;
     $("#sgAdd", box).disabled = !sid;
+    $("#sgRen", box).disabled = !sid;
     $("#sgNsg", box).innerHTML = "";
     if (!sid) return;
     localStorage.setItem(key, sid);
@@ -204,7 +205,35 @@ export async function tabOciSecGroup(acc, box) {
     if (r) { toast(`已添加 ${r.added} 条${r.skipped ? `，跳过已存在 ${r.skipped} 条` : ""}`); load(); }
   };
   $("#sgSub", box).onchange = load;
+  $("#sgRen", box).onclick = () => { const s = subs.find((x) => x.id === $("#sgSub", box).value); if (s) renameSubnet(acc, s, reload); };
   load();
+}
+
+// 子网 / VCN 改名：只改显示名称（display_name），实例、IP、安全规则都不受影响；保存后刷新下拉并保持选中
+export async function renameSubnet(acc, s, done) {
+  const v = await modal("子网改名", `<label>子网名称</label><input name="subnet" maxlength="255" value="${esc(s.name || "")}">
+    ${s.vcn_id ? `<label>所属 VCN 名称（可一并修改）</label><input name="vcn" maxlength="255" value="${esc(s.vcn_name || "")}">` : ""}
+    <p class="muted">只修改显示名称，不影响子网里的实例、IP 和安全规则。${esc(s.cidr || "")}</p>`, (bg) => {
+    const f = form(bg), sub = (f.subnet || "").trim(), vcn = (f.vcn || "").trim();
+    if (!sub || (s.vcn_id && !vcn)) { toast("名称不能为空", true); return false; }
+    if (sub.length > 255 || vcn.length > 255) { toast("名称最多 255 个字符", true); return false; }
+    return { sub, vcn };
+  }, "保存");
+  if (!v) return;
+  const body = { region: regionOf(acc) || undefined };
+  let changed = 0;
+  if (v.sub !== (s.name || "")) {
+    if (!(await act(null, () => api(`/accounts/${acc.id}/oci/subnets/${encodeURIComponent(s.id)}`, { method: "PATCH", body: { ...body, display_name: v.sub } })))) return;
+    changed++;
+  }
+  if (s.vcn_id && v.vcn !== (s.vcn_name || "")) {
+    if (!(await act(null, () => api(`/accounts/${acc.id}/oci/vcns/${encodeURIComponent(s.vcn_id)}`, { method: "PATCH", body: { ...body, display_name: v.vcn } })))) return;
+    changed++;
+  }
+  if (!changed) { toast("名称没有变化"); return; }
+  toast("已改名");
+  localStorage.setItem("tc_sgsub_" + acc.id, s.id);
+  done();
 }
 
 // ---------- 6. OCI 存储（块存储卷 + 引导卷） ----------

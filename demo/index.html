@@ -30,6 +30,7 @@
     ],
     4: [{ id: "/subscriptions/demo/resourceGroups/rg-demo/providers/Microsoft.Compute/virtualMachines/az-b1s", name: "az-b1s", state: "running", public_ip: "192.0.2.44", private_ip: "10.2.0.4", ipv6: [], shape: "Standard_B1s", zone: "-", resource_group: "rg-demo", created: "2026-04-09 15:26" }],
   };
+  var subNames = { "ocid1.subnet.demo-a": "subnet-public", "ocid1.subnet.demo-b": "subnet-private" }, vcnName = "vcn-demo";   // 子网 / VCN 改名演示
   var lightsail = [{ id: "ls-debian", name: "ls-debian", state: "running", public_ip: "198.51.100.30", private_ip: "172.26.1.4", ipv6: ["2001:db8:1::30"], shape: "nano_3_0", blueprint: "debian_12", static_ip: true, zone: "ap-northeast-1a" }];
   var tasks = [
     { id: 12, type: "snatch", account_id: 1, account_name: "东京主号", provider: "oci", status: "running", attempts: 1384, message: "第 1384 次：容量不足", created: now - 86400, updated: now - 40, params: { name: "arm-main-2", create: { shape: "VM.Standard.A1.Flex", ocpus: 4, memory_gb: 24 }, interval: 60 } },
@@ -463,14 +464,25 @@
         seclists[0].rules.push({ direction: d0, protocol: pr0, cidr: c1, port: pt, idx: seclists[0].rules.length + 10 }); a0++; });
       audit1("POST /security-rules", "添加 " + a0 + " 条"); return { ok: true, sl_id: seclists[0].id, added: a0, skipped: k0 };
     }
+    if ((m = p.match(/^\/accounts\/(\d+)\/oci\/(subnets|vcns)\/([^/]+)$/)) && method === "PATCH") {
+      // 子网 / VCN 改名：只改显示名称
+      var nn = String((body && body.display_name) || "").trim(), oid = decodeURIComponent(m[3]), isSub = m[2] === "subnets";
+      if (!oid.startsWith(isSub ? "ocid1.subnet." : "ocid1.vcn.")) return { __status: 400, detail: isSub ? "subnet_id 不是子网 OCID" : "vcn_id 不是VCN OCID" };
+      if (!nn) return { __status: 400, detail: "名称不能为空" };
+      if (nn.length > 255) return { __status: 400, detail: "名称最多 255 个字符" };
+      var oldN = isSub ? (subNames[oid] || "") : vcnName;
+      if (isSub) subNames[oid] = nn; else vcnName = nn;
+      audit1("oci-" + (isSub ? "subnet" : "vcn") + "-rename", oldN + " → " + nn);
+      return { ok: true, id: oid, old_name: oldN, name: nn };
+    }
     if ((m = p.match(/^\/accounts\/(\d+)\/oci\/security-subnets$/))) {
       // 安全组页子网下拉：同子网实例合并，另有一个没有实例的私有子网；arm-main 演示挂了 NSG
       var si = (inst[m[1]] || []).filter(function (i) { return i.state !== "terminated"; });
       var nsgOf = function (i) { return i.name === "arm-main" ? [{ id: "ocid1.networksecuritygroup.demo", name: "web-nsg" }] : []; };
       return { errors: [], subnets: [
-        { id: "ocid1.subnet.demo-a", name: "subnet-public", cidr: "10.0.0.0/24", ipv6_cidrs: ["2603:c020::/64"], vcn_id: "ocid1.vcn.demo", vcn_name: "vcn-demo", security_list_count: 1,
+        { id: "ocid1.subnet.demo-a", name: subNames["ocid1.subnet.demo-a"], cidr: "10.0.0.0/24", ipv6_cidrs: ["2603:c020::/64"], vcn_id: "ocid1.vcn.demo", vcn_name: vcnName, security_list_count: 1,
           instances: si.map(function (i) { return { id: i.id, name: i.name, state: i.state, nsgs: nsgOf(i) }; }) },
-        { id: "ocid1.subnet.demo-b", name: "subnet-private", cidr: "10.0.1.0/24", ipv6_cidrs: [], vcn_id: "ocid1.vcn.demo", vcn_name: "vcn-demo", security_list_count: 1, instances: [] }] };
+        { id: "ocid1.subnet.demo-b", name: subNames["ocid1.subnet.demo-b"], cidr: "10.0.1.0/24", ipv6_cidrs: [], vcn_id: "ocid1.vcn.demo", vcn_name: vcnName, security_list_count: 1, instances: [] }] };
     }
     if ((m = p.match(/^\/accounts\/(\d+)\/security-rules$/))) {
       var subQ = (method === "GET" ? q.get("subnet_id") : (body && body.subnet_id)) || "";
@@ -852,7 +864,10 @@
     if ((m = p.match(/^\/tasks\/(\d+)\/stop$/))) { tasks.forEach(function (t) { if (t.id == m[1] && t.status === "running") { t.status = "stopped"; t.message = "已手动停止"; t.updated = Math.floor(Date.now() / 1000); tlog(t.id, "已手动停止", "warn"); } }); return { ok: true }; }
     if (p === "/monitors" && method === "GET") return monitors;
     if (p === "/logout") return { ok: true };
-    if ((m = p.match(/^\/accounts\/(\d+)\/regions$/))) { var pr = accounts.find(function (a) { return a.id == m[1]; }).provider; return pr === "oci" ? ["ap-tokyo-1", "ap-seoul-1", "ap-osaka-1"] : ["ap-northeast-1", "ap-southeast-1", "us-east-1", "us-west-2"]; }
+    if ((m = p.match(/^\/accounts\/(\d+)\/regions$/))) { var pr = accounts.find(function (a) { return a.id == m[1]; }).provider; if (pr === "aws" && q.get("service") === "lightsail") return ["ap-northeast-1", "ap-southeast-1", "us-east-1", "us-west-2"];   // Lightsail 不支持台北 ap-east-2
+      return pr === "oci" ? ["ap-tokyo-1", "ap-seoul-1", "ap-osaka-1"] : ["ap-east-2", "ap-northeast-1", "ap-southeast-1", "us-east-1", "us-west-2"]; }
+    if (/^\/accounts\/\d+\/(lightsail\/|instances$)/.test(p) && (q.get("kind") === "lightsail" || p.indexOf("/lightsail/") >= 0) && (q.get("region") || (body && body.region)) === "ap-east-2")
+      return { __status: 400, detail: "Lightsail 不支持该区域（台北 ap-east-2），请换区域" };
     if ((m = p.match(/^\/accounts\/(\d+)\/instances$/)) && method === "GET") return q.get("kind") === "lightsail" ? lightsail : (inst[m[1]] || []);
     if (p.match(/\/instances\/change-ip$/)) {
       var ca = accOf(p), cidrs = String(body.cidrs || "").split(/[,，\n]/).map(function (x) { return x.trim(); }).filter(Boolean);
@@ -1583,14 +1598,30 @@ const regionLabel = (code) => { const c = regionCity(code); return c ? `${code} 
 // 下拉选项：value 永远是纯代码，显示带城市名
 const regionOpt = (code, selected) => `<option value="${esc(code)}"${selected ? " selected" : ""}>${esc(regionLabel(code))}</option>`;
 const regionOf = (acc) => localStorage.getItem("tc_region_" + acc.id) || acc.region || "";
-async function regionSelect(acc, onChange) {
+// Lightsail 只在部分区域提供服务（如台北 ap-east-2 没有）：区域下拉用 /regions?service=lightsail；当前区域不支持时自动切换并提示
+const LS_REGIONS = {};
+async function lsRegions(acc) {
+  if (!LS_REGIONS[acc.id]) LS_REGIONS[acc.id] = api(`/accounts/${acc.id}/regions?service=lightsail`).catch((e) => { delete LS_REGIONS[acc.id]; throw e; });
+  return LS_REGIONS[acc.id];
+}
+async function ensureLsRegion(acc) {
+  let rs;
+  try { rs = await lsRegions(acc); } catch (e) { return regionOf(acc); }
+  const cur = regionOf(acc);
+  if (!rs.length || rs.includes(cur)) return cur;
+  const to = rs.includes(acc.region) ? acc.region : rs[0];
+  localStorage.setItem("tc_region_" + acc.id, to);
+  toast(`Lightsail 不支持 ${regionLabel(cur)}，已切换到 ${regionLabel(to)}`);
+  return to;
+}
+async function regionSelect(acc, onChange, service) {
   if (NOREG(acc)) return "";
   const id = "rg" + acc.id;
   setTimeout(async () => {
     const sel = document.getElementById(id);
     if (!sel) return;
     try {
-      const rs = await api(`/accounts/${acc.id}/regions`);
+      const rs = service === "lightsail" ? await lsRegions(acc) : await api(`/accounts/${acc.id}/regions`);
       const cur = regionOf(acc);
       sel.innerHTML = rs.map((r) => regionOpt(r, r === cur)).join("");
       if (!rs.includes(cur)) sel.insertAdjacentHTML("afterbegin", regionOpt(cur, true));
@@ -2333,7 +2364,7 @@ const subnetLabel = (s) => {
 async function tabOciSecGroup(acc, box) {
   const reload = () => tabOciSecGroup(acc, box);
   box.innerHTML = `<div class="bar">${await regionSelect(acc, reload)}<select id="sgSub" title="子网"><option value="">加载子网…</option></select>
-    <button class="btn" id="sgRf">刷新</button><button class="btn primary" id="sgAdd" disabled>添加规则</button><span class="grow"></span>
+    <button class="btn" id="sgRen" disabled title="修改子网 / VCN 的显示名称">改名</button><button class="btn" id="sgRf">刷新</button><button class="btn primary" id="sgAdd" disabled>添加规则</button><span class="grow"></span>
     <span class="muted">安全列表跟着子网走：规则对该子网里的所有实例生效</span></div><div class="card" id="sgBox"><div class="empty">选择子网后显示安全规则</div></div><div id="sgNsg"></div>`;
   $("#sgRf", box).onclick = reload;
   let subs = [];
@@ -2350,6 +2381,7 @@ async function tabOciSecGroup(acc, box) {
   const load = async () => {
     const sid = $("#sgSub", box).value;
     $("#sgAdd", box).disabled = !sid;
+    $("#sgRen", box).disabled = !sid;
     $("#sgNsg", box).innerHTML = "";
     if (!sid) return;
     localStorage.setItem(key, sid);
@@ -2414,7 +2446,35 @@ async function tabOciSecGroup(acc, box) {
     if (r) { toast(`已添加 ${r.added} 条${r.skipped ? `，跳过已存在 ${r.skipped} 条` : ""}`); load(); }
   };
   $("#sgSub", box).onchange = load;
+  $("#sgRen", box).onclick = () => { const s = subs.find((x) => x.id === $("#sgSub", box).value); if (s) renameSubnet(acc, s, reload); };
   load();
+}
+
+// 子网 / VCN 改名：只改显示名称（display_name），实例、IP、安全规则都不受影响；保存后刷新下拉并保持选中
+async function renameSubnet(acc, s, done) {
+  const v = await modal("子网改名", `<label>子网名称</label><input name="subnet" maxlength="255" value="${esc(s.name || "")}">
+    ${s.vcn_id ? `<label>所属 VCN 名称（可一并修改）</label><input name="vcn" maxlength="255" value="${esc(s.vcn_name || "")}">` : ""}
+    <p class="muted">只修改显示名称，不影响子网里的实例、IP 和安全规则。${esc(s.cidr || "")}</p>`, (bg) => {
+    const f = form(bg), sub = (f.subnet || "").trim(), vcn = (f.vcn || "").trim();
+    if (!sub || (s.vcn_id && !vcn)) { toast("名称不能为空", true); return false; }
+    if (sub.length > 255 || vcn.length > 255) { toast("名称最多 255 个字符", true); return false; }
+    return { sub, vcn };
+  }, "保存");
+  if (!v) return;
+  const body = { region: regionOf(acc) || undefined };
+  let changed = 0;
+  if (v.sub !== (s.name || "")) {
+    if (!(await act(null, () => api(`/accounts/${acc.id}/oci/subnets/${encodeURIComponent(s.id)}`, { method: "PATCH", body: { ...body, display_name: v.sub } })))) return;
+    changed++;
+  }
+  if (s.vcn_id && v.vcn !== (s.vcn_name || "")) {
+    if (!(await act(null, () => api(`/accounts/${acc.id}/oci/vcns/${encodeURIComponent(s.vcn_id)}`, { method: "PATCH", body: { ...body, display_name: v.vcn } })))) return;
+    changed++;
+  }
+  if (!changed) { toast("名称没有变化"); return; }
+  toast("已改名");
+  localStorage.setItem("tc_sgsub_" + acc.id, s.id);
+  done();
 }
 
 // ---------- 6. OCI 存储（块存储卷 + 引导卷） ----------
@@ -3227,7 +3287,8 @@ function instCard(acc, i, kind) {
 
 async function tabInstances(acc, box, kind = "vm") {
   const reload = () => tabInstances(acc, box, kind);
-  box.innerHTML = `<div class="bar">${await regionSelect(acc, reload)}<button class="btn" id="rf">刷新</button>
+  if (kind === "lightsail") await ensureLsRegion(acc);
+  box.innerHTML = `<div class="bar">${await regionSelect(acc, reload, kind === "lightsail" ? "lightsail" : undefined)}<button class="btn" id="rf">刷新</button>
     ${kind === "lightsail" ? `<button class="btn primary" id="lsNew">创建 Lightsail</button>` : ""}
     ${acc.provider === "aws" && kind === "vm" ? `<button class="btn primary" id="ec2New">创建 EC2</button>` : ""}
     <span class="grow"></span><span class="muted" id="info"></span>

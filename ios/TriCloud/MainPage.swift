@@ -44,7 +44,7 @@ final class MainPage: Page {
                 let aid = acc.optInt("id")
                 let c = self.card(acc.optString("name") + (acc.optInt("disabled") == 1 ? "  [已停用]" : ""))
                 let proxy = str(acc, "proxy", "").isEmpty ? "" : "\n代理 " + acc.optString("proxy") + (str(acc, "proxy_user", "").isEmpty ? "" : " · " + acc.optString("proxy_user"))
-                c.muted(MainPage.pname(acc.optString("provider")) + " · " + str(acc, "region", "-") + MainPage.typeOf(acc) + MainPage.ageOf(acc) + MainPage.testOf(acc) + proxy)
+                c.muted(MainPage.pname(acc.optString("provider")) + " · " + Regions.label(str(acc, "region", "-")) + MainPage.typeOf(acc) + MainPage.ageOf(acc) + MainPage.testOf(acc) + proxy)
                 let row = c.row()
                 row.button("管理") { self.push(AccountPage(acc)) }
                 row.button("测活") {

@@ -67,9 +67,18 @@ async def auth_mw(req: Request, call_next):
     return resp
 
 
+@app.exception_handler(core.LightsailRegionError)
+async def ls_region_err(req, exc):
+    return JSONResponse({"detail": str(exc)}, status_code=400)
+
+
 @app.exception_handler(Exception)
 async def err(req, exc):
     msg = str(exc)
+    lm = re.search(r"https://lightsail\.([a-z0-9-]+)\.amazonaws\.com", msg)
+    if type(exc).__name__ == "EndpointConnectionError" and lm:   # 兜底：区域表没覆盖到的 Lightsail 端点连不上
+        from .providers.aws_provider import ls_region_msg
+        return JSONResponse({"detail": ls_region_msg(lm.group(1))}, status_code=400)
     m = re.search(r"\((UnauthorizedOperation|AccessDenied\w*|AuthorizationFailed|NotAuthorized\w*)\)", msg) or \
         re.search(r"'code': '(NotAuthorizedOrNotFound|NotAuthenticated)'", msg)
     if m:   # 云账号权限不足：不是面板故障，给出缺哪个权限

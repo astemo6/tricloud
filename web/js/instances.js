@@ -1,6 +1,6 @@
 // TriCloud 前端 v1.6.0 · 账号页框架与实例：列表 / 卡片 / 表格、实例操作、开放端口与安全组弹窗、迁移、流量守护弹窗、v1.6 实例弹窗（重装 / 附加 IP / IP 质量 / 500M / 磁盘 / Lightsail 防火墙）
 import { $, ACCOUNTS, act, api, confirmBox, esc, form, instView, isDesktop, lastModal, modal, NO_CHANGE_IP, NO_CREATE, NOREG, OP_NAMES, PNAME, post, regionOf, regionSelect, rq, TAB_FNS_EXTRA, TABS, toast, TRAFFIC_DIALOG, view } from "./core.js";
-import { ociOsFields, ociShapeOpts, PUBLIC_CIDR, tabOciCreate, tabOciLimits, tabOciObjects, tabOciRegionSub, tabOciSecGroup, tabOciSnatch, tabOciStorage, tabOciTraffic, wireOciOs } from "./oci.js";
+import { ociOsFields, ociShapeOpts, PUBLIC_CIDR, tabOciCreate, tabOciLimits, tabOciObjects, tabOciSecGroup, tabOciSnatch, tabOciStorage, tabOciTraffic, wireOciOs } from "./oci.js";
 import { ec2Create, lightsailCreate, tabAwsRegions, tabCloudFront, tabLightsailV16, tabQuota, tabRecycle } from "./aws.js";
 import { tabAzCreate, tabAzFoundry, tabAzQuota, tabAzRgs, tabAzSubscription } from "./azure.js";
 import { tabBilling } from "./billing.js";
@@ -30,7 +30,7 @@ export async function pageAccount(acc, tab) {
   const box = $("#tab");
   const fn = {
     instances: tabInstances, ec2: tabInstances, vms: tabInstances, lightsail: tabLightsailV16,
-    storage: tabOciStorage, objects: (a, b) => tabOciObjects(a, b), traffic: tabOciTraffic, regionsub: tabOciRegionSub,
+    storage: tabOciStorage, objects: (a, b) => tabOciObjects(a, b), traffic: tabOciTraffic,
     create: tabOciCreate, snatch: tabOciSnatch, cloudfront: tabCloudFront, quota: tabQuota, recycle: tabRecycle, billing: tabBilling,
     limits: tabOciLimits, regions: tabAwsRegions, azcreate: tabAzCreate, rgs: tabAzRgs, azquota: tabAzQuota,
     subscription: tabAzSubscription, secgroup: tabOciSecGroup, foundry: tabAzFoundry,

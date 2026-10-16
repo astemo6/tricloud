@@ -366,12 +366,20 @@ extension AccountPage {
                 self.post("/accounts/\(self.id)/oci/network", ["region": self.region()]) { x in self.taskOrToast(x, "已提交") }
             }
         }
+        let c = card("计算配额 · " + region())
+        let note = c.live("加载中…")
+        // 页面最底部：区域订阅的二级入口（订阅不可撤销，不放在标签栏里，防误点）
+        section("高级")
+        nav("exclamationmark.triangle", "区域订阅（不可撤销）", "订阅后无法取消", tint: .red) { self.push(OciRegionSubPage(self)) }
         let g = gen
         get("/accounts/\(id)/oci/limits?" + rq()) { r in
             guard self.cur(g) else { return }
             let d = jobj(r)
-            let c = self.card("计算配额 · " + str(d, "region", self.region()))
+            c.title = "计算配额 · " + str(d, "region", self.region())
             let items = d.optJSONArray("items") ?? []
+            let basis = d.optString("a1_basis")
+            let a1 = basis == "paid" ? "付费号 4 OCPU / 24GB" : basis == "free" ? "免费号 2 OCPU / 12GB" : "免费号 2 OCPU / 12GB（未识别账号类型，可在右上角「账号类型」刷新）"
+            note.text = "「上限」是 OCI 允许开的量，升级按量付费后会很大；「免费剩余」A1 按" + a1 + "计算（2026-06 起免费号减半），E2.1.Micro 2 台，超出部分计费。可用量为 0 时抢机必然失败。"
             if items.isEmpty { c.muted("无数据") }
             for i in 0..<items.count {
                 let it = items.obj(i)
@@ -379,45 +387,6 @@ extension AccountPage {
                 var line = "上限 " + str(it, "limit", "-") + " · 已用 " + str(it, "used", "-") + " · 可用 " + str(it, "available", "-")
                 if !it.isNull("free") { line += " · 免费剩余 " + str(it, "free_left", "?") + " / " + it.optString("free") }
                 c.muted(line)
-            }
-            let basis = d.optString("a1_basis")
-            let a1 = basis == "paid" ? "付费号 4 OCPU / 24GB" : basis == "free" ? "免费号 2 OCPU / 12GB" : "免费号 2 OCPU / 12GB（未识别账号类型，可在右上角「账号类型」刷新）"
-            c.muted("「上限」是 OCI 允许开的量，升级按量付费后会很大；「免费剩余」A1 按" + a1 + "计算（2026-06 起免费号减半），E2.1.Micro 2 台，超出部分计费。可用量为 0 时抢机必然失败。")
-        }
-    }
-
-    // MARK: - OCI 区域订阅
-
-    func ociRegionSub() {
-        let g = gen
-        get("/accounts/\(id)/oci/region-subscriptions") { r in
-            guard self.cur(g) else { return }
-            let d = jobj(r)
-            let rs = d.optJSONArray("regions") ?? []
-            var subd: [JObj] = [], unsub: [JObj] = []
-            for i in 0..<rs.count { if rs.obj(i).optBoolean("subscribed") { subd.append(rs.obj(i)) } else { unsub.append(rs.obj(i)) } }
-            let c = self.card("已订阅 \(subd.count) 个区域 · 主区域 " + str(d, "home", "-"))
-            c.muted(d.optString("limit_hint") + "。订阅不可撤销，订阅后可在实例等标签的「区域」里切换。")
-            var lines: [String] = []
-            for x in subd {
-                let home: String = x.optBoolean("home") ? " · 主区域" : ""
-                let head: String = x.optString("name") + " (" + x.optString("key") + ")"
-                lines.append(head + home + " · " + str(x, "status", "已订阅"))
-            }
-            c.text(lines.joined(separator: "\n"), 13)
-            if !unsub.isEmpty {
-                c.row().button("订阅新区域…") {
-                    self.choose("订阅区域（不可撤销）", unsub.map { $0.optString("name") + " · " + $0.optString("key") }) { i in
-                        let x = unsub[i]
-                        self.confirm("订阅区域", "订阅 " + x.optString("name") + "（" + x.optString("key") + "）？\n⚠️ 订阅后无法取消，免费账号的额外区域名额通常只有 1 个；Always Free 资源仍只在主区域。") {
-                            self.post("/accounts/\(self.id)/oci/region-subscriptions", ["region_key": x.optString("key"), "confirm": true]) { y in
-                                let o = jobj(y)
-                                self.toast("已提交订阅：" + o.optString("region") + "（" + o.optString("status") + "），几分钟后生效")
-                                self.refresh()
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -815,6 +784,62 @@ final class LsPortsPage: Page {
             if cidrs.contains("0.0.0.0/0") || cidrs.contains("::/0") {
                 self.confirm("⚠️ 对整个互联网开放", "来源 0.0.0.0/0：任何人都能访问 " + (proto == "icmp" ? "ICMP" : v.optString("port")) + "。请确认服务有密码 / 密钥保护。") { send(true) }
             } else { send(false) }
+        }
+    }
+}
+
+// MARK: - OCI 区域订阅（build 18：从标签栏移到「配额/网络」底部的二级入口；提交前须手动输入区域标识，如 ap-osaka-1）
+
+final class OciRegionSubPage: Page {
+    let ap: AccountPage
+
+    init(_ ap: AccountPage) {
+        self.ap = ap
+        super.init()
+        title = "区域订阅（不可撤销）"
+    }
+
+    override func refresh() {
+        get("/accounts/\(ap.id)/oci/region-subscriptions") { r in
+            self.clear()
+            let d = jobj(r)
+            let rs = d.optJSONArray("regions") ?? []
+            var subd: [JObj] = [], unsub: [JObj] = []
+            for i in 0..<rs.count { if rs.obj(i).optBoolean("subscribed") { subd.append(rs.obj(i)) } else { unsub.append(rs.obj(i)) } }
+            let c = self.card("已订阅 \(subd.count) 个区域 · 主区域 " + str(d, "home", "-"))
+            c.muted(d.optString("limit_hint") + "。订阅不可撤销，订阅后可在实例等标签的「区域」里切换。")
+            var lines: [String] = []
+            for x in subd {
+                let home: String = x.optBoolean("home") ? " · 主区域" : ""
+                let head: String = x.optString("name") + " (" + x.optString("key") + ")"
+                lines.append(head + home + " · " + str(x, "status", "已订阅"))
+            }
+            c.text(lines.joined(separator: "\n"), 13)
+            if !unsub.isEmpty {
+                c.row().button("订阅新区域…") {
+                    self.choose("订阅区域（不可撤销）", unsub.map { $0.optString("name") + " · " + $0.optString("key") }) { i in
+                        self.subscribe(unsub[i])
+                    }
+                }
+            }
+        }
+    }
+
+    private func subscribe(_ x: JObj) {
+        let key = x.optString("key"), name = x.optString("name")
+        confirm("订阅区域", "订阅 " + name + "（" + key + "）？\n⚠️ 订阅后无法取消，免费账号的额外区域名额通常只有 1 个；Always Free 资源仍只在主区域。") {
+            self.form("再次确认：订阅区域", "订阅 " + name + "（" + key + "）后无法取消。请手动输入区域标识「" + name + "」以确认。",
+                      [Field.text("region_name", "区域标识（如 ap-osaka-1）", "")], "确认订阅") { v in
+                if v.optString("region_name").trimmingCharacters(in: .whitespacesAndNewlines) != name {
+                    self.toast("输入的区域标识不一致，未订阅")
+                    return
+                }
+                self.post("/accounts/\(self.ap.id)/oci/region-subscriptions", ["region_key": key, "confirm": true]) { y in
+                    let o = jobj(y)
+                    self.toast("已提交订阅：" + o.optString("region") + "（" + o.optString("status") + "），几分钟后生效")
+                    self.refresh()
+                }
+            }
         }
     }
 }

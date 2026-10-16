@@ -1,5 +1,5 @@
 // TriCloud 前端 v1.6.0 · Hash 路由（#/aws/3/billing）、侧栏、顶栏账号快速切换器
-import { $, ACCOUNTS, esc, isDesktop, PLOGO, PNAME, PROVS, TABS, view } from "./core.js";
+import { $, ACCOUNTS, esc, isDesktop, PLOGO, PNAME, PROVS, TAB_ALIAS, TABS, view } from "./core.js";
 import { pageHome } from "./home.js";
 import { pageAccounts, pageDeletedAccounts } from "./accounts.js";
 import { closeOpsMenu, pageAccount } from "./instances.js";
@@ -36,7 +36,8 @@ export async function route() {
     if (TABS[p[0]]) {
       const acc = ACCOUNTS.find((a) => a.id == p[1] && a.provider === p[0]);
       if (!acc) return (view.innerHTML = `<div class="empty">账号不存在</div>`);
-      const tab = TABS[p[0]].some((t) => t[0] === p[2]) ? p[2] : TABS[p[0]][0][0];
+      const want = (TAB_ALIAS[p[0]] || {})[p[2]] || p[2];
+      const tab = TABS[p[0]].some((t) => t[0] === want) ? want : TABS[p[0]][0][0];
       if (p[2] !== tab) return history.replaceState(null, "", `#/${p[0]}/${p[1]}/${tab}`), route();
       return pageAccount(acc, tab);
     }

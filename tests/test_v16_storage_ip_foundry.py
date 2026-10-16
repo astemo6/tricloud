@@ -537,7 +537,17 @@ with TestClient(main.app, raise_server_exceptions=False) as c:
 web = "".join(open(os.path.join(ROOT, "web", "js", f), encoding="utf-8").read() for f in sorted(os.listdir(os.path.join(ROOT, "web", "js"))) if f.endswith(".js"))
 ok("web: new ops + tabs wired", all(s in web for s in ('["reinstall", "重装系统"]', '["ips", "附加 IP"]', '["net500", "500M 下行"]', '["disks", "磁盘"]',
                                                      '["lsports", "防火墙"]', '["quality", "IP 质量"]', '["storage", "存储"]', '["objects", "对象存储"]',
-                                                     '["regionsub", "区域订阅"]', "pageFreeCheck", "QUALITY_FIELDS", "data-off", "proxycheck_key")))
+                                                     "tabOciRegionSub", "pageFreeCheck", "QUALITY_FIELDS", "data-off", "proxycheck_key")))
+ok("web: 区域订阅 not in OCI tab bar, folded at bottom of 配额/网络", '["regionsub", "区域订阅"]' not in web and "regionSubSection(acc)" in web
+   and '高级 · 区域订阅（不可撤销）' in web and 'document.createElement("details")' in web and 'addEventListener("toggle"' in web)
+ok("web: 区域订阅 subscribe requires typing region name (ap-osaka-1) after confirm", "typeKeyConfirm(b.dataset.n, b.dataset.sub)" in web and 'inp.value.trim() !== name' in web and "ok.disabled = true" in web)
+ok("web: old #/oci/<id>/regionsub route maps to limits", 'TAB_ALIAS = { oci: { regionsub: "limits" } }' in web and "TAB_ALIAS[p[0]]" in web)
+_aj = open(os.path.join(ROOT, "android", "app", "src", "main", "java", "com", "tricloud", "app", "AccountActivity.java"), encoding="utf-8").read()
+ok("android: 区域订阅 tab removed, folded section + typed key confirm", '{"regionsub", "区域订阅"}' not in _aj and "ociRegionSubSection()" in _aj
+   and "typeKeyConfirm(" in _aj and "pos.setEnabled(name.equals(" in _aj and '"regionsub".equals(tab)) tab = "limits"' in _aj)
+_is = "".join(open(os.path.join(ROOT, "ios", "TriCloud", f), encoding="utf-8").read() for f in ("AccountPage.swift", "AccountPage+V16.swift"))
+ok("ios: 区域订阅 tab removed, secondary page + typed key confirm", '("regionsub", "区域订阅")' not in _is and "OciRegionSubPage(self)" in _is
+   and 'v.optString("region_name").trimmingCharacters(in: .whitespacesAndNewlines) != name' in _is and 'if tab == "regionsub" { tab = "limits" }' in _is)
 ok("web: account list has no 停用 button (only 启用 for already-disabled)", '"启用" : "停用"' not in web and 'data-off="${a.id}">启用' in web)
 ok("web: reinstall requires explicit confirm checkbox", 'name="confirm"' in web and "请先勾选确认" in web)
 mockjs = open(os.path.join(ROOT, "demo", "mock.js"), encoding="utf-8").read().replace("\\/", "/")

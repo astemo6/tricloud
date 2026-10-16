@@ -23,7 +23,7 @@ public class AccountActivity extends BaseActivity {
     static String[][] tabs(String p) {
         switch (p) {
             case "oci": return new String[][]{{"instances", "实例"}, {"create", "创建实例"}, {"snatch", "自动抢机"}, {"secgroup", "安全组"}, {"storage", "存储"},
-                    {"objects", "对象存储"}, {"traffic", "流量"}, {"limits", "配额/网络"}, {"regionsub", "区域订阅"}, {"billing", "账单"}};
+                    {"objects", "对象存储"}, {"traffic", "流量"}, {"limits", "配额/网络"}, {"billing", "账单"}};   // 区域订阅收在「配额/网络」页底部（防误点）
             case "aws": return new String[][]{{"ec2", "EC2"}, {"lightsail", "Lightsail"}, {"regions", "区域"}, {"cloudfront", "CloudFront"}, {"quota", "配额"}, {"recycle", "闲置资源"}, {"billing", "账单"}};
             default: return new String[][]{{"vms", "虚拟机"}, {"azcreate", "创建 VM"}, {"rgs", "资源组"}, {"azquota", "配额"}, {"foundry", "Foundry"}, {"subscription", "订阅"}, {"billing", "账单"}};
         }
@@ -36,6 +36,7 @@ public class AccountActivity extends BaseActivity {
         prov = acc.optString("provider");
         id = acc.optInt("id");
         tab = s != null ? s.getString("tab", tabs(prov)[0][0]) : Api.pref("tab_" + id, tabs(prov)[0][0]);
+        if ("regionsub".equals(tab)) tab = "limits";   // build 18 起区域订阅不再是单独标签
         boolean known = false;
         for (String[] t : tabs(prov)) if (t[0].equals(tab)) known = true;
         if (!known) tab = tabs(prov)[0][0];
@@ -91,7 +92,7 @@ public class AccountActivity extends BaseActivity {
 
     private void header() {
         clear();
-        if (!MainActivity.noRegion(prov) && !Arrays.asList("cloudfront", "quota", "billing", "subscription", "regions", "regionsub").contains(tab)) {
+        if (!MainActivity.noRegion(prov) && !Arrays.asList("cloudfront", "quota", "billing", "subscription", "regions").contains(tab)) {
             LinearLayout r2 = row(body);
             button(r2, "区域：" + region(), v -> Api.get(this, "/accounts/" + id + "/regions", x -> {
                 JSONArray a = Api.arr(x);
@@ -121,7 +122,6 @@ public class AccountActivity extends BaseActivity {
             case "storage": ociStorage(); break;
             case "objects": ociObjects(); break;
             case "limits": ociLimits(); break;
-            case "regionsub": ociRegionSub(); break;
             case "regions": awsRegions(false); break;
             case "azcreate": azCreateTab(); break;
             case "rgs": azRgs(); break;
@@ -1629,10 +1629,14 @@ public class AccountActivity extends BaseActivity {
         button(row(nc), "自动创建网络", v -> confirm("自动创建网络", "新建 VCN（含 IPv6）、互联网网关、路由和公有子网，安全列表默认只放行 22 与 ICMP。确定？", () -> {
             try { Api.post(this, "/accounts/" + id + "/oci/network", rb(), x -> taskOrToast(x, "已提交")); } catch (Exception ignored) { }
         }));
+        LinearLayout c = card("计算配额 · " + region());
+        android.widget.TextView cLoading = muted(c, "加载中…");
+        ociRegionSubSection();   // 页面最底部：默认折叠的「高级 · 区域订阅」
         Api.get(this, "/accounts/" + id + "/oci/limits?" + rq(), r -> {
             JSONObject d = Api.obj(r);
             JSONArray items = d.optJSONArray("items");
-            LinearLayout c = card("计算配额 · " + d.optString("region"));
+            c.removeView(cLoading);
+            ((android.widget.TextView) c.getChildAt(0)).setText("计算配额 · " + d.optString("region"));
             if (items == null || items.length() == 0) muted(c, "无数据");
             for (int i = 0; items != null && i < items.length(); i++) {
                 JSONObject it = items.optJSONObject(i);
@@ -1647,29 +1651,73 @@ public class AccountActivity extends BaseActivity {
         });
     }
 
-    private void ociRegionSub() {
+    static final String REGION_SUB_TITLE = "高级 · 区域订阅（不可撤销）";
+
+    /** v1.6 build 18：区域订阅不再单独占标签，收在「配额/网络」页底部，默认折叠，展开才加载。 */
+    private void ociRegionSubSection() {
+        LinearLayout adv = card(REGION_SUB_TITLE);
+        muted(adv, "订阅新区域后无法取消，一般不需要。展开后才会加载区域列表。");
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setVisibility(android.view.View.GONE);
+        boolean[] loaded = {false};
+        android.widget.Button tg = button(row(adv), "展开", null);
+        adv.addView(list);
+        tg.setOnClickListener(v -> {
+            boolean show = list.getVisibility() != android.view.View.VISIBLE;
+            list.setVisibility(show ? android.view.View.VISIBLE : android.view.View.GONE);
+            tg.setText(show ? "收起" : "展开");
+            if (show && !loaded[0]) { loaded[0] = true; ociRegionSub(list); }
+        });
+    }
+
+    private void ociRegionSub(LinearLayout box) {
+        box.removeAllViews();
+        muted(box, "加载中…");
         Api.get(this, "/accounts/" + id + "/oci/region-subscriptions", r -> {
+            box.removeAllViews();
             JSONObject d = Api.obj(r);
             JSONArray rs = d.optJSONArray("regions");
             int sub = 0;
             for (int i = 0; rs != null && i < rs.length(); i++) if (rs.optJSONObject(i).optBoolean("subscribed")) sub++;
-            LinearLayout top = card("已订阅 " + sub + " 个区域 · 主区域 " + str(d, "home", "-"));
-            muted(top, str(d, "limit_hint", "") + "。订阅不可撤销，订阅后可在区域选择里切换。");
+            text(box, "已订阅 " + sub + " 个区域 · 主区域 " + str(d, "home", "-"), 14, true);
+            muted(box, str(d, "limit_hint", "") + "。订阅不可撤销，订阅后可在区域选择里切换。");
             for (int i = 0; rs != null && i < rs.length(); i++) {
                 JSONObject x = rs.optJSONObject(i);
                 boolean s = x.optBoolean("subscribed");
-                LinearLayout c = card(x.optString("name") + (x.optBoolean("home") ? "  [主区域]" : ""));
-                muted(c, x.optString("key") + " · " + (s ? str(x, "status", "已订阅") : "未订阅"));
-                if (!s) button(row(c), "订阅", v -> confirm("订阅区域", "订阅 " + x.optString("name") + "（" + x.optString("key") + "）？\n⚠️ 订阅后无法取消，免费账号的额外区域名额通常只有 1 个；Always Free 资源仍只在主区域。", () -> {
+                text(box, x.optString("name") + (x.optBoolean("home") ? "  [主区域]" : ""), 14, true);
+                muted(box, x.optString("key") + " · " + (s ? str(x, "status", "已订阅") : "未订阅"));
+                if (!s) button(row(box), "订阅", v -> confirm("订阅区域", "订阅 " + x.optString("name") + "（" + x.optString("key") + "）？\n⚠️ 订阅后无法取消，免费账号的额外区域名额通常只有 1 个；Always Free 资源仍只在主区域。",
+                        () -> typeKeyConfirm(x.optString("name"), x.optString("key"), () -> {
                     try {
                         Api.post(this, "/accounts/" + id + "/oci/region-subscriptions", new JSONObject().put("region_key", x.optString("key")).put("confirm", true), y -> {
                             JSONObject o = Api.obj(y);
                             toast("已提交订阅：" + o.optString("region") + "（" + o.optString("status") + "），几分钟后生效");
-                            refresh();
+                            ociRegionSub(box);
                         });
                     } catch (Exception ignored) { }
-                }));
+                })));
             }
+        });
+    }
+
+    /** 二次确认：手动输入完整区域标识（如 ap-osaka-1）一致后「确认订阅」才可点。 */
+    private void typeKeyConfirm(String name, String key, Runnable ok) {
+        com.google.android.material.textfield.TextInputLayout til = inputLayout("输入区域标识确认", name, android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(24), dp(8), dp(24), 0);
+        wrap.addView(til);
+        androidx.appcompat.app.AlertDialog dlg = new com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle("再次确认：订阅区域")
+                .setMessage("订阅 " + name + "（" + key + "）后无法取消。请手动输入区域标识「" + name + "」以确认。")
+                .setView(wrap).setPositiveButton("确认订阅", (d, w) -> ok.run()).setNegativeButton("取消", null).show();
+        android.widget.Button pos = dlg.getButton(android.content.DialogInterface.BUTTON_POSITIVE);
+        pos.setEnabled(false);
+        android.widget.EditText et = til.getEditText();
+        if (et != null) et.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence c, int a, int b, int n) { }
+            @Override public void onTextChanged(CharSequence c, int a, int b, int n) { }
+            @Override public void afterTextChanged(android.text.Editable e) { pos.setEnabled(name.equals(e.toString().trim())); }
         });
     }
 

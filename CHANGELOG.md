@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.6.0（build 18）(2026-10-16)
+- OCI「区域订阅」移出账号标签栏，防止误点（订阅不可撤销）：Web 收在「配额/网络」页最底部默认折叠的「高级 · 区域订阅（不可撤销）」区块，展开才加载；Android 同样在该页底部折叠；iOS 在该页底部「高级」分组里作为二级页面。订阅除原确认框外，还要手动输入完整区域标识（如 `ap-osaka-1`）才能提交。旧链接 `#/oci/<id>/regionsub` 自动跳到「配额/网络」。后端接口不变。Android versionCode 18 / iOS build 18。
+
 ## 1.6.0 结构整理（2026-10-15，接口与数据不变）
 - 后端：`app/main.py` 只保留 app 创建、生命周期、认证 / 审计中间件、异常处理；124 个接口按功能拆到 `app/routers/`（auth、accounts、instances、oci、aws、azure、billing、tasks_monitors、settings、security、cloudflare、guard_health、pages，公共工具在 common），`routes_v16.py` 的 27 个接口并入对应模块。全部 151 个接口的路径、方法、参数与匹配顺序不变。
 - `extras.py` 拆为 `security`（TOTP / API Token / 审计 / 备份恢复）、`cloudinit`（开机密码 / cloud-init / 脚本模板）、`dns`（Cloudflare）、`net`（TCP 检测 / 网段 / IP 质量）。

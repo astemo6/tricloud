@@ -104,6 +104,7 @@ export async function tabOciLimits(acc, box) {
     if (!(await confirmBox("自动创建网络", "新建 VCN（含 IPv6）、互联网网关、路由和公有子网，安全列表默认只放行 22 与 ICMP。确定？"))) return;
     act(e.target, () => post(`/accounts/${acc.id}/oci/network`, { region: regionOf(acc) }), (r) => `已创建任务 #${r.task_id}`);
   };
+  box.appendChild(regionSubSection(acc));   // 页面最底部，默认折叠
   let r;
   try { r = await api(`/accounts/${acc.id}/oci/limits?${rq(acc)}`); } catch (e) { $("#lb", box).innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
   $("#lb", box).innerHTML = `<div class="card"><h3>计算配额 · ${esc(r.region)}</h3><table><tr><th>项目</th><th>上限</th><th>已用</th><th>可用</th><th>免费剩余</th></tr>
@@ -314,19 +315,44 @@ export function guardCell(g) {
   return `${st} <span class="muted">${g.last_gb ?? "-"} / ${g.limit_gb} GB${g.action === "stop" ? " · 超限停机" : " · 只推送"}</span>`;
 }
 
-// ---------- 7. OCI 区域订阅 ----------
+// ---------- 7. OCI 区域订阅（v1.6 build 18：不再单独占标签，收在「配额/网络」页底部默认折叠的「高级」区，展开才加载） ----------
+// 订阅不可撤销：确认框之后还要手动输入区域标识（如 ap-osaka-1）才能提交，防止误点
+export const REGION_SUB_TITLE = "高级 · 区域订阅（不可撤销）";
+export function regionSubSection(acc) {
+  const el = document.createElement("details");
+  el.className = "card rsadv"; el.id = "rsAdv";
+  el.innerHTML = `<summary>${REGION_SUB_TITLE}</summary><div id="rsBody"><p class="muted">展开后加载区域列表。</p></div>`;
+  let loaded = false;
+  el.addEventListener("toggle", () => { if (el.open && !loaded) { loaded = true; tabOciRegionSub(acc, el.querySelector("#rsBody")); } });
+  return el;
+}
+export function typeKeyConfirm(name, key) {
+  // 必须手动输入完整的区域标识（如 ap-osaka-1，即列表里的「区域」列），一致后「确认订阅」才可点
+  return modal("再次确认：订阅区域", `<p>订阅 <b>${esc(name)}</b>（${esc(key)}）后<b>无法取消</b>。请手动输入区域标识 <code class="mono">${esc(name)}</code> 以确认：</p>
+    <input name="rskey" id="rsKey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(name)}">`,
+  (bg) => {
+    if (bg.querySelector("#rsKey").value.trim() !== name) { toast("输入的区域标识不一致", true); return false; }
+    return true;
+  }, "确认订阅", true, (bg) => {
+    const ok = bg.querySelector("[data-ok]"), inp = bg.querySelector("#rsKey");
+    ok.disabled = true;
+    inp.addEventListener("input", () => { ok.disabled = inp.value.trim() !== name; });
+    setTimeout(() => inp.focus());
+  });
+}
 export async function tabOciRegionSub(acc, box) {
   const reload = () => tabOciRegionSub(acc, box);
-  box.innerHTML = `<div class="card"><span class="spin"></span></div>`;
+  box.innerHTML = `<div><span class="spin"></span></div>`;
   let d;
-  try { d = await api(`/accounts/${acc.id}/oci/region-subscriptions`); } catch (e) { box.innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
+  try { d = await api(`/accounts/${acc.id}/oci/region-subscriptions`); } catch (e) { box.innerHTML = `<div>❌ ${esc(e.message)}</div>`; return; }
   const subd = d.regions.filter((r) => r.subscribed);
-  box.innerHTML = `<div class="card"><h3>已订阅 ${subd.length} 个区域 · 主区域 ${esc(d.home || "-")}</h3>
+  box.innerHTML = `<h3>已订阅 ${subd.length} 个区域 · 主区域 ${esc(d.home || "-")}</h3>
     <p class="muted">${esc(d.limit_hint)}。订阅<b>不可撤销</b>，订阅后可在顶部区域下拉里切换。</p>
     <table><tr><th>区域</th><th>Key</th><th>状态</th><th></th></tr>${d.regions.map((r) => `<tr><td>${esc(r.name)}${r.home ? ` <span class="badge done">主区域</span>` : ""}</td><td class="mono">${esc(r.key)}</td>
-      <td>${r.subscribed ? esc(r.status || "已订阅") : `<span class="muted">未订阅</span>`}</td><td>${r.subscribed ? "" : `<button class="btn sm" data-sub="${esc(r.key)}" data-n="${esc(r.name)}">订阅</button>`}</td></tr>`).join("")}</table></div>`;
+      <td>${r.subscribed ? esc(r.status || "已订阅") : `<span class="muted">未订阅</span>`}</td><td>${r.subscribed ? "" : `<button class="btn sm danger" data-sub="${esc(r.key)}" data-n="${esc(r.name)}">订阅</button>`}</td></tr>`).join("")}</table>`;
   box.querySelectorAll("[data-sub]").forEach((b) => (b.onclick = async () => {
     if (!(await confirmBox("订阅区域", `订阅 ${esc(b.dataset.n)}（${esc(b.dataset.sub)}）？<br>⚠️ 订阅后<b>无法取消</b>，免费账号的额外区域名额通常只有 1 个；Always Free 资源仍只在主区域。`, true))) return;
+    if (!(await typeKeyConfirm(b.dataset.n, b.dataset.sub))) return;
     if (await act(b, () => post(`/accounts/${acc.id}/oci/region-subscriptions`, { region_key: b.dataset.sub, confirm: true }), (r) => `已提交订阅：${r.region}（${r.status}），几分钟后生效`)) reload();
   }));
 }

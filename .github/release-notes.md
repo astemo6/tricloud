@@ -1,9 +1,10 @@
-### 1.6.0 build 20 更新内容
+### 1.6.0 build 21 更新内容
 
-- **新功能：AWS「新号 Credit」**（Web / Android / iOS 的 AWS 账号新增标签）：显示新免费计划类型、剩余 credit、到期时间，以及 EC2 / Budgets / Lambda / RDS / Bedrock 5 个官方活动的状态、奖励和完成时间（需要 IAM 只读权限 `freetier:GetAccountPlanState`、`freetier:ListAccountActivities`、`freetier:GetAccountActivity`）。
-- **一键完成活动**：每个未完成活动一个按钮，后台任务执行并显示进度和日志，以最低成本完成后自动删除资源（EC2、RDS 只运行几分钟，费用极小，从 credit 中扣；预算免费、默认保留）；也可「一键全部完成」（两次确认）。所有资源打标签 `tricloud-credit=1`，另有「清理残留」兜底。
-- **注意**：AWS 没有公开说明用 API 完成的操作是否计入活动，执行后显示「已执行，等待 AWS 识别」，奖励以 AWS 返回的活动状态为准（可能要几分钟到几小时）；Bedrock 官方要求在 playground 使用，API 调用不一定计入。
-- 版本：Android versionCode 20 / iOS build 20（版本号仍 1.6.0），需同时更新面板到最新版。
+- **新功能：OneDrive 定期备份**（Web 设置 → OneDrive 备份 / 侧栏，Android 与 iOS 在「更多 → OneDrive 备份」和设置页）：用你自己注册的 Azure 应用（公共客户端，填 client_id）通过设备码登录 Microsoft（打开 microsoft.com/devicelogin 输入代码），只申请 `Files.ReadWrite.AppFolder` + `offline_access`，只能读写 OneDrive「应用」下这一个文件夹。
+- 备份内容：数据库一致快照 + 加密密钥，用你设置的备份密码（scrypt + AES-256-GCM）加密后上传，文件名带时间戳；每天 / 每周定时（时间按面板时区），保留最近 N 份（默认 30），也可「立即备份」；失败 Telegram 通知并 1 小时后重试（每期最多 3 次），成功写审计。Telegram 新增 `/backup`（立即备份 + 状态）。
+- 恢复：备份列表选一份 → 输入备份密码 → 二次确认；恢复前自动在 data/ 保存当前数据，替换后面板自动重启，所有设备重新登录。新装机：装好 → 登录 → 绑定同一个 OneDrive → 恢复。可解绑（只删本机授权，网盘上的备份保留）。离线解密：`python -m tools.decrypt_backup 文件 输出目录`。
+- 安全：refresh token 和备份密码用面板 Fernet 密钥加密存库（定时备份需要无人值守）；API Token 只能看状态 / 列表和立即备份，绑定、设置、恢复、解绑返回 403。Azure 应用注册教程见 `docs/api-credentials.md` 第四节。
+- 版本：Android versionCode 21 / iOS build 21（版本号仍 1.6.0），需同时更新面板到最新版。
 
 **Android**：下载 `TriCloud-*.apk` 直接安装（需允许安装未知来源应用），可覆盖升级。
 

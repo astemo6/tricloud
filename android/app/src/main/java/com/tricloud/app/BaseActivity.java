@@ -105,7 +105,7 @@ public abstract class BaseActivity extends AppCompatActivity {
     static final String[][] NAV_PAGES = {
             {"accounts", "🔑 云账号"}, {"health", "🩺 账号健康度"}, {"freecheck", "🆓 免费额度体检"}, {"traffic", "📈 流量守护"},
             {"tasks", "⏱ 任务"}, {"monitors", "📡 监控"}, {"secrets", "🔐 开机密码"}, {"scripts", "📜 脚本模板"},
-            {"dns", "🌐 DNS 联动"}, {"security", "🛡 安全与备份"}, {"settings", "⚙️ 设置"}};
+            {"dns", "🌐 DNS 联动"}, {"security", "🛡 安全与备份"}, {"onedrive", "☁️ OneDrive 备份"}, {"settings", "⚙️ 设置"}};
 
     static Class<?> pageClass(String k) {
         switch (k) {
@@ -119,6 +119,7 @@ public abstract class BaseActivity extends AppCompatActivity {
             case "scripts": return ScriptsActivity.class;
             case "dns": return DnsActivity.class;
             case "security": return SecurityActivity.class;
+            case "onedrive": return OneDriveActivity.class;
             case "settings": return SettingsActivity.class;
             case "deleted": return DeletedActivity.class;
             default: return MainActivity.class;
@@ -464,7 +465,7 @@ public abstract class BaseActivity extends AppCompatActivity {
             line.setOrientation(LinearLayout.HORIZONTAL);
             p.addView(line);
         } else line = (LinearLayout) p.getChildAt(p.getChildCount() - 1);
-        boolean danger = label.contains("删除") || label.contains("终止") || label.contains("销毁") || label.contains("清空");
+        boolean danger = label.contains("删除") || label.contains("终止") || label.contains("销毁") || label.contains("清空") || label.contains("解绑 OneDrive");
         MaterialButton b = new MaterialButton(new ContextThemeWrapper(this,
                 danger ? R.style.ThemeOverlay_TriCloud_Danger : R.style.ThemeOverlay_TriCloud_Tonal));
         b.setText(label);

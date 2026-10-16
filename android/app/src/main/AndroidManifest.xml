@@ -31,5 +31,6 @@
         <activity android:name=".ScriptsActivity" />
         <activity android:name=".DnsActivity" />
         <activity android:name=".SecurityActivity" />
+        <activity android:name=".OneDriveActivity" />
     </application>
 </manifest>

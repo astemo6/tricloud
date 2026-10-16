@@ -24,6 +24,8 @@ public class TasksActivity extends BaseActivity {
         switch (t) {
             case "snatch": return "抢机"; case "change_ip": return "换 IP"; case "resize": return "改配置"; case "ipv6": return "IPv6";
             case "azure_create": return "创建 VM"; case "ensure_network": return "自动建网"; case "snapshot": return "快照（已移除）"; case "migrate": return "迁移"; case "cf_delete": return "删除 CDN 分发";
+            case "reinstall": return "重装系统"; case "net500m": return "下行 500Mbps"; case "foundry": return "部署 AI 模型"; case "billing_keep": return "保号账单";
+            case "aws_credit": return "新号 Credit"; case "onedrive_backup": return "OneDrive 备份";
             default: return t;
         }
     }

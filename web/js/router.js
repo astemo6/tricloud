@@ -7,6 +7,7 @@ import { pageFreeCheck } from "./oci.js";
 import { pageTasks } from "./tasks.js";
 import { pageHealth, pageMonitors, pageTraffic } from "./monitors.js";
 import { pageDns, pageScripts, pageSecrets, pageSecurity, pageSettings } from "./settings.js";
+import { pageOneDrive } from "./onedrive.js";
 
 export function parseHash() {
   const p = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
@@ -29,6 +30,7 @@ export async function route() {
     if (p[0] === "scripts") return pageScripts();
     if (p[0] === "dns") return pageDns();
     if (p[0] === "security") return pageSecurity();
+    if (p[0] === "onedrive") return pageOneDrive();
     if (p[0] === "health") return pageHealth();
     if (p[0] === "traffic") return pageTraffic();
     if (p[0] === "deleted") return pageDeletedAccounts();
@@ -57,13 +59,13 @@ export function renderSide(p) {
   }
   html += `<div class="grp">管理</div>` + link("#/accounts", "🔑 云账号") + link("#/health", "🩺 账号健康度") + link("#/freecheck", "🆓 免费额度体检") + link("#/traffic", "📈 流量守护") + link("#/tasks", "⏱ 任务") +
     link("#/monitors", "📡 监控") + link("#/secrets", "🔐 开机密码") + link("#/scripts", "📜 脚本模板") +
-    link("#/dns", "🌐 DNS 联动") + link("#/security", "🛡 安全与备份") + link("#/settings", "⚙️ 设置");
+    link("#/dns", "🌐 DNS 联动") + link("#/security", "🛡 安全与备份") + link("#/onedrive", "☁️ OneDrive 备份") + link("#/settings", "⚙️ 设置");
   $("#side").innerHTML = html;
   const acc = TABS[p[0]] && ACCOUNTS.find((a) => a.id == p[1]);
   renderAccSwitch(acc);
   $("#title").textContent = acc ? `${PNAME[acc.provider]} · ${acc.name}` :
     ({ accounts: "云账号", tasks: "任务", monitors: "监控", settings: "设置", secrets: "开机密码", scripts: "脚本模板",
-      dns: "Cloudflare DNS 联动", security: "安全与备份", health: "账号健康度", traffic: "流量守护", deleted: "已删账号", freecheck: "免费额度体检" }[p[0]] || "总览");
+      dns: "Cloudflare DNS 联动", security: "安全与备份", onedrive: "OneDrive 备份", health: "账号健康度", traffic: "流量守护", deleted: "已删账号", freecheck: "免费额度体检" }[p[0]] || "总览");
 }
 
 // ---------- 顶栏账号快速切换器 ----------

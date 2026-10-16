@@ -16,6 +16,7 @@
 | 代理 | **每账号独立出口代理**（http/https/socks5），代理密码加密、不回显 |
 | 安全 | **TOTP 二次验证**（防重放）；**API Token**（只读/完全，仅存哈希，不能触碰 2FA/备份/密码）；**审计日志**（写操作、来源、IP，保留 180 天） |
 | 备份 | **加密备份/恢复**：数据库 + 密钥整包用口令（scrypt + Fernet）加密，下载与恢复都需面板密码 |
+| 备份 | **OneDrive 定期备份**（1.6.0 build 21）：见下方「OneDrive 定期备份」 |
 
 ## 实例改名 + 同步系统主机名（v1.5）
 - 接口：`POST /api/accounts/{id}/instances/rename`，`{instance_id, region, kind, new_name, sync_hostname=true}`（`/oci/rename` 保留，同一逻辑）。OCI 改显示名；AWS EC2 改 `Name` 标签；Azure 的 VM 资源名不可修改，显示名写入 `tricloud-name` 标签（列表优先显示）；Lightsail 不支持改名。
@@ -66,6 +67,15 @@
 - **Android 1.5.0**：CloudFront 全套、OCI 安全组、实例「开放端口」（输入框 + 公网警告确认）、删除 IPv6、EC2 / Azure 创建、账号编辑与单账号测活、代理字段、批量添加、已删账号回收站、`interrupted` 状态。
 - 文档：旧版调研文档已脱敏后放到 `docs/`。
 
+## OneDrive 定期备份（1.6.0 build 21）
+- 设备码登录 Microsoft Graph（`/consumers` 或 `/common`），scope 只有 `Files.ReadWrite.AppFolder offline_access`，只能读写 OneDrive「应用 / <应用名>」文件夹。`client_id` 由用户注册自己的公共客户端应用后填写（教程见 `docs/api-credentials.md` 第四节）。
+- 备份内容：`tricloud.db`（SQLite backup API 一致快照）+ `fernet.key` + `meta.json` 打 zip，用备份密码 scrypt（N=2^15, r=8, p=1）派生密钥、AES-256-GCM 加密，文件 `tricloud-backup-YYYYMMDD-HHMMSS.tcod`；≤4MB 直接 PUT，更大用 upload session（3.125 MiB 分片）。
+- 定时：每天 / 每周（星期几）+ HH:MM，按面板时区；保留最近 N 份（默认 30，只删自己生成的文件）；失败 TG 通知，1 小时后重试，每期最多 3 次；成功写审计 `onedrive-backup`。任务类型 `onedrive_backup`（面板级任务，account_id=0），任务抽屉可看日志。
+- 恢复：选一份 + 备份密码 + 二次确认；先在 `data/pre-restore-时间/` 存当前快照，校验完整性与密钥匹配后替换 db + key，保留当前机器的 OneDrive 绑定，所有会话作废；Docker 里随后退出进程由 restart 策略拉起（`TRICLOUD_RESTART_AFTER_RESTORE` 可覆盖）。
+- 离线解密：`python -m tools.decrypt_backup 文件 [密码] 输出目录`（只依赖 cryptography）。
+- API Token：只能 GET 状态 / 列表与 `POST /api/onedrive/backup`，其余（绑定、设置、恢复、解绑）403。TG：`/backup` 立即备份 + 状态，`/backup status` 只看状态。
+- 接口：`GET /api/onedrive`、`POST /api/onedrive/config`、`POST /api/onedrive/bind`、`POST /api/onedrive/bind/poll`、`DELETE /api/onedrive/bind?confirm=true`（`pending_only=true` 取消待授权）、`POST /api/onedrive/backup`、`GET /api/onedrive/backups`、`POST /api/onedrive/restore`。
+
 ## 从旧版迁移
 ```
 python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-data <新 data> --dry-run
@@ -77,6 +87,7 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 
 | 版本 | 内容 |
 |---|---|
+| 1.6.0（build 21） | OneDrive 定期备份（设备码绑定、每天 / 每周、保留 N 份、立即备份、列表与恢复、解绑、TG `/backup`、离线解密工具），Web + Android + iOS |
 | 1.6.0（build 17） | 首页 AWS 实例数包含 Lightsail（显示为「N 台（运行 X）· EC2 a · Lightsail b」） |
 | 1.6.0（build 16） | 移除第四家可选云厂商（彻底删除其后端、Web、演示、Android、iOS 代码），只保留 OCI / AWS / Azure；`/api/meta` 只返回三家云 |
 | 1.5.0 | 合并线上旧版：TG 内联按钮、已删账号回收站、代理账密分填、默认创建参数、OCI 安全组、CloudFront 全套、账号编辑、重启续跑、迁移脚本、Android 1.5.0；**移除串口控制台** |

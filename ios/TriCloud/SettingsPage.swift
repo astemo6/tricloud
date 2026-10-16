@@ -103,6 +103,10 @@ final class SettingsPage: Page {
                 r4.button((m.0 == cur ? "● " : "") + m.1) { AppState.shared.setTheme(m.0); self.refresh() }
             }
 
+            let od = self.card("OneDrive 备份")
+            od.muted("把数据库和加密密钥用你的备份密码加密后，定期上传到你自己的 OneDrive「应用」文件夹（只授权这一个文件夹）。")
+            od.row().button("打开 OneDrive 备份") { self.push(OneDrivePage()) }
+
             let sv = self.card("服务器")
             sv.muted(Api.server)
             // iOS 额外入口：在 Safari 打开网页版面板

@@ -156,6 +156,7 @@ td .btn + .btn { margin-left: 4px; }
   font-size: 14px; animation: snack .2s ease-out; }
 [data-theme="dark"] .toast { background: #e6e1e5; color: #313033; }
 .toast.err { background: var(--bad-c); color: var(--bad); }
+.err-text { color: var(--bad); }
 @keyframes snack { from { opacity: 0; transform: translate(-50%, 12px); } }
 
 /* ---------- 对话框 ---------- */

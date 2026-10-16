@@ -295,6 +295,88 @@
     crTaskId = tid; audit1("POST /aws/credits", "任务 #" + tid + "：" + keys.join("、"));
     return tid;
   }
+  // ---------- build 21：OneDrive 定期备份 ----------
+  function odName(d) { function z(n) { return (n < 10 ? "0" : "") + n; } return "tricloud-backup-" + d.getFullYear() + z(d.getMonth() + 1) + z(d.getDate()) + "-" + z(d.getHours()) + z(d.getMinutes()) + z(d.getSeconds()) + ".tcod"; }
+  function odTime(n) { var m = n.match(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/); return m ? m[1] + "-" + m[2] + "-" + m[3] + " " + m[4] + ":" + m[5] + ":" + m[6] : ""; }
+  var od = { client_id: "11111111-2222-3333-4444-555555555555", tenant: "consumers", bound: true, pending: null, polls: 0, pw: true,
+    cfg: { enabled: true, freq: "daily", time: "03:30", weekday: 0, keep: 30 }, state: {}, files: [], nid: 1, task: null };
+  (function () { for (var i = 1; i <= 3; i++) { var d = new Date(Date.now() - i * 86400000); d.setHours(3, 30, 2, 0); od.files.push({ id: "OD" + od.nid++, name: odName(d), size: 48000 + i * 512 }); } od.state = { last_ok: Math.floor(od.files.length && (Date.now() - 86400000) / 1000), last_file: od.files[0].name, last_size: od.files[0].size, last_result: "done" }; })();
+  function odNext() {
+    var c = od.cfg, h = +c.time.split(":")[0], mi = +c.time.split(":")[1], n = new Date(), s = new Date(n); s.setHours(h, mi, 0, 0);
+    if (c.freq === "weekly") { var wd = (n.getDay() + 6) % 7; s.setDate(s.getDate() - ((wd - c.weekday + 7) % 7)); if (s > n) s.setDate(s.getDate() - 7); s.setDate(s.getDate() + 7); }
+    else { if (s > n) s.setDate(s.getDate() - 1); s.setDate(s.getDate() + 1); }
+    function z(x) { return (x < 10 ? "0" : "") + x; } return s.getFullYear() + "-" + z(s.getMonth() + 1) + "-" + z(s.getDate()) + " " + c.time;
+  }
+  function odRunning() { return od.task && tasks.some(function (t) { return t.id === od.task && t.status === "running"; }) ? od.task : null; }
+  function odStatus() {
+    var ready = od.bound && od.pw && od.cfg.enabled;
+    return { client_id: od.client_id, tenant: od.tenant, scope: "Files.ReadWrite.AppFolder offline_access", bound: od.bound, account: od.bound ? { folder: "TriCloud Backup", drive_type: "personal" } : {},
+      pending: od.pending, password_set: od.pw, cfg: JSON.parse(JSON.stringify(od.cfg)), ready: ready, next_run: ready ? odNext() : null, timezone: settings.timezone || "Asia/Shanghai",
+      state: JSON.parse(JSON.stringify(od.state)), device_login_url: "https://microsoft.com/devicelogin", restart_after_restore: true, running_task_id: odRunning() };
+  }
+  function route21(method, p, q, body) {
+    if (!/^\/onedrive/.test(p)) return undefined;
+    body = body || {};
+    if (p === "/onedrive" && method === "GET") return odStatus();
+    if (p === "/onedrive/config") {
+      var ch = [];
+      if ("client_id" in body) { var cid = String(body.client_id || "").trim(); if (cid && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cid)) return { __status: 400, detail: "client_id 应为 Azure 应用的「应用程序(客户端) ID」，形如 00000000-0000-0000-0000-000000000000" };
+        if (cid !== od.client_id) { od.client_id = cid; ch.push("client_id"); if (od.bound) { od.bound = false; ch.push("unbound"); } } }
+      if ("tenant" in body) { if (["consumers", "common"].indexOf(body.tenant) < 0) return { __status: 400, detail: "登录端点只能是 consumers 或 common" }; od.tenant = body.tenant; }
+      if (body.password) { if (String(body.password).length < 10) return { __status: 400, detail: "备份密码至少 10 位" }; if ("password2" in body && body.password2 !== body.password) return { __status: 400, detail: "两次输入的备份密码不一致" }; od.pw = true; ch.push("password"); }
+      if ("freq" in body) { if (["daily", "weekly"].indexOf(body.freq) < 0) return { __status: 400, detail: "频率只能是每天或每周" }; od.cfg.freq = body.freq; }
+      if ("time" in body) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(body.time)) return { __status: 400, detail: "时间格式应为 HH:MM（24 小时制）" }; od.cfg.time = body.time; }
+      if ("weekday" in body) od.cfg.weekday = +body.weekday;
+      if ("keep" in body) { var k = +body.keep; if (!(k >= 1 && k <= 365 && Math.floor(k) === k)) return { __status: 400, detail: "保留份数需为 1~365" }; od.cfg.keep = k; }
+      if ("enabled" in body) od.cfg.enabled = !!body.enabled;
+      var r = odStatus(); r.changed = ch; return r;
+    }
+    if (p === "/onedrive/bind" && method === "POST") {
+      if (!od.client_id) return { __status: 400, detail: "请先填写 Azure 应用的 client_id（应用程序(客户端) ID）" };
+      od.pending = { user_code: "DEMO-2468", verification_uri: "https://microsoft.com/devicelogin", interval: 2, expires_at: Math.floor(Date.now() / 1000) + 900, expires_in: 900 }; od.polls = 0;
+      return od.pending;
+    }
+    if (p === "/onedrive/bind/poll") {
+      if (!od.pending) return { status: od.bound ? "ok" : "none" };
+      od.polls++;
+      if (od.polls < 2) return { status: "pending", interval: 2 };
+      od.pending = null; od.bound = true; audit1("onedrive-bind", "绑定 OneDrive（TriCloud Backup）");
+      return { status: "ok", account: { folder: "TriCloud Backup", drive_type: "personal" } };
+    }
+    if (p === "/onedrive/bind" && method === "DELETE") {
+      if (q.get("pending_only") === "true") { od.pending = null; return { ok: true }; }
+      if (q.get("confirm") !== "true") return { __status: 400, detail: "需 confirm=true" };
+      od.bound = false; od.pending = null; audit1("DELETE /onedrive/bind", "HTTP 200"); return { ok: true };
+    }
+    if (p === "/onedrive/backup") {
+      if (odRunning()) return { __status: 409, detail: "已有 OneDrive 备份在运行，请等它结束" };
+      if (!od.bound) return { __status: 400, detail: "尚未绑定 OneDrive" };
+      if (!od.pw) return { __status: 400, detail: "尚未设置备份密码" };
+      var name = odName(new Date());
+      var tid = addTask("onedrive_backup", 0, "OneDrive 备份", { params: { name: "OneDrive 备份", trigger: "manual" }, extra: ["生成数据库一致快照（SQLite backup API）…", "已加密（scrypt + AES-256-GCM），48.6 KB，上传 " + name, "上传完成"],
+        done: "已备份到 OneDrive：" + name + "（48.6 KB）", onDone: function () {
+          od.files.unshift({ id: "OD" + od.nid++, name: name, size: 49766 }); var gone = od.files.splice(od.cfg.keep);
+          od.state = { last_ok: Math.floor(Date.now() / 1000), last_file: name, last_size: 49766, last_result: "done", last_trigger: "manual" };
+          audit1("onedrive-backup", "已备份到 OneDrive：" + name + (gone.length ? "，清理旧备份 " + gone.length + " 个" : "")); } });
+      var t = tasks.find(function (x) { return x.id === tid; }); if (t) { t.account_id = 0; t.account_name = null; t.provider = null; }
+      od.task = tid;
+      return { ok: true, task_id: tid, message: "已开始备份（任务 #" + tid + "）" };
+    }
+    if (p === "/onedrive/backups") {
+      if (!od.bound) return { __status: 400, detail: "尚未绑定 OneDrive" };
+      return { items: od.files.map(function (f) { return { id: f.id, name: f.name, size: f.size, created: "", time: odTime(f.name) }; }), keep: od.cfg.keep };
+    }
+    if (p === "/onedrive/restore") {
+      if (!body.confirm) return { __status: 400, detail: "恢复会用备份覆盖当前全部数据，需 confirm" };
+      if (!body.password) return { __status: 400, detail: "请输入备份密码" };
+      var f = od.files.find(function (x) { return x.id === body.item_id; });
+      if (!f) return { __status: 400, detail: "OneDrive 接口 GET 返回 HTTP 404：itemNotFound" };
+      if (String(body.password).length < 10) return { __status: 400, detail: "备份密码错误或文件已损坏" };
+      audit1("onedrive-restore", "从 " + f.name + " 恢复；恢复前快照 pre-restore-demo");
+      return { ok: true, name: f.name, snapshot: "pre-restore-demo", restart: true, message: "已恢复，面板将自动重启（约 10 秒），请重新登录（演示：数据不变）" };
+    }
+    return { __status: 404, detail: "Not Found" };
+  }
   function route20(method, p, q, body) {
     var m, a = accOf(p), id = a && a.id;
     if (/\/aws\/credits$/.test(p) && method === "GET") return crView(id, q.get("refresh") === "true");
@@ -751,6 +833,7 @@
   function route(method, path, body) {
     var u = new URL(path, "http://x"); var p = u.pathname.replace(/^\/api/, ""); var q = u.searchParams; var m;
     if (p === "/meta") return { providers: ["oci", "aws", "azure"] };
+    var r21 = route21(method, p, q, body); if (r21 !== undefined) return r21;
     var r20 = route20(method, p, q, body); if (r20 !== undefined) return r20;
     var r16 = route16(method, p, q, body); if (r16 !== undefined) return r16;
     var r15 = route15(method, p, q, body); if (r15 !== undefined) return r15;

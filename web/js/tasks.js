@@ -22,7 +22,8 @@ export async function pageTasks() {
 
 // ================= v1.4 新增 =================
 export const TASK_NAME = { snatch: "抢机", change_ip: "换 IP", resize: "改配置", ipv6: "IPv6", azure_create: "创建 VM", ensure_network: "自动建网",
-  snapshot: "快照（已移除）", migrate: "迁移" , cf_delete: "删除 CDN 分发" };
+  snapshot: "快照（已移除）", migrate: "迁移" , cf_delete: "删除 CDN 分发", reinstall: "重装系统", net500m: "下行 500Mbps", foundry: "部署 AI 模型",
+  billing_keep: "保号账单", aws_credit: "新号 Credit", onedrive_backup: "OneDrive 备份" };
 export const TST = { running: "运行中", done: "完成", failed: "失败", stopped: "已停止", interrupted: "已中断" };
 
 // ---------- 任务抽屉：提交任务后自动打开并跟踪，运行中每 2 秒刷新 ----------

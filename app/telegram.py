@@ -409,7 +409,24 @@ def aws_free_plan_lines():
 
 
 HELP = ("/start 按钮菜单（选云 → 账号 → 实例 → 操作）\n/bill 账单汇总\n/tasks 最近任务\n/credits Credit 与到期\n"
-        "/health 账号健康度\n/traffic 流量守护\n/ipq IP 查询 IP 质量（风险分 / 归属）\n/free OCI 免费额度体检")
+        "/health 账号健康度\n/traffic 流量守护\n/ipq IP 查询 IP 质量（风险分 / 归属）\n/free OCI 免费额度体检\n"
+        "/backup 立即备份到 OneDrive 并显示状态（/backup status 只看状态）")
+
+
+def backup_command(arg=""):
+    """build 21 /backup：立即备份（后台任务，完成后另发一条）+ 状态；/backup status 只看状态。"""
+    from . import onedrive
+    from .routers import onedrive as rod
+    head = "☁️ <b>OneDrive 备份</b>"
+    if arg.strip().lower() in ("status", "状态", "s"):
+        return head + "\n" + esc(onedrive.status_text())
+    if not onedrive.bound() or not onedrive.password():
+        return head + "\n" + esc(onedrive.status_text()) + "\n请先在面板「设置 → OneDrive 备份」绑定并设置备份密码"
+    tid = rod.running_task()
+    if tid:
+        return head + f"\n已有备份在运行（任务 #{tid}）\n" + esc(onedrive.status_text())
+    tid = rod.start_backup("tg")
+    return head + f"\n已开始备份（任务 #{tid}），完成后会再发一条消息\n" + esc(onedrive.status_text())
 
 
 def free_report():
@@ -475,6 +492,8 @@ async def handle_message(bot, chat_id, m):
                                    f"类型：{esc(q.get('type') or '-')}\n归属：{esc(q.get('country') or '-')}\nISP：{esc(q.get('isp') or '-')} {esc(q.get('asn') or '')}")
     elif txt.startswith("/free"):
         await _reply(bot, chat_id, await asyncio.to_thread(free_report))
+    elif txt.startswith("/backup"):   # build 21
+        await _reply(bot, chat_id, await asyncio.to_thread(backup_command, txt[7:]))
     elif txt.startswith("/credits"):
         await _reply(bot, chat_id, await asyncio.to_thread(credits_report))
     else:

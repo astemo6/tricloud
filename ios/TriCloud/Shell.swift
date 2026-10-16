@@ -64,6 +64,7 @@ enum Menus {
         MenuEntry(key: "scripts", icon: "doc.text.fill", title: "脚本模板", tint: .brown, make: { ScriptsPage() }),
         MenuEntry(key: "dns", icon: "globe", title: "DNS 联动", tint: .teal, make: { DnsPage() }),
         MenuEntry(key: "security", icon: "shield.lefthalf.filled", title: "安全与备份", tint: .purple, make: { SecurityPage() }),
+        MenuEntry(key: "onedrive", icon: "icloud.and.arrow.up.fill", title: "OneDrive 备份", tint: .blue, make: { OneDrivePage() }),
         MenuEntry(key: "deleted", icon: "trash.fill", title: "已删账号", tint: .gray, make: { DeletedPage() }),
         MenuEntry(key: "settings", icon: "gearshape.fill", title: "设置", tint: .gray, make: { SettingsPage() }),
     ]

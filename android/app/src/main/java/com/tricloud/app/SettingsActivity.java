@@ -90,6 +90,10 @@ public class SettingsActivity extends BaseActivity {
                 catch (Exception ex) { toast("请输入整数"); }
             }));
 
+            LinearLayout od = card("OneDrive 备份");
+            muted(od, "把数据库和加密密钥用你的备份密码加密后，定期上传到你自己的 OneDrive「应用」文件夹（只授权这一个文件夹）。");
+            button(row(od), "打开 OneDrive 备份", v -> startActivity(new android.content.Intent(this, OneDriveActivity.class)));
+
             LinearLayout pw = card("面板密码");
             muted(pw, "修改后所有设备需要重新登录。登录连续失败 5 次将锁定该 IP 15 分钟。");
             LinearLayout r3 = row(pw);

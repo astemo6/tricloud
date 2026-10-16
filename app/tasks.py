@@ -11,7 +11,8 @@ LOG_KEEP = 500          # 每个任务最多保留的日志行数（抢机任务
 TYPE_NAME = {"snatch": "抢机", "change_ip": "换 IP", "resize": "改配置", "ipv6": "IPv6", "azure_create": "创建 VM",
              "ensure_network": "自动建网", "snapshot": "快照（已移除）", "migrate": "迁移", "cf_delete": "删除 CDN 分发",
              "reinstall": "重装系统", "net500m": "下行 500Mbps", "foundry": "部署 AI 模型",
-             "billing_keep": "保号账单", "aws_credit": "新号 Credit"}
+             "billing_keep": "保号账单", "aws_credit": "新号 Credit", "onedrive_backup": "OneDrive 备份"}
+NO_ACCOUNT_TYPES = {"onedrive_backup"}   # 面板级任务：account_id=0，不取云账号 / provider
 CF_POLL_SECONDS = 30          # 删除 CloudFront 分发：等待停用部署完成的轮询间隔
 CF_WAIT_SECONDS = 45 * 60     # 最长等待
 
@@ -340,6 +341,37 @@ async def _do_aws_credit(c):
                         "\n（等待 AWS 识别，以活动状态为准）")
 
 
+async def _do_onedrive_backup(c):
+    """build 21 OneDrive 备份：快照 → 加密 → 上传 approot → 保留最近 N 份。成功写审计，失败 TG 通知（不抛给通用失败处理，避免重复推送）。"""
+    from . import onedrive, security
+    t, p, tlog = c.t, c.p, c.tlog
+    trigger = p.get("trigger") or "manual"
+    if p.get("slot"):
+        onedrive.mark_try(p["slot"])
+    try:
+        r = await asyncio.to_thread(onedrive.run_backup, trigger, tlog)
+    except Exception as e:   # noqa: BLE001
+        msg = str(e)[:400]
+        s = onedrive.state()
+        onedrive.set_state(last_result="failed", last_error=msg, last_try=int(time.time()), last_trigger=trigger,
+                           failed_slot=s.get("slot") if trigger == "schedule" else s.get("failed_slot"))
+        _update(t["id"], status="failed", message=msg)
+        s = onedrive.state()
+        retry = ""
+        if trigger == "schedule":
+            left = onedrive.RETRY_MAX - int(s.get("slot_tries") or 0)
+            retry = f"\n1 小时后自动重试（本期还剩 {left} 次）" if left > 0 else "\n本期已重试 3 次，等下一次计划时间"
+        await telegram.send(f"❌ <b>OneDrive 备份失败</b>（{ {'schedule': '定时', 'tg': 'Telegram', 'manual': '手动'}.get(trigger, trigger) }）\n"
+                            f"{telegram.esc(msg)}{retry}")
+        return
+    kb = r["size"] / 1024
+    msg = f"已备份到 OneDrive：{r['name']}（{kb:.1f} KB）" + (f"，清理旧备份 {len(r['pruned'])} 个" if r["pruned"] else "")
+    _update(t["id"], status="done", message=msg, result={"name": r["name"], "size": r["size"], "pruned": len(r["pruned"])})
+    security.audit("-", {"schedule": "schedule", "tg": "telegram"}.get(trigger, "session"), "onedrive-backup", msg)
+    if trigger == "tg":
+        await telegram.send(f"✅ <b>OneDrive 备份完成</b>\n{telegram.esc(r['name'])}（{kb:.1f} KB）")
+
+
 # 一次性长任务：任务类型 → 处理函数（c 为 _TaskCtx）。新增任务类型在这里登记即可。
 ONCE_HANDLERS = {
     "change_ip": _do_change_ip,
@@ -354,13 +386,15 @@ ONCE_HANDLERS = {
     "foundry": _do_foundry,
     "billing_keep": _do_billing_keep,
     "aws_credit": _do_aws_credit,
+    "onedrive_backup": _do_onedrive_backup,
 }
 
 
 async def _run_once(t):
     """一次性长任务：change_ip / resize / ipv6 / azure_create / ensure_network。"""
     p = json.loads(t["params"])
-    acc = core.get_account(t["account_id"])
+    panel_task = t["type"] in NO_ACCOUNT_TYPES
+    acc = {"provider": "panel", "name": "面板"} if panel_task else core.get_account(t["account_id"])
     _update(t["id"], message="执行中…", attempts=1, params=dict(p, next_run=2 ** 40))
     name = p.get("name") or p.get("name_display") or str(p.get("instance_id") or "")[-12:]
 
@@ -376,7 +410,7 @@ async def _run_once(t):
     tlog = lambda m, lv="info": log(t["id"], m, lv)   # noqa: E731
     try:
         tlog(f"开始执行：{_summary(t['type'], p)}（{acc['provider'].upper()} · {acc['name']}）")
-        prov = services.provider(t["account_id"], p.get("region"))
+        prov = None if panel_task else services.provider(t["account_id"], p.get("region"))
         h = ONCE_HANDLERS.get(t["type"])
         if h:
             await h(_TaskCtx(t, p, acc, prov, name, progress, checkpoint, tlog))
@@ -740,6 +774,15 @@ async def schedule_loop():
             except Exception as e:
                 core.ex("UPDATE traffic_guards SET checked_at=? WHERE id=?", (int(time.time()), g["id"]))
                 print("traffic guard failed", g["id"], e, flush=True)
+        # build 21 OneDrive 定期备份（每天 / 每周 HH:MM，面板时区；失败 1 小时后重试，每期最多 3 次）
+        try:
+            from . import onedrive
+            key = onedrive.due(now)
+            if key and not core.q("SELECT 1 FROM tasks WHERE type='onedrive_backup' AND status='running'", one=True):
+                onedrive.mark_try(key)
+                create_task("onedrive_backup", 0, {"name": "OneDrive 备份", "trigger": "schedule"})
+        except Exception as e:
+            print("onedrive schedule failed", e, flush=True)
         # 每日账单报告
         if core.get_setting("daily_report", False):
             hhmm = core.get_setting("report_time", "09:00")

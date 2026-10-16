@@ -1,5 +1,6 @@
 // TriCloud 前端 v1.6.0 · 设置、安全（二次验证 / API Token / 审计 / 备份）、开机密码、脚本模板、DNS 联动、保存为默认
 import { $, act, api, confirmBox, del, esc, form, loading, modal, post, setCompact, setSettings, SETTINGS, SETTINGS_CARDS, toast, view } from "./core.js";
+import { odSettingsBind, odSettingsCard } from "./onedrive.js";
 
 // ---------------- 设置 ----------------
 export async function pageSettings() {
@@ -40,8 +41,9 @@ export async function pageSettings() {
     <label><input type="checkbox" id="compact" ${document.documentElement.classList.contains("compact") ? "checked" : ""}> 紧凑模式（缩小行高和留白，只对本设备生效）</label></div>
   <div class="card" id="pw"><h3>修改面板密码</h3><label>原密码</label><input name="old" type="password">
     <label>新密码（≥10 位）</label><input name="new" type="password"><div class="bar" style="margin-top:12px"><button class="btn primary" id="savePw">修改</button></div>
-    <p class="muted">修改后所有设备需要重新登录。登录连续失败 5 次将锁定该 IP 15 分钟。</p></div>${SETTINGS_CARDS.map((c) => c.html(s)).join("")}</div>`;
+    <p class="muted">修改后所有设备需要重新登录。登录连续失败 5 次将锁定该 IP 15 分钟。</p></div>${odSettingsCard()}${SETTINGS_CARDS.map((c) => c.html(s)).join("")}</div>`;
   SETTINGS_CARDS.forEach((c) => c.bind(view));
+  odSettingsBind();
   $("#save").onclick = (e) => { const f = form($("#tg")); if (!f.tg_token) delete f.tg_token; act(e.target, () => post("/settings", f), "已保存").then(pageSettings); };
   $("#test").onclick = (e) => act(e.target, () => post("/settings/tg-test"), "测试消息已发送");
   $("#saveCf").onclick = (e) => { const f = form($("#cfc")); if (!f.cf_token) return toast("请输入 Token", true); act(e.target, () => post("/settings", f), "已保存").then(pageSettings); };
@@ -136,7 +138,7 @@ export async function pageSecurity() {
   <div class="card"><h3>二次验证（TOTP）</h3>
     ${s.totp_enabled ? `<p><span class="badge running">已开启</span> 登录需要身份验证器 App 上的 6 位验证码。</p><button class="btn danger" id="off">关闭</button>`
       : `<p class="muted">支持 Google Authenticator、1Password、Authy 等。开启后即使面板密码泄露也无法登录。</p><button class="btn primary" id="on">开启</button>`}</div>
-  <div class="card"><h3>加密备份 / 恢复</h3><p class="muted">备份包含全部账号凭证、设置和加密密钥，整包再用你设置的口令加密（scrypt + Fernet）。口令丢失则无法恢复。</p>
+  <div class="card"><h3>加密备份 / 恢复</h3><p class="muted">备份包含全部账号凭证、设置和加密密钥，整包再用你设置的口令加密（scrypt + Fernet）。口令丢失则无法恢复。想定期自动备份到网盘，用 <a href="#/onedrive">OneDrive 备份</a>。</p>
     <div class="bar"><button class="btn primary" id="bk">下载备份</button><button class="btn" id="rs">从备份恢复</button></div></div>
   <div class="card"><div class="bar"><h3 class="grow" style="margin:0">API Token</h3><button class="btn sm primary" id="nt">新建</button></div>
     <p class="muted">给脚本、自建 Bot 调用面板 API 用（Header：Authorization: Bearer tc_...）。只读 Token 只能 GET；任何 Token 都不能改密码、2FA、备份。</p>

@@ -281,6 +281,59 @@ IAM 角色权限限定在 `tricloud-credit-*` 名下，面板没法借此改动�
 
 ---
 
+## 四、OneDrive 备份（可选，Microsoft Graph）
+
+面板「设置 → OneDrive 备份」可以把数据库和加密密钥定期加密上传到**你自己的** OneDrive。面板不内置任何第三方应用，需要你在 Azure 门户注册一个自己的应用，只把它的 `client_id` 填进面板。整个过程约 3 分钟，个人 Microsoft 帐户（outlook.com / hotmail.com / live.com）免费可用，不需要 Azure 订阅。
+
+面板只申请两个权限：`Files.ReadWrite.AppFolder`（只能读写 OneDrive 里 **应用 / <你的应用名>** 这一个文件夹，看不到网盘里其他任何文件）和 `offline_access`（拿到 refresh token，才能无人值守定时备份）。不要给这个应用加别的权限。
+
+### 注册应用（Azure 门户）
+
+1. 打开 <https://portal.azure.com>，用要存放备份的 Microsoft 帐户登录（个人帐户也能登录门户，没有订阅也没关系）。
+   顶部搜索框输入「应用注册」（App registrations）→ 进入后点左上角 **＋ 新注册**（New registration）。
+2. **注册应用程序**页面（截图位置：页面中间的表单）：
+   - 名称：例如 `TriCloud Backup`（这个名字就是 OneDrive 里「应用」下面的文件夹名）。
+   - 受支持的帐户类型：选 **「任何组织目录中的帐户和个人 Microsoft 帐户」**，或 **「仅个人 Microsoft 帐户」**（只用个人 OneDrive 时推荐后者）。
+     这里选成「仅此组织目录」的话，个人 Microsoft 帐户无法登录，绑定时会提示 client_id 不支持个人帐户。
+   - 重定向 URI：**留空**（设备码登录不需要）。
+   - 点底部 **注册**。
+3. 注册完成后进入应用的 **概述**（Overview）页：页面顶部「概要」区块里的 **应用程序(客户端) ID**（Application (client) ID，形如 `00000000-0000-0000-0000-000000000000`）就是面板要填的 `client_id`，点右边的复制图标复制。
+   「目录(租户) ID」不需要填。
+4. 左侧菜单 **身份验证**（Authentication）→ 拉到页面最底部 **高级设置**（Advanced settings）→ **允许公共客户端流**（Allow public client flows）→ 选 **是**（Yes）→ 顶部 **保存**。
+   这一步决定能不能用设备码登录；没打开时绑定会提示「该应用未启用允许公共客户端流」。
+   （新版门户的「身份验证」页如果是分标签的样式，这个开关在「设置」标签里。）
+5. 左侧菜单 **API 权限**（API permissions）：默认已有 `Microsoft Graph / User.Read`，可以保留也可以删除；**不需要**手动添加 `Files.ReadWrite.AppFolder`——面板在登录时动态申请，你在 Microsoft 的授权页上同意即可。不要添加 `Files.ReadWrite.All` 之类更大的权限。
+6. **不需要**创建客户端密码（Client secret）或证书：这是公共客户端，面板里不保存任何应用密钥。
+
+### 在面板里绑定
+
+1. 面板 **设置 → OneDrive 备份**（或侧栏「☁️ OneDrive 备份」，App 在「更多 → OneDrive 备份」）→ 填 `client_id` → 登录端点保持 **consumers**（个人帐户；同时要用工作/学校帐户时选 common）→ 保存 → **绑定 OneDrive**。
+2. 面板显示一个代码（如 `ABCD-EFGH`）：在任意设备打开 <https://microsoft.com/devicelogin>，输入代码 → 登录 Microsoft 帐户 → 授权页确认只列出「访问应用的文件夹」和「保持访问权限」两项 → 接受。面板每几秒自动检查一次，授权后显示「已绑定」（代码 15 分钟内有效）。
+3. 设置 **备份密码**（≥10 位，务必另外记下来，丢了就无法恢复）、频率（每天 / 每周）、时间（按面板时区，默认 Asia/Shanghai）、保留份数（默认 30）。点 **立即备份** 试一次，OneDrive 网页版「我的文件 → 应用 → TriCloud Backup」里会出现 `tricloud-backup-时间.tcod`。
+
+### 安全说明
+
+- refresh token 和备份密码都用面板自己的 Fernet 密钥（`data/fernet.key`）加密后存在本机数据库里——定时备份需要无人值守解开它们。能读到 `data/` 的人本来就能读到全部云凭证，所以这不增加风险。
+- 上传到 OneDrive 的文件只用备份密码加密（scrypt 派生 + AES-256-GCM），与 `fernet.key` 无关；只拿到 OneDrive 文件、不知道备份密码，解不开。
+- API Token 只能查看状态 / 列表和「立即备份」，不能绑定、改设置、恢复、解绑（返回 403）。
+- 撤销授权：<https://account.live.com/consent/Manage> 里删掉这个应用，或在面板点「解绑」（只删除本机 token，OneDrive 上的备份文件保留）。
+
+### 新装机恢复
+
+装好面板 → 登录 → OneDrive 备份页填同一个 `client_id` 并绑定同一个 Microsoft 帐户 → 备份列表选一份 → 恢复 → 输入备份密码 → 二次确认。恢复前面板会把当前数据保存到 `data/pre-restore-时间/`，替换数据库和密钥后自动重启（Docker 的 restart 策略拉起），用备份时的面板密码重新登录。
+
+### 离线解密
+
+不依赖面板，任何装了 Python 3 和 `cryptography`（`pip install cryptography`）的电脑，在仓库根目录：
+
+```
+python -m tools.decrypt_backup tricloud-backup-20261016-033000.tcod 输出目录
+```
+
+会提示输入备份密码（也可以作为第二个参数或环境变量 `TRICLOUD_BACKUP_PASSWORD` 传入），输出 `tricloud.db`、`fernet.key`、`meta.json`。手动恢复：停面板 → 把这两个文件覆盖到 `data/`（先备份原文件）→ `chmod 600` → 启动面板。
+
+---
+
 ## 填到面板
 
 面板（Web / Android / iOS / Windows 客户端）→ **账号** → **添加账号**：

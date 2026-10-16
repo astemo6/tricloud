@@ -8,8 +8,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from . import core, security, tasks, telegram
-from .routers import (accounts, auth, aws, aws_credit, azure, billing, cloudflare, guard_health, instances, oci, pages, settings,
-                      tasks_monitors)
+from .routers import (accounts, auth, aws, aws_credit, azure, billing, cloudflare, guard_health, instances, oci, onedrive, pages,
+                      settings, tasks_monitors)
 from .routers import security as security_routes
 from .routers.common import VERSION, _token, client_ip
 from .routers.pages import WEB_DIR, StaticWithModules
@@ -31,7 +31,7 @@ async def lifespan(app):
 
 app = FastAPI(title="TriCloud", version=VERSION, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 PUBLIC = {"/api/login", "/api/health"}
-AUDIT_SKIP = {"/api/logout"}
+AUDIT_SKIP = {"/api/logout", "/api/onedrive/bind/poll"}   # 设备码轮询每几秒一次，绑定成功由路由自己写 onedrive-bind
 AUDIT_SKIP_OK = {("DELETE", "/api/audit")}   # 清空审计成功时路由自己写了 audit-clear，中间件不再追加一条
 
 
@@ -48,7 +48,9 @@ async def auth_mw(req: Request, call_next):
             actor = "api_token:" + (tok[:10] if tok.startswith("tc_") else f"legacy#{tk['id']}")
             # API Token 不能管理安全设置
             if path.startswith(("/api/2fa", "/api/tokens", "/api/password", "/api/backup", "/api/restore", "/api/secrets")) \
-                    or (path == "/api/audit" and req.method == "DELETE"):   # Token 不能抹掉审计痕迹
+                    or (path == "/api/audit" and req.method == "DELETE") \
+                    or (path.startswith("/api/onedrive") and req.method != "GET" and path != "/api/onedrive/backup"):
+                # Token 不能抹掉审计痕迹；OneDrive 只能看状态 / 列表和「立即备份」，不能绑定（防止绑到别人的网盘）、改密码、恢复、解绑
                 return JSONResponse({"detail": "API Token 无权访问此接口"}, status_code=403)
         else:
             return JSONResponse({"detail": "未登录"}, status_code=401)
@@ -89,7 +91,7 @@ async def err(req, exc):
 
 
 # 注册顺序 = 匹配顺序。各模块内部的路径互不冲突；静态页与 /static 挂载放最后。
-ROUTERS = (auth, accounts, instances, oci, aws, aws_credit, azure, billing, tasks_monitors, settings, security_routes, cloudflare,
+ROUTERS = (auth, accounts, instances, oci, aws, aws_credit, azure, billing, tasks_monitors, settings, security_routes, onedrive, cloudflare,
            guard_health, pages)
 for _m in ROUTERS:
     app.include_router(_m.router)

@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 ENV MALLOC_ARENA_MAX=2
 COPY app ./app
 COPY web ./web
+COPY tools ./tools
 COPY entrypoint.sh /entrypoint.sh
 RUN useradd -u 10001 -m tricloud && chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]

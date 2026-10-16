@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.0（build 21）(2026-10-16)
+- 新功能：OneDrive 定期备份（Web + Android + iOS + Telegram `/backup`）。Microsoft Graph 设备码登录（`/consumers` 默认，可选 `/common`），scope 仅 `Files.ReadWrite.AppFolder offline_access`；client_id 由用户注册自己的公共客户端应用后填写（`docs/api-credentials.md` 第四节）。refresh token、备份密码以 Fernet 加密存 settings 表。
+- 备份：`tricloud.db`（SQLite backup API 快照）+ `fernet.key` + `meta.json` 打 zip，scrypt（N=2^15,r=8,p=1）+ AES-256-GCM 加密为 `tricloud-backup-YYYYMMDD-HHMMSS.tcod`，上传到 approot（≤4MB 直接 PUT，否则 upload session 3.125 MiB 分片）；每天 / 每周 + HH:MM（面板时区），保留最近 N 份（默认 30，只删自己生成的文件）；后台任务 `onedrive_backup`（面板级，account_id=0），失败 TG 通知 + 1 小时后重试（每期最多 3 次），成功写审计 `onedrive-backup`。
+- 恢复：下载 → 解密 → 完整性 / 密钥匹配校验 → `data/pre-restore-时间/` 本地快照 → 替换 db + key（保留当前机器的 OneDrive 绑定）→ 会话全部作废；Docker 中随后以退出码 75 退出由 restart 策略拉起（`TRICLOUD_RESTART_AFTER_RESTORE` 可覆盖）。解绑只删本地 token。
+- 离线解密工具 `python -m tools.decrypt_backup 文件 [密码] 输出目录`（只依赖 cryptography）。Dockerfile 复制 tools/（新安装生效）。
+- 新接口（8 个，/api 路由 161 → 169）：`GET /api/onedrive`、`POST /api/onedrive/config`、`POST /api/onedrive/bind`、`POST /api/onedrive/bind/poll`、`DELETE /api/onedrive/bind`、`POST /api/onedrive/backup`、`GET /api/onedrive/backups`、`POST /api/onedrive/restore`。API Token 只能 GET 与 `POST /api/onedrive/backup`。
+- 版本：Android versionCode 21 / iOS build 21（versionName 仍 1.6.0）。
+
 ## 1.6.0（build 20）(2026-10-16)
 - 新功能：AWS「新号 Credit」标签（Web / Android / iOS）：显示新免费计划的计划类型、剩余 credit、到期时间，以及 5 个官方活动（EC2 / Budgets / Lambda / RDS / Bedrock）的状态、奖励、完成时间。数据来自 freetier `GetAccountPlanState` + `ListAccountActivities`（zh-CN）+ `GetAccountActivity`（端点 us-east-1，免费接口），缓存 5 分钟，`?refresh=true` 跳过缓存。缺 freetier 权限时提示需要的只读权限（`freetier:GetAccountPlanState / ListAccountActivities / GetAccountActivity`），不适用新计划的老账号也友好显示。
 - 每个未完成活动可「一键完成」（后台任务 `aws_credit`，有进度和日志，执行前先做权限检查，失败给中文原因）：EC2 启动最小免费级实例（t3.micro / t2.micro，Amazon Linux 2023，约 5 分钟后终止，实例内另设自动关机终止兜底）；Budgets 创建 $1 月度成本预算 `tricloud-credit-budget`（免费，默认保留）；Lambda 创建无策略的最小执行角色 + Python 函数 + 公开函数 URL，访问一次验证，10 分钟后自动删除；RDS 创建 db.t4g.micro / db.t3.micro MySQL（20 GB gp2、单可用区、不公网、不备份、随机密码不保存），可用后删除（跳过最终快照、删除自动备份）；Bedrock 在 us-east-1 用 Converse 调 Amazon Nova Micro 一句话（界面注明官方写的是 playground，API 调用不一定计入）。所有资源打标签 `tricloud-credit=1`，停止任务也会清理；另有「清理残留资源」按钮（可选同时删预算）和「一键全部完成」（两次确认，提示从 credit 扣少量费用）。执行后只显示「已执行，等待 AWS 识别」，状态以 AWS 返回为准，完成后自动刷新一次。新接口：`GET /api/accounts/{id}/aws/credits`、`POST …/aws/credits/activities/{activity}/run`、`POST …/aws/credits/run-all`、`POST …/aws/credits/cleanup`（都写审计）。Telegram `/credits` 附带最近查询过的新号 Credit 摘要（只读缓存）。

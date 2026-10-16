@@ -687,6 +687,12 @@ ok("web: run-all double confirm mentions credit cost", A.count("confirmBox(") >=
 ok("demo mock: credits + run + cleanup", "/aws/credits" in M and "run-all" in M and "cleanup" in M)
 ok("android: credit tab + endpoints", '{"credit", "新号 Credit"}' in AJ and "/aws/credits" in AJ and "已执行，等待 AWS 识别" in AJ)
 ok("ios: credit tab + endpoints", '("credit", "新号 Credit")' in IP and "/aws/credits" in IS and "已执行，等待 AWS 识别" in IS)
+bv = RC.build_view(aid, {"state": "ok", "plan": {"type": "PAID"}, "activities": [], "activities_denied": True,
+                         "activities_error": "没有 freetier 读权限"})
+ok("activities denied: banner note + 无权限读取 status (not AWS 未返回)",
+   "无法读取活动状态" in bv["notes"][0] and all(a["status_text"] == "无权限读取" for a in bv["activities"]))
+bv2 = RC.build_view(aid, {"state": "ok", "plan": {"type": "FREE"}, "activities": []})
+ok("activities empty but readable: AWS 未返回", all(a["status_text"] == "AWS 未返回" for a in bv2["activities"]) and "无法读取" not in bv2["notes"][0])
 
 print(f"\n{sum(x[1] for x in R)}/{len(R)} passed")
 sys.exit(0 if all(x[1] for x in R) else 1)

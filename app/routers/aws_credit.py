@@ -83,7 +83,12 @@ def _running(acc_id):
 
 def build_view(acc_id, data, cached=False, age=0):
     m = _aws_mod()
-    out = dict(data, cached=cached, age=age, notes=NOTES, keys=list(ACT_KEYS))
+    denied = bool(data.get("activities_denied"))
+    notes = list(NOTES)
+    if denied:
+        notes.insert(0, "⚠ 无法读取活动状态：" + (data.get("activities_error") or "缺少 freetier:ListAccountActivities 权限")
+                     + "。补上权限后点「刷新」即可看到每个活动是否已完成。")
+    out = dict(data, cached=cached, age=age, notes=notes, keys=list(ACT_KEYS))
     tl = _credit_tasks(acc_id)
     aws_acts = data.get("activities") or []
     by_key = {}
@@ -102,7 +107,7 @@ def build_view(acc_id, data, cached=False, age=0):
                 break
         step = (last or {}).get("steps", {}).get(k)
         a.update(key=k, label=ACT_LABEL[k], plan=info["plan"], note=info.get("note"), permissions=info["perms"],
-                 status_text=STATUS_TEXT.get(a.get("status") or "", "AWS 未返回" if data.get("state") == "ok" else "未知"),
+                 status_text=STATUS_TEXT.get(a.get("status") or "", ("无权限读取" if denied else "AWS 未返回") if data.get("state") == "ok" else "未知"),
                  completed=a.get("status") == "COMPLETED", runnable=a.get("status") != "COMPLETED",
                  last_run=({"task_id": last["id"], "task_status": last["status"], **(step or {"status": "running" if last["status"] == "running" else "pending"})}
                            if last else None))

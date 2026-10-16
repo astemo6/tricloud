@@ -1,4 +1,4 @@
-// TriCloud 前端 v1.6.0 build 21 · OneDrive 定期备份（设备码绑定、计划与保留、备份密码、立即备份、备份列表与恢复、解绑）
+// TriCloud 前端 v1.6.0 build 22 · OneDrive 定期备份（设备码绑定、计划与保留、备份密码、立即备份、备份列表与恢复、解绑）
 import { $, act, api, applyShowWhen, confirmBox, esc, fmtBytes, fmtDT, form, loading, modal, post, toast, view } from "./core.js";
 
 const OD_WD = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
@@ -23,7 +23,7 @@ export async function odSettingsBind() {
 
 function stopPoll() { if (odTimer) { clearTimeout(odTimer); odTimer = null; } }
 
-export async function pageOneDrive() {
+export async function pageOneDrive(hint) {
   stopPoll();
   loading();
   const s = await api("/onedrive");
@@ -44,7 +44,10 @@ export async function pageOneDrive() {
     <p class="muted">在 Azure 门户注册一个你自己的应用（公共客户端、允许个人 Microsoft 帐户、启用「允许公共客户端流」），把「应用程序(客户端) ID」填到这里。教程见文档 docs/api-credentials.md 的「OneDrive 备份」一节。只申请 <code>Files.ReadWrite.AppFolder</code> + <code>offline_access</code>，看不到网盘里的其他文件。</p>
     <label>client_id（应用程序(客户端) ID）</label><input name="client_id" class="mono" value="${esc(s.client_id || "")}" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off">
     <label>登录端点</label><select name="tenant"><option value="consumers" ${s.tenant === "consumers" ? "selected" : ""}>consumers（个人 Microsoft 帐户，推荐）</option><option value="common" ${s.tenant === "common" ? "selected" : ""}>common（个人 + 工作/学校帐户）</option></select>
-    <div class="bar" style="margin-top:12px"><button class="btn" id="odSaveApp">保存</button><button class="btn primary" id="odBind" ${s.client_id ? "" : "disabled"}>${s.bound ? "重新绑定" : "绑定 OneDrive"}</button></div>
+    <div class="bar" style="margin-top:12px">${s.bound
+      ? `<button class="btn" id="odSaveApp">保存</button><button class="btn" id="odBind">重新绑定</button>`
+      : `<button class="btn sm" id="odSaveApp">保存</button><button class="btn primary" id="odBind" style="font-weight:600;padding:10px 22px" ${s.client_id ? "" : "disabled"}>🔗 绑定 OneDrive</button>`}</div>
+    ${!s.bound && s.client_id ? `<p class="muted" id="odBindHint">${hint ? "✅ 已保存。" : ""}点右边蓝色「绑定 OneDrive」获取代码，代码会显示在下方。</p>` : !s.bound ? `<p class="muted" id="odBindHint">填好 client_id 后点右边蓝色「绑定 OneDrive」，下方会弹出代码（会自动先保存 client_id）。</p>` : ""}
     <div id="odPendBox"></div></div>
   <div class="card" id="odPlan"><h3>2. 计划、保留与备份密码</h3>
     <label><input type="checkbox" name="enabled" style="width:auto" ${c.enabled ? "checked" : ""}> 启用定时备份</label>
@@ -52,7 +55,7 @@ export async function pageOneDrive() {
       <div><label>时间（${esc(s.timezone)}）</label><input name="time" type="time" value="${esc(c.time)}"></div></div>
     <div data-show-when="freq=weekly"><label>星期</label><select name="weekday">${OD_WD.map((w, i) => `<option value="${i}" ${+c.weekday === i ? "selected" : ""}>${w}</option>`).join("")}</select></div>
     <label>保留最近几份（1–365，多余的自动删除）</label><input name="keep" type="number" min="1" max="365" value="${esc(c.keep)}">
-    <label>备份密码（≥10 位）${s.password_set ? ` <span class="badge done">已设置</span>` : ""}</label><input name="password" type="password" autocomplete="new-password" placeholder="${s.password_set ? "留空保持不变" : "恢复时需要，丢失无法恢复"}">
+    <label>备份密码（不能为空，长度不限）${s.password_set ? ` <span class="badge done">已设置</span>` : ""}</label><input name="password" type="password" autocomplete="new-password" placeholder="${s.password_set ? "留空保持不变" : "恢复时需要，丢失无法恢复"}">
     <label>再输一次</label><input name="password2" type="password" autocomplete="new-password">
     <p class="muted">备份文件用这个密码加密（scrypt + AES-256-GCM），OneDrive 上的文件没有密码打不开。为了无人值守定时运行，密码用面板的 Fernet 密钥加密后保存在本机数据库里。</p>
     <div class="bar" style="margin-top:8px"><button class="btn primary" id="odSavePlan">保存</button></div></div>
@@ -63,9 +66,13 @@ export async function pageOneDrive() {
   <div class="card" id="odList"><div class="bar"><h3 class="grow" style="margin:0">OneDrive 上的备份</h3>${s.bound ? `<button class="btn sm" id="odRefresh">刷新</button>` : ""}</div>
     <div id="odItems" class="muted">${s.bound ? `<span class="spin"></span> 读取中…` : "绑定后显示"}</div></div>`;
   applyShowWhen($("#odPlan")); $("#odPlan").addEventListener("change", () => applyShowWhen($("#odPlan")));
-  $("#odSaveApp").onclick = (e) => act(e.target, () => post("/onedrive/config", form($("#odApp"))), (r) => (r.changed.includes("unbound") ? "已保存；换了应用，原绑定已解除" : "已保存")).then((r) => r && pageOneDrive());
+  $("#odSaveApp").onclick = (e) => act(e.target, () => post("/onedrive/config", form($("#odApp"))),
+    (r) => (r.changed.includes("unbound") ? "已保存；换了应用，原绑定已解除。点「绑定 OneDrive」获取代码" : !r.bound && r.client_id ? "已保存，点「绑定 OneDrive」获取代码" : "已保存"))
+    .then((r) => r && pageOneDrive(!r.bound && !!r.client_id));
   $("#odSavePlan").onclick = (e) => {
     const f = form($("#odPlan"));
+    if (!f.password && f.password2) return toast("备份密码不能为空", true);
+    if (f.password && f.password !== f.password2) return toast("两次输入的备份密码不一致", true);
     if (!f.password) { delete f.password; delete f.password2; }
     act(e.target, () => post("/onedrive/config", f), "已保存").then((r) => r && pageOneDrive());
   };

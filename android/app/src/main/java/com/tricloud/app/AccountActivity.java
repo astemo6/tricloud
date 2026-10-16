@@ -968,9 +968,11 @@ public class AccountActivity extends BaseActivity {
                     if (tv == null || rr == null) continue;
                     if (g == null) { tv.setText("流量守护：未设置"); button(rr, "设置守护", v -> traffic(it, "vm")); continue; }
                     tv.setText("流量守护：" + (g.optInt("enabled", 1) == 1 ? str(g, "status_text", "正常") : "已关闭") + " · " + str(g, "last_gb", "-") + " / " + str(g, "limit_gb", "-") + " GB"
-                            + ("stop".equals(g.optString("action")) ? " · 超限停机" : " · 只推送"));
+                            + ("stop".equals(g.optString("action")) ? " · 超限停机" : "throttle".equals(g.optString("action")) ? " · 超限限速 " + str(g, "throttle_mbps", "1") + " Mbps" : " · 只推送")
+                            + (g.optInt("acct_enabled") == 1 ? " · 流量明细" : ""));
                     int gid = g.optInt("id");
                     button(rr, "编辑守护", v -> traffic(it, "vm"));
+                    button(rr, "agent / 明细", v -> startActivity(new android.content.Intent(this, GuardAgentActivity.class).putExtra("gid", gid).putExtra("name", it.optString("name"))));
                     button(rr, "立即检查", v -> Api.post(this, "/traffic-guards/" + gid + "/check", null, x -> { toast("已检查"); refresh(); }));
                     button(rr, "删除守护", v -> confirm("删除规则", "删除这台实例的流量守护？", () -> Api.del(this, "/traffic-guards/" + gid, x -> { toast("已删除"); refresh(); })));
                 }

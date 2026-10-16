@@ -78,10 +78,13 @@ extension Page {
                 f.append(Field.select("direction", "方向", dir, ["out", "in", "both"], ["出站", "入站", "双向（出+入）"]))
                 f.append(Field.num("limit_gb", "上限 GB（免费出站 " + free + " GB/月）", str(g, "limit_gb", free)))
                 f.append(Field.num("warn_pct", "预警比例 %", str(g, "warn_pct", "80")))
-                f.append(Field.select("action", "到达上限后", str(g, "action", "notify"), ["notify", "stop"], ["只推送", "推送并自动停机"]))
+                f.append(Field.select("action", "到达上限后", str(g, "action", "notify"), ["notify", "stop", "throttle"],
+                                      ["只推送", "推送并自动停机", "推送并限速（需在实例上装 agent）"]))
                 f.append(Field.num("shutdown_hours", "关机多少小时后自动开机（0 = 不自动开机）", str(g, "shutdown_hours", "0")))
+                f.append(Field.num("throttle_mbps", "限速到 Mbps（出站，0.1–10000，推送并限速时生效）", str(g, "throttle_mbps", "1")))
+                f.append(Field.check("acct_enabled", "流量明细：按端口 / 服务统计（同一个 agent，只计数不拦截）", g.optInt("acct_enabled") == 1))
                 f.append(Field.check("enabled", "启用这条规则", g.isNull("enabled") || g.optInt("enabled", 1) == 1))
-                self.form("流量守护 · " + name, use + "\n月度模式每 30 分钟、滚动窗口每 10 分钟查一次平台指标（有 5~15 分钟延迟）。自动开机失败只推送告警、不重试。",
+                self.form("流量守护 · " + name, use + "\n月度模式每 30 分钟、滚动窗口每 10 分钟查一次平台指标（有 5~15 分钟延迟）。自动开机失败只推送告警、不重试。\n推送并限速：由实例上的 agent（bash + tc，每 5 分钟）执行，SSH 端口不限速，回落或下月自动解除；保存后在「agent / 明细」里复制安装命令。",
                           f, "保存") { v in
                     var b = v
                     b["account_id"] = accId
@@ -94,6 +97,10 @@ extension Page {
                         let ok: String = "已保存，当前已用 " + str(o, "last_gb", "-") + " GB（" + str(o, "last_pct", "-") + "%）"
                         self.toast(o.isNull("warning") ? ok : "⚠️ " + o.optString("warning"))
                         onSaved?()
+                        // build 22：首次选「推送并限速」/ 打开流量明细且 agent 未安装 → 直接打开 agent 页给安装命令
+                        let want = v.optString("action") == "throttle" || v.optBoolean("acct_enabled")
+                        let installed = g.optJSONObject("agent")?.optBoolean("installed") ?? false
+                        if want && o.optInt("id") > 0 && !installed { self.push(GuardAgentPage(o.optInt("id"), name)) }
                     }
                 }
             }

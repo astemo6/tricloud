@@ -1,5 +1,6 @@
 // TriCloud 前端 v1.6.0 · 监控、流量守护、账号健康度
 import { $, ACCOUNTS, act, api, confirmBox, del, esc, loading, post, view } from "./core.js";
+import { agentLine, guardAgentDialog, guardPortsDialog } from "./guard.js";
 import { trafficDialog } from "./instances.js";
 
 // ---------------- 监控 ----------------
@@ -39,27 +40,33 @@ export async function pageHealth() {
     act(b, () => post("/account-health/refresh", { account_id: +b.dataset.chk }), "检测完成").then(pageHealth)));
 }
 
-export const GST = { ok: "running", warn: "pending", over: "failed", tripped: "stopped", resume_failed: "failed", disabled: "" };
+export const GST = { ok: "running", warn: "pending", over: "failed", tripped: "stopped", resume_failed: "failed", disabled: "", throttled: "pending" };
 export async function pageTraffic() {
   loading();
   const list = await api("/traffic-guards");
   const fmt = (t) => (t ? new Date(t * 1000).toLocaleString() : "-");
-  const actText = (g) => g.action !== "stop" ? "只推送" : g.shutdown_hours > 0 ? `停机 ${g.shutdown_hours} 小时后自动开机` : "自动停机";
-  view.innerHTML = `<div class="card"><p class="muted">在实例卡片上点「流量守护」添加规则（OCI 在账号的「流量」标签里设置）：本月累计或滚动窗口（最近 N 小时，出站 / 入站 / 双向）。超限可自动停机，并可在 M 小时后自动开机（失败只告警、不重试）。也可以给 Telegram Bot 发 /traffic 查看。</p>
+  const actText = (g) => g.action === "throttle" ? `限速 ${g.throttle_mbps} Mbps` : g.action !== "stop" ? "只推送" : g.shutdown_hours > 0 ? `停机 ${g.shutdown_hours} 小时后自动开机` : "自动停机";
+  view.innerHTML = `<div class="card"><p class="muted">在实例卡片上点「流量守护」添加规则（OCI 在账号的「流量」标签里设置）：本月累计或滚动窗口（最近 N 小时，出站 / 入站 / 双向）。超限可自动停机，并可在 M 小时后自动开机（失败只告警、不重试）；或「推送并限速」（实例上装 agent，默认 1 Mbps，SSH 不限）。同一个 agent 还能按端口 / 服务统计流量明细。Telegram：/traffic、/ports 实例名。</p>
     ${list.length ? `<table><tr><th>实例</th><th>账号</th><th>统计</th><th>用量</th><th>上限</th><th>到上限</th><th>状态</th><th>启用</th><th>检查于</th><th></th></tr>
     ${list.map((g) => `<tr data-g="${g.id}"><td>${esc(g.name || g.instance_id.slice(-12))}</td><td><span class="dot ${g.provider}"></span>${esc(g.account_name || "-")}</td>
       <td>${esc(g.scope || "本月出站")}</td>
       <td><div class="meter"><i style="width:${Math.min(100, g.last_pct || 0)}%" class="${(g.last_pct || 0) >= 100 ? "bad" : (g.last_pct || 0) >= g.warn_pct ? "warn" : ""}"></i></div>
-        ${g.last_gb ?? "-"} GB · ${g.last_pct ?? "-"}%</td><td>${g.limit_gb} GB</td><td>${actText(g)}</td>
+        ${g.last_gb ?? "-"} GB · ${g.last_pct ?? "-"}%</td><td>${g.limit_gb} GB</td><td>${actText(g)}${g.agent ? `<div>${agentLine(g.agent, g)}</div>` : ""}</td>
       <td><span class="badge ${GST[g.status] || ""}">${esc(g.status_text || "正常")}</span>${g.resume_at_text ? `<div class="muted">预计 ${esc(g.resume_at_text)} 开机</div>` : g.state_msg && g.status !== "ok" ? `<div class="muted">${esc(g.state_msg)}</div>` : ""}</td>
       <td><label class="switch"><input type="checkbox" data-en="${g.id}" ${g.enabled ? "checked" : ""}><span></span></label></td>
       <td>${fmt(g.checked_at)}</td><td><button class="btn sm" data-chk="${g.id}">立即检查</button> <button class="btn sm" data-ed="${g.id}">编辑</button>
+      <button class="btn sm" data-ag="${g.id}">agent</button> <button class="btn sm" data-pt="${g.id}">端口明细</button>${g.throttled ? ` <button class="btn sm" data-rt="${g.id}">解除限速</button>` : ""}
       ${g.resume_at ? `<button class="btn sm" data-cr="${g.id}">取消自动开机</button>` : ""}${["tripped", "resume_failed"].includes(g.status) ? ` <button class="btn sm" data-rs="${g.id}">清除状态</button>` : ""}
       <button class="btn sm danger" data-del="${g.id}">删除</button></td></tr>`).join("")}</table>`
     : `<div class="empty">还没有流量守护规则</div>`}</div>`;
   view.querySelectorAll("[data-chk]").forEach((b) => (b.onclick = () => act(b, () => post(`/traffic-guards/${b.dataset.chk}/check`), "已检查").then(pageTraffic)));
   view.querySelectorAll("[data-en]").forEach((b) => (b.onchange = () => act(null, () => api(`/traffic-guards/${b.dataset.en}`, { method: "PATCH", body: { enabled: b.checked } }), b.checked ? "已启用" : "已停用").then(pageTraffic)));
   view.querySelectorAll("[data-cr]").forEach((b) => (b.onclick = () => act(b, () => api(`/traffic-guards/${b.dataset.cr}`, { method: "PATCH", body: { cancel_resume: true } }), "已取消自动开机").then(pageTraffic)));
+  view.querySelectorAll("[data-ag]").forEach((b) => (b.onclick = () => guardAgentDialog(list.find((x) => x.id == b.dataset.ag), pageTraffic)));
+  view.querySelectorAll("[data-pt]").forEach((b) => (b.onclick = () => guardPortsDialog(list.find((x) => x.id == b.dataset.pt))));
+  view.querySelectorAll("[data-rt]").forEach((b) => (b.onclick = async () => {
+    if (await confirmBox("解除限速", "手动解除这条守护的限速？本期内不会再自动限速（回落 / 下个月后恢复正常判断）。")) act(b, () => api(`/traffic-guards/${b.dataset.rt}`, { method: "PATCH", body: { release_throttle: true } }), "已解除，agent 下次心跳生效").then(pageTraffic);
+  }));
   view.querySelectorAll("[data-rs]").forEach((b) => (b.onclick = () => act(b, () => api(`/traffic-guards/${b.dataset.rs}`, { method: "PATCH", body: { reset_state: true } }), "已清除").then(pageTraffic)));
   view.querySelectorAll("[data-ed]").forEach((b) => (b.onclick = () => {
     const g = list.find((x) => x.id == b.dataset.ed); const acc = ACCOUNTS.find((a) => a.id === g.account_id);

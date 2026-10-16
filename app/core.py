@@ -111,6 +111,21 @@ MIGRATIONS = [
     "ALTER TABLE accounts ADD COLUMN disabled INTEGER DEFAULT 0",
     "ALTER TABLE accounts ADD COLUMN disabled_reason TEXT",
     "ALTER TABLE accounts ADD COLUMN acct_type TEXT",
+    # ---- build 22：流量守护「推送并限速」（实例上自装 tc agent，按守护独立 token 只读拉取状态）----
+    "ALTER TABLE traffic_guards ADD COLUMN throttle_mbps REAL DEFAULT 1",
+    "ALTER TABLE traffic_guards ADD COLUMN throttled INTEGER DEFAULT 0",
+    "ALTER TABLE traffic_guards ADD COLUMN throttled_at INTEGER",
+    "ALTER TABLE traffic_guards ADD COLUMN agent_token_enc TEXT",
+    "ALTER TABLE traffic_guards ADD COLUMN agent_token_hash TEXT",
+    "ALTER TABLE traffic_guards ADD COLUMN agent_seen INTEGER",
+    "ALTER TABLE traffic_guards ADD COLUMN agent_info TEXT",
+    "ALTER TABLE traffic_guards ADD COLUMN agent_alerted INTEGER DEFAULT 0",
+    # ---- build 22：按端口 / 服务的流量明细（同一 agent 用 nftables / iptables 计数规则统计，按日聚合，保留 90 天）----
+    "ALTER TABLE traffic_guards ADD COLUMN acct_enabled INTEGER DEFAULT 0",
+    "ALTER TABLE traffic_guards ADD COLUMN acct_seen INTEGER",
+    "CREATE TABLE IF NOT EXISTS guard_port_traffic(guard_id INTEGER, day TEXT, proto TEXT, port INTEGER, proc TEXT, "
+    "bytes_in INTEGER DEFAULT 0, bytes_out INTEGER DEFAULT 0, updated INTEGER, PRIMARY KEY(guard_id, day, proto, port))",
+    "CREATE INDEX IF NOT EXISTS idx_gpt_day ON guard_port_traffic(day)",
 ]
 
 

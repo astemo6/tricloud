@@ -217,8 +217,13 @@ ok("config: bad freq 400", post("/api/onedrive/config", {"freq": "hourly"}).stat
 ok("config: bad time 400", post("/api/onedrive/config", {"time": "25:00"}).status_code == 400)
 ok("config: bad keep 400 (0 / 366 / x)", all(post("/api/onedrive/config", {"keep": v}).status_code == 400 for v in (0, 366, "x")))
 ok("config: bad weekday 400", post("/api/onedrive/config", {"weekday": 7}).status_code == 400)
-ok("config: short password 400", post("/api/onedrive/config", {"password": "short"}).status_code == 400)
-ok("config: password mismatch 400", post("/api/onedrive/config", {"password": "0123456789ab", "password2": "x123456789ab"}).status_code == 400)
+ok("config: whitespace-only password 400 (不能为空)", post("/api/onedrive/config", {"password": "   "}).status_code == 400
+   and "不能为空" in post("/api/onedrive/config", {"password": "   "}).json()["detail"])
+r0 = post("/api/onedrive/config", {"password": "a", "password2": "a"})
+ok("config: 1-char password accepted (no length / complexity rule, build 22)", r0.status_code == 200 and "password" in r0.json()["changed"]
+   and onedrive.password() == "a")
+ok("format: short password encrypt/decrypt round trip", onedrive.decrypt_blob(onedrive.encrypt_blob(b"x", "a"), "a") == b"x")
+ok("config: password mismatch 400", post("/api/onedrive/config", {"password": "abc", "password2": "abd"}).status_code == 400)
 r = post("/api/onedrive/config", {"client_id": CID, "tenant": "consumers", "password": "correct horse battery", "keep": 3})
 j = r.json()
 ok("config: saved client_id / password / keep", r.status_code == 200 and j["client_id"] == CID and j["password_set"] and j["cfg"]["keep"] == 3
@@ -590,6 +595,10 @@ ok("web: OneDrive page + settings card + route", "export async function pageOneD
    and '"onedrive"' in RT and "#/onedrive" in RT and "pageOneDrive()" in RT)
 ok("web: restore = password modal then red confirm", W.index('modal("从 OneDrive 恢复"') < W.index('confirmBox("确认恢复"') and "confirm: true" in W)
 ok("web: unbind red confirm + DELETE confirm=true", '"/onedrive/bind?confirm=true", { method: "DELETE" }' in W)
+ok("web: build 22 bind button primary + hint + save toast + no ≥10", 'class="btn primary" id="odBind"' in W and "已保存，点「绑定 OneDrive」获取代码" in W
+   and "点右边蓝色「绑定 OneDrive」获取代码" in W and "≥10" not in W and "两次输入的备份密码不一致" in W)
+ok("docs: step 2 says click blue bind button after save; password no length rule", "保存后点右边蓝色「绑定 OneDrive」按钮，下方弹出代码" in DOC
+   and "≥10 位" not in DOC.split("OneDrive 备份")[1])
 ok("web: polling stops when leaving page", 'if (!document.getElementById("odPend")) return;' in W)
 ok("web: device code + devicelogin link + polling", "/onedrive/bind/poll" in W and "microsoft.com/devicelogin" in W)
 ok("web: restore double confirm + password", "/onedrive/restore" in W and W.count("confirmBox(") >= 1 and "备份密码" in W)
@@ -603,6 +612,8 @@ for nm, src_ in (("android", AJ), ("ios", IS)):
     ok(f"{nm}: status / bind poll / config / backup / list / restore / unbind endpoints",
        all(x in src_ for x in ("/onedrive", "/onedrive/bind/poll", "/onedrive/config", "/onedrive/backup", "/onedrive/backups", "/onedrive/restore", "confirm=true")))
     ok(f"{nm}: devicelogin link", "microsoft.com/devicelogin" in src_)
+    ok(f"{nm}: build 22 bind hint after save + no ≥10 password rule", "已保存，点「绑定 OneDrive」获取代码" in src_ and "≥10" not in src_
+       and "两次输入的备份密码不一致" in src_ and "备份密码不能为空" in src_)
 c.__exit__(None, None, None)
 
 print(f"\n{sum(x[1] for x in R)}/{len(R)} passed")

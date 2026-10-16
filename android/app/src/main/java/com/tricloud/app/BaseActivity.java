@@ -317,10 +317,14 @@ public abstract class BaseActivity extends AppCompatActivity {
                 f.add(Field.select("direction", "方向", dir, new String[]{"out", "in", "both"}, new String[]{"出站", "入站", "双向（出+入）"}));
                 f.add(Field.num("limit_gb", "上限 GB（免费出站 " + free + " GB/月）", str(gg, "limit_gb", free)));
                 f.add(Field.num("warn_pct", "预警比例 %", str(gg, "warn_pct", "80")));
-                f.add(Field.select("action", "到达上限后", str(gg, "action", "notify"), new String[]{"notify", "stop"}, new String[]{"只推送", "推送并自动停机"}));
+                f.add(Field.select("action", "到达上限后", str(gg, "action", "notify"), new String[]{"notify", "stop", "throttle"},
+                        new String[]{"只推送", "推送并自动停机", "推送并限速（需在实例上装 agent）"}));
                 f.add(Field.num("shutdown_hours", "关机多少小时后自动开机（0 = 不自动开机，自动停机时生效）", str(gg, "shutdown_hours", "0")));
+                f.add(Field.num("throttle_mbps", "限速到 Mbps（出站，0.1–10000，推送并限速时生效）", str(gg, "throttle_mbps", "1")));
+                f.add(Field.check("acct_enabled", "流量明细：按端口 / 服务统计（同一个 agent，只计数不拦截）", gg.optInt("acct_enabled") == 1));
                 f.add(Field.check("enabled", "启用这条规则", gg.optInt("enabled", 1) != 0));
-                form("流量守护 · " + name, use + "\n月度模式每 30 分钟、滚动窗口每 10 分钟查一次平台指标（免费，有 5~15 分钟延迟）。到预警比例推送 Telegram；自动开机失败只告警、不重试。", f, "保存", v -> {
+                form("流量守护 · " + name, use + "\n月度模式每 30 分钟、滚动窗口每 10 分钟查一次平台指标（免费，有 5~15 分钟延迟）。到预警比例推送 Telegram；自动开机失败只告警、不重试。"
+                        + "\n推送并限速：由实例上的 agent（bash + tc，每 5 分钟）执行，SSH 端口不限速，回落或下月自动解除；保存后在「agent / 明细」里复制安装命令。", f, "保存", v -> {
                     try {
                         v.put("account_id", accId).put("instance_id", instId).put("kind", kind).put("name", name);
                         if (region != null && !region.isEmpty() && !MainActivity.noRegion(prov)) v.put("region", region);
@@ -328,6 +332,11 @@ public abstract class BaseActivity extends AppCompatActivity {
                             JSONObject o = Api.obj(x);
                             toast(o.has("warning") && !o.isNull("warning") ? o.optString("warning") : "已保存，当前已用 " + str(o, "last_gb", "-") + " GB（" + str(o, "last_pct", "-") + "%）");
                             if (onSaved != null) onSaved.run();
+                            // build 22：首次选「推送并限速」/ 打开流量明细且 agent 未安装 → 直接打开 agent 页给安装命令
+                            boolean wantAgent = "throttle".equals(v.optString("action")) || v.optBoolean("acct_enabled");
+                            JSONObject ag = gg.optJSONObject("agent");
+                            if (wantAgent && o.optInt("id") > 0 && (ag == null || !ag.optBoolean("installed")))
+                                startActivity(new Intent(this, GuardAgentActivity.class).putExtra("gid", o.optInt("id")).putExtra("name", name));
                         });
                     } catch (Exception ignored) { }
                 });
@@ -465,7 +474,7 @@ public abstract class BaseActivity extends AppCompatActivity {
             line.setOrientation(LinearLayout.HORIZONTAL);
             p.addView(line);
         } else line = (LinearLayout) p.getChildAt(p.getChildCount() - 1);
-        boolean danger = label.contains("删除") || label.contains("终止") || label.contains("销毁") || label.contains("清空") || label.contains("解绑 OneDrive");
+        boolean danger = label.contains("删除") || label.contains("终止") || label.contains("销毁") || label.contains("清空") || label.contains("解绑 OneDrive") || label.contains("重置 token");
         MaterialButton b = new MaterialButton(new ContextThemeWrapper(this,
                 danger ? R.style.ThemeOverlay_TriCloud_Danger : R.style.ThemeOverlay_TriCloud_Tonal));
         b.setText(label);

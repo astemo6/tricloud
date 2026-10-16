@@ -12,7 +12,7 @@
 - **AWS**：EC2、Lightsail、CloudFront、区域激活与全区域扫描、配额、闲置资源
 - **Azure**：创建 VM、资源组、配额、Foundry、订阅信息
 - **成本**：三家账单、Credit 与教育优惠到期提醒、免费额度护栏与免费体检（OCI A1：免费号 2C/12G，付费号 4C/24G）
-- **运维**：流量守护（超限自动关机）、IP 连通监控与自动换 IP、DNS 联动（Cloudflare）、开机脚本模板、随机开机密码、跨云迁移、任务实时日志、账号健康度
+- **运维**：流量守护（超限自动关机 / 实例自装 agent 限速 + 按端口/服务的流量明细）、IP 连通监控与自动换 IP、DNS 联动（Cloudflare）、开机脚本模板、随机开机密码、跨云迁移、任务实时日志、账号健康度
 - **安全**：TOTP 二次验证、API Token、审计日志、加密备份 / 恢复
 
 不提供 Web SSH、串口控制台或远程终端。功能详解见 [docs/FEATURES.md](docs/FEATURES.md)，更新日志见 [CHANGELOG.md](CHANGELOG.md)。
@@ -71,7 +71,7 @@ bash <(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercon
 
 ## Telegram
 
-@BotFather 创建 Bot，在面板「设置 → Telegram」填 Token 和 Chat ID。命令：`/start` 按钮菜单管理实例，`/bill`、`/tasks`、`/credits`、`/health`、`/traffic`。长轮询，无需 Webhook。
+@BotFather 创建 Bot，在面板「设置 → Telegram」填 Token 和 Chat ID。命令：`/start` 按钮菜单管理实例，`/bill`、`/tasks`、`/credits`、`/health`、`/traffic`、`/ports 实例名`、`/backup`。长轮询，无需 Webhook。
 
 ## App
 

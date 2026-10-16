@@ -1,5 +1,6 @@
 // TriCloud 前端 v1.6.0 · OCI：创建 / 抢机、配额、安全组、存储、对象存储、流量、区域订阅、免费额度体检
 import { $, ACCOUNTS, act, api, confirmBox, del, esc, fmtBytes, form, loading, modal, post, regionLabel, regionOf, regionSelect, rq, SETTINGS, toast, view } from "./core.js";
+import { guardAgentDialog, guardPortsDialog } from "./guard.js";
 import { loginFields, portModeFields, portsOf, publicWarn, showCreated, trafficDialog } from "./instances.js";
 import { GST } from "./monitors.js";
 import { saveDefaultBtn } from "./settings.js";
@@ -439,9 +440,11 @@ export async function tabOciTraffic(acc, box) {
     ${d.items.map((r, i) => `<tr><td>${esc(r.name)}<div class="muted mono" style="font-size:11px">${esc(r.shape || "")}</div></td><td>${esc(r.state || "")}</td><td class="mono">${esc(r.public_ip || "-")}</td>
       <td>${r.error ? `<span class="muted" title="${esc(r.error)}">读取失败</span>` : `<b>${gb(r.out_gb)}</b>`}</td><td>${r.error ? "-" : gb(r.in_gb)}</td>
       <td>${guardCell(gs.find((g) => g.instance_id === r.id))}</td>
-      <td>${(() => { const g = gs.find((x) => x.instance_id === r.id); return g ? `<button class="btn sm" data-tg="${i}">编辑</button> <button class="btn sm" data-tgchk="${g.id}">立即检查</button> <button class="btn sm danger" data-tgdel="${g.id}">删除</button>` : `<button class="btn sm" data-tg="${i}">设置守护</button>`; })()}</td></tr>`).join("") || `<tr><td colspan=7 class="muted">本区域没有实例</td></tr>`}</table></div>`;
+      <td>${(() => { const g = gs.find((x) => x.instance_id === r.id); return g ? `<button class="btn sm" data-tg="${i}">编辑</button> <button class="btn sm" data-tgag="${g.id}">agent</button> <button class="btn sm" data-tgpt="${g.id}">端口明细</button> <button class="btn sm" data-tgchk="${g.id}">立即检查</button> <button class="btn sm danger" data-tgdel="${g.id}">删除</button>` : `<button class="btn sm" data-tg="${i}">设置守护</button>`; })()}</td></tr>`).join("") || `<tr><td colspan=7 class="muted">本区域没有实例</td></tr>`}</table></div>`;
   box.querySelectorAll("[data-tg]").forEach((b) => (b.onclick = () => trafficDialog(acc, d.items[+b.dataset.tg], "vm", reload)));
   box.querySelectorAll("[data-tgchk]").forEach((b) => (b.onclick = () => act(b, () => post(`/traffic-guards/${b.dataset.tgchk}/check`), "已检查").then(reload)));
+  box.querySelectorAll("[data-tgag]").forEach((b) => (b.onclick = () => guardAgentDialog(gs.find((g) => g.id == b.dataset.tgag), reload)));
+  box.querySelectorAll("[data-tgpt]").forEach((b) => (b.onclick = () => guardPortsDialog(gs.find((g) => g.id == b.dataset.tgpt))));
   box.querySelectorAll("[data-tgdel]").forEach((b) => (b.onclick = async () => {
     if (await confirmBox("删除规则", "删除这台实例的流量守护？", true)) act(b, () => api(`/traffic-guards/${b.dataset.tgdel}`, { method: "DELETE" }), "已删除").then(reload);
   }));
@@ -449,7 +452,7 @@ export async function tabOciTraffic(acc, box) {
 export function guardCell(g) {
   if (!g) return `<span class="muted">未设置</span>`;
   const st = `<span class="badge ${GST[g.status] || ""}">${esc(g.enabled ? g.status_text || "正常" : "已关闭")}</span>`;
-  return `${st} <span class="muted">${g.last_gb ?? "-"} / ${g.limit_gb} GB${g.action === "stop" ? " · 超限停机" : " · 只推送"}</span>`;
+  return `${st} <span class="muted">${g.last_gb ?? "-"} / ${g.limit_gb} GB${g.action === "stop" ? " · 超限停机" : g.action === "throttle" ? ` · 超限限速 ${g.throttle_mbps} Mbps` : " · 只推送"}${g.acct_enabled ? " · 流量明细" : ""}</span>`;
 }
 
 // ---------- 7. OCI 区域订阅（v1.6 build 18：不再单独占标签，收在「配额/网络」页底部默认折叠的「高级」区，展开才加载） ----------

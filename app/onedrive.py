@@ -38,7 +38,7 @@ DEVICE_LOGIN_URL = "https://microsoft.com/devicelogin"
 SIMPLE_MAX = 4 * 1024 * 1024            # ≤4MB 直接 PUT，否则用 upload session
 CHUNK = 320 * 1024 * 10                 # upload session 分片须是 320 KiB 的整数倍（3.125 MiB）
 MAX_DOWNLOAD = 512 * 1024 * 1024        # 恢复时最多下载 512MB
-PW_MIN = 10
+PW_MIN = 1                              # build 22：不限长度 / 复杂度，只要求不为空（两次输入一致由 password2 校验）
 KEEP_DEFAULT, KEEP_MAX = 30, 365
 NAME_RE = re.compile(r"^tricloud-backup-\d{8}-\d{6}(-\d+)?\.tcod$")   # 只管理自己生成的文件，保留策略不会删别的
 GUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
@@ -168,8 +168,8 @@ def save_config(body):
         changed.append("password_clear")
     elif body.get("password"):
         pw = str(body["password"])
-        if len(pw) < PW_MIN:
-            raise ODError(f"备份密码至少 {PW_MIN} 位", "config")
+        if not pw.strip():
+            raise ODError("备份密码不能为空", "config")
         if "password2" in body and body.get("password2") != pw:
             raise ODError("两次输入的备份密码不一致", "config")
         core.set_secret_setting(K_PW, pw)
@@ -465,8 +465,8 @@ def _kdf(pw, salt, log2n=KDF_LOG2N, r=KDF_R, p=KDF_P):
 
 
 def encrypt_blob(payload: bytes, pw: str) -> bytes:
-    if len(pw or "") < PW_MIN:
-        raise ODError(f"备份密码至少 {PW_MIN} 位", "crypto")
+    if not pw:
+        raise ODError("备份密码不能为空", "crypto")
     salt, nonce = secrets.token_bytes(16), secrets.token_bytes(12)
     hdr = MAGIC + bytes([FMT_VER, KDF_LOG2N, KDF_R, KDF_P]) + salt + nonce
     return hdr + AESGCM(_kdf(pw, salt)).encrypt(nonce, payload, hdr)

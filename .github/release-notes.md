@@ -1,10 +1,10 @@
-### 1.6.0 build 21 更新内容
+### 1.6.0 build 22 更新内容
 
-- **新功能：OneDrive 定期备份**（Web 设置 → OneDrive 备份 / 侧栏，Android 与 iOS 在「更多 → OneDrive 备份」和设置页）：用你自己注册的 Azure 应用（公共客户端，填 client_id）通过设备码登录 Microsoft（打开 microsoft.com/devicelogin 输入代码），只申请 `Files.ReadWrite.AppFolder` + `offline_access`，只能读写 OneDrive「应用」下这一个文件夹。
-- 备份内容：数据库一致快照 + 加密密钥，用你设置的备份密码（scrypt + AES-256-GCM）加密后上传，文件名带时间戳；每天 / 每周定时（时间按面板时区），保留最近 N 份（默认 30），也可「立即备份」；失败 Telegram 通知并 1 小时后重试（每期最多 3 次），成功写审计。Telegram 新增 `/backup`（立即备份 + 状态）。
-- 恢复：备份列表选一份 → 输入备份密码 → 二次确认；恢复前自动在 data/ 保存当前数据，替换后面板自动重启，所有设备重新登录。新装机：装好 → 登录 → 绑定同一个 OneDrive → 恢复。可解绑（只删本机授权，网盘上的备份保留）。离线解密：`python -m tools.decrypt_backup 文件 输出目录`。
-- 安全：refresh token 和备份密码用面板 Fernet 密钥加密存库（定时备份需要无人值守）；API Token 只能看状态 / 列表和立即备份，绑定、设置、恢复、解绑返回 403。Azure 应用注册教程见 `docs/api-credentials.md` 第四节。
-- 版本：Android versionCode 21 / iOS build 21（版本号仍 1.6.0），需同时更新面板到最新版。
+- **新功能：流量守护「推送并限速」**：到达上限后可选「推送并限速」（默认 1 Mbps，可改），由你自己在实例上运行面板给出的安装命令装一个轻量 agent（bash 脚本 + systemd timer，每 5 分钟检查一次），超限时出站限速、SSH 端口不限，回落或下月自动解除，也可手动解除；agent 离线时 Telegram 提示「无法限速」。面板不会远程在实例上执行任何命令。
+- **新功能：按端口 / 服务的流量明细**：同一个 agent 用只计数、不拦截的 nftables（或 iptables）规则统计每个监听端口的入站 / 出站流量，自动识别进程名（sshd、x-ui、xray…），非监听端口的流量归为「其他/出站连接」。在流量守护的「agent / 明细」里看今日 / 本月按端口和按服务的 Top 与占比；Telegram 新增 `/ports 实例名`。数据保留 90 天。
+- 每条守护有自己的 agent token：可复制安装 / 卸载命令、看 agent 在线状态与最后心跳、重置 token。
+- OneDrive：未绑定时「绑定 OneDrive」改为醒目的蓝色按钮，保存 client_id 后会提示点它获取代码；备份密码不再限制长度和复杂度（不能为空、两次一致即可）。
+- 版本：Android versionCode 22 / iOS build 22（版本号仍 1.6.0），需同时更新面板到最新版。
 
 **Android**：下载 `TriCloud-*.apk` 直接安装（需允许安装未知来源应用），可覆盖升级。
 

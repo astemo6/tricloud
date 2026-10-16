@@ -307,9 +307,9 @@ IAM 角色权限限定在 `tricloud-credit-*` 名下，面板没法借此改动�
 
 ### 在面板里绑定
 
-1. 面板 **设置 → OneDrive 备份**（或侧栏「☁️ OneDrive 备份」，App 在「更多 → OneDrive 备份」）→ 填 `client_id` → 登录端点保持 **consumers**（个人帐户；同时要用工作/学校帐户时选 common）→ 保存 → **绑定 OneDrive**。
-2. 面板显示一个代码（如 `ABCD-EFGH`）：在任意设备打开 <https://microsoft.com/devicelogin>，输入代码 → 登录 Microsoft 帐户 → 授权页确认只列出「访问应用的文件夹」和「保持访问权限」两项 → 接受。面板每几秒自动检查一次，授权后显示「已绑定」（代码 15 分钟内有效）。
-3. 设置 **备份密码**（≥10 位，务必另外记下来，丢了就无法恢复）、频率（每天 / 每周）、时间（按面板时区，默认 Asia/Shanghai）、保留份数（默认 30）。点 **立即备份** 试一次，OneDrive 网页版「我的文件 → 应用 → TriCloud Backup」里会出现 `tricloud-backup-时间.tcod`。
+1. 面板 **设置 → OneDrive 备份**（或侧栏「☁️ OneDrive 备份」，App 在「更多 → OneDrive 备份」）→ 填 `client_id` → 登录端点保持 **consumers**（个人帐户；同时要用工作/学校帐户时选 common）→ 点 **保存**。
+2. **保存后点右边蓝色「绑定 OneDrive」按钮，下方弹出代码**（如 `ABCD-EFGH`）——只点「保存」不会出现代码（App 里同样是「保存」之后点蓝色的「绑定 OneDrive」）。拿到代码后：在任意设备打开 <https://microsoft.com/devicelogin>，输入代码 → 登录 Microsoft 帐户 → 授权页确认只列出「访问应用的文件夹」和「保持访问权限」两项 → 接受。面板每几秒自动检查一次，授权后显示「已绑定」（代码 15 分钟内有效）。
+3. 设置 **备份密码**（不能为空，长度和复杂度不限，两次输入要一致；务必另外记下来，丢了就无法恢复）、频率（每天 / 每周）、时间（按面板时区，默认 Asia/Shanghai）、保留份数（默认 30）。点 **立即备份** 试一次，OneDrive 网页版「我的文件 → 应用 → TriCloud Backup」里会出现 `tricloud-backup-时间.tcod`。
 
 ### 安全说明
 

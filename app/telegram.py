@@ -410,7 +410,7 @@ def aws_free_plan_lines():
 
 HELP = ("/start 按钮菜单（选云 → 账号 → 实例 → 操作）\n/bill 账单汇总\n/tasks 最近任务\n/credits Credit 与到期\n"
         "/health 账号健康度\n/traffic 流量守护\n/ipq IP 查询 IP 质量（风险分 / 归属）\n/free OCI 免费额度体检\n"
-        "/backup 立即备份到 OneDrive 并显示状态（/backup status 只看状态）")
+        "/backup 立即备份到 OneDrive 并显示状态（/backup status 只看状态）\n/ports 实例名 本月按端口 / 服务的流量 Top（需开启流量明细）")
 
 
 def backup_command(arg=""):
@@ -446,6 +446,14 @@ def free_report():
     return "🆓 OCI 免费额度体检：\n" + ("\n".join(out) or "没有启用中的 OCI 账号")
 
 
+def _cmd_arg(txt, cmd):
+    """「/ports@MyBot 名字」或「/ports 名字」→「名字」。"""
+    rest = txt[len(cmd):]
+    if rest.startswith("@"):
+        rest = rest.split(None, 1)[1] if len(rest.split(None, 1)) > 1 else ""
+    return rest.strip()
+
+
 async def handle_message(bot, chat_id, m):
     chat_id = str(chat_id)
     if str(m["chat"]["id"]) != chat_id:   # 只响应配置的 chat_id
@@ -478,7 +486,11 @@ async def handle_message(bot, chat_id, m):
     elif txt.startswith("/traffic"):
         rows = core.q("SELECT * FROM traffic_guards ORDER BY last_pct DESC")
         await _reply(bot, chat_id, "📈 本月流量：\n" + ("\n".join(f"{esc(g['name'])}：{g['last_gb'] or 0:.1f}/{g['limit_gb']:g} GB（{g['last_pct'] or 0:.0f}%）"
-                                                               + (" 超限停机" if g["action"] == "stop" else "") for g in rows) or "未设置流量守护"))
+                                                               + (" 超限停机" if g["action"] == "stop" else "")
+                                                               + ((" 🐢已限速" if g.get("throttled") else " 超限限速") if g["action"] == "throttle" else "") for g in rows) or "未设置流量守护"))
+    elif txt.startswith("/ports"):   # build 22 流量明细
+        from . import port_traffic
+        await _reply(bot, chat_id, await asyncio.to_thread(port_traffic.tg_report, _cmd_arg(txt, "/ports")))
     elif txt.startswith("/tasks"):
         await _reply(bot, chat_id, tasks_report())
     elif txt.startswith("/ipq"):   # v1.6

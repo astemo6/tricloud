@@ -17,6 +17,7 @@
 | 安全 | **TOTP 二次验证**（防重放）；**API Token**（只读/完全，仅存哈希，不能触碰 2FA/备份/密码）；**审计日志**（写操作、来源、IP，保留 180 天） |
 | 备份 | **加密备份/恢复**：数据库 + 密钥整包用口令（scrypt + Fernet）加密，下载与恢复都需面板密码 |
 | 备份 | **OneDrive 定期备份**（1.6.0 build 21）：见下方「OneDrive 定期备份」 |
+| 流量守护 | **推送并限速 + 端口流量明细**（1.6.0 build 22）：见下方「流量守护 agent」 |
 
 ## 实例改名 + 同步系统主机名（v1.5）
 - 接口：`POST /api/accounts/{id}/instances/rename`，`{instance_id, region, kind, new_name, sync_hostname=true}`（`/oci/rename` 保留，同一逻辑）。OCI 改显示名；AWS EC2 改 `Name` 标签；Azure 的 VM 资源名不可修改，显示名写入 `tricloud-name` 标签（列表优先显示）；Lightsail 不支持改名。
@@ -71,10 +72,21 @@
 - 设备码登录 Microsoft Graph（`/consumers` 或 `/common`），scope 只有 `Files.ReadWrite.AppFolder offline_access`，只能读写 OneDrive「应用 / <应用名>」文件夹。`client_id` 由用户注册自己的公共客户端应用后填写（教程见 `docs/api-credentials.md` 第四节）。
 - 备份内容：`tricloud.db`（SQLite backup API 一致快照）+ `fernet.key` + `meta.json` 打 zip，用备份密码 scrypt（N=2^15, r=8, p=1）派生密钥、AES-256-GCM 加密，文件 `tricloud-backup-YYYYMMDD-HHMMSS.tcod`；≤4MB 直接 PUT，更大用 upload session（3.125 MiB 分片）。
 - 定时：每天 / 每周（星期几）+ HH:MM，按面板时区；保留最近 N 份（默认 30，只删自己生成的文件）；失败 TG 通知，1 小时后重试，每期最多 3 次；成功写审计 `onedrive-backup`。任务类型 `onedrive_backup`（面板级任务，account_id=0），任务抽屉可看日志。
+- 备份密码（build 22 起）：只要求不能为空、两次输入一致，不限长度和复杂度。绑定：填 client_id 保存后点蓝色「绑定 OneDrive」才会出现代码（未绑定时页面会提示）。
 - 恢复：选一份 + 备份密码 + 二次确认；先在 `data/pre-restore-时间/` 存当前快照，校验完整性与密钥匹配后替换 db + key，保留当前机器的 OneDrive 绑定，所有会话作废；Docker 里随后退出进程由 restart 策略拉起（`TRICLOUD_RESTART_AFTER_RESTORE` 可覆盖）。
 - 离线解密：`python -m tools.decrypt_backup 文件 [密码] 输出目录`（只依赖 cryptography）。
 - API Token：只能 GET 状态 / 列表与 `POST /api/onedrive/backup`，其余（绑定、设置、恢复、解绑）403。TG：`/backup` 立即备份 + 状态，`/backup status` 只看状态。
 - 接口：`GET /api/onedrive`、`POST /api/onedrive/config`、`POST /api/onedrive/bind`、`POST /api/onedrive/bind/poll`、`DELETE /api/onedrive/bind?confirm=true`（`pending_only=true` 取消待授权）、`POST /api/onedrive/backup`、`GET /api/onedrive/backups`、`POST /api/onedrive/restore`。
+
+## 流量守护 agent：推送并限速 + 按端口 / 服务的流量明细（1.6.0 build 22）
+- **推送并限速**：流量守护「到达上限后」新增第三种动作 `throttle`，限速默认 **1 Mbps**（0.1–10000，出站）。超限时面板把这条守护标记为「已限速」并推送 Telegram；滚动窗口回落到上限以下、或月度模式跨月（`release_due`，不查云指标）自动解除，也可手动「解除限速」（本期内不再自动限速）。agent 离线 / 未安装时 TG 文案注明「无法限速」；装过的 agent 超过 15 分钟没心跳推送一次「限速 agent 离线」，恢复心跳后重置。
+- **agent**（`app/guard_agent/`，纯 bash，过 `bash -n` 与 shellcheck）：由用户自己在实例上用 root 运行安装命令（`curl -fsSL '<面板>/api/guard-agent/install.sh?token=<守护专属 token>' | sudo bash`），面板**不会**经 Run Command 或任何方式远程执行命令。安装 `/usr/local/bin/tricloud-guard`、`/etc/tricloud-guard/conf`（0600）、`tricloud-guard.service`（oneshot）+ `.timer`（每 5 分钟），没有常驻进程。限速用 `tc` HTB：主网卡（默认路由所在网卡，可 `IFACE=` 覆盖）出站 `1:20` 限速，SSH 端口（`sshd -T` / sshd_config，默认 22）的回包走不限速的 `1:10`。token 被重置 / 守护被删除（401/404）立即解除限速并删除计数规则；面板连不上保持现状，连续 24 小时连不上解除限速。子命令 `run | status | clear | uninstall`。
+- **流量明细**（守护上的开关 `acct_enabled`，任何动作都能开，只统计也行）：同一个 agent 用**只计数**的规则统计——nftables 独立 table `inet tricloud_acct`（input / output / forward 三个 base chain，priority -160，规则只有 `counter`，没有 drop / accept / reject）；没有 nft 时退回 iptables / ip6tables `mangle` 表里的 `TRICLOUD_ACCT_IN / OUT / FWD` 计数链（规则不带 `-j`，回环用 RETURN 跳过）。按 `ss -lntup` 的监听端口（排除只监听回环的，最多 64 个）自动建计数规则，端口集合或网卡变了才重建（重建前先把旧计数收进待上报），并把端口映射到进程名（`sshd`、`x-ui`、`xray`…；Docker 发布端口映射为 `docker:容器名`，DNAT 到容器的流量在 forward 链按原始目的端口计）。非监听端口的流量 = 网卡总量 − 各端口之和，归为「**其他/出站连接**」（如本机主动访问外网、代理出站）。每 5 分钟把「上次成功上报以来的增量」随心跳 POST 给面板，上报失败留在本地下次补报。面板关闭流量明细 / 卸载时删除计数规则。
+- **面板存储**：表 `guard_port_traffic`（守护 × 面板时区日期 × 协议 × 端口：进程名、入站字节、出站字节），每天清理 90 天前的记录；删除守护连带删除。
+- **接口**：公开（凭守护专属 token，`X-TriCloud-Guard-Token` 或 `?token=`，只能读写本守护）`GET|POST /api/guard-agent/state`（`format=env` 返回 `throttle / rate_kbit / acct / interval`；POST 正文每行 `协议 端口 进程名 入字节 出字节`，≤64KB、≤400 行，格式不对的行丢弃）、`GET /api/guard-agent/install.sh?token=`、`GET /api/guard-agent/uninstall.sh`；需登录 `GET /api/traffic-guards/{gid}/agent`（安装 / 卸载命令 + agent 在线状态、最后心跳、是否已限速、网卡、SSH 端口、计数后端与端口数）、`POST /api/traffic-guards/{gid}/agent/reset`（重置 token）、`GET /api/traffic-guards/{gid}/ports?range=today|month&limit=`（按端口、按服务的 Top：入站 / 出站 / 合计 / 占比）。`PATCH /api/traffic-guards/{gid}` 新增 `acct_enabled`、`release_throttle`；`POST /api/traffic-guards` 新增 `action=throttle`、`throttle_mbps`、`acct_enabled`。agent token 用 Fernet 加密存库（面板要能再次显示安装命令），另存 sha256 用于查找，任何列表接口都不回传。
+- **API Token**：`POST …/agent/reset` 返回 403；`GET …/agent` 只返回状态、不返回带 token 的安装命令；agent 每 5 分钟的心跳不写审计，下载安装脚本 / 重置 token 写审计。
+- **界面**：Web 流量守护页与 OCI「流量」标签每条规则有「agent」「端口明细」按钮（agent 弹窗：在线状态与最后心跳、当前是否限速、可复制的安装 / 卸载 / 状态命令、重置 token、流量明细开关；端口明细：今日 / 本月、按端口 / 按服务、占比条）；首次选「推送并限速」或打开流量明细时保存后直接弹出安装命令。Android（Material 3）`GuardAgentActivity`、iOS（HIG）`GuardAgentPage` 同样内容，流量守护表单新增「推送并限速」、限速 Mbps、流量明细开关。
+- **Telegram**：`/traffic` 显示「超限限速 / 🐢已限速」；新命令 `/ports 实例名`（本月按端口 Top 10 + 按服务 Top 5，不带参数列出已开流量明细的实例）。
 
 ## 从旧版迁移
 ```
@@ -87,6 +99,7 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 
 | 版本 | 内容 |
 |---|---|
+| 1.6.0（build 22） | 流量守护「推送并限速」（实例自装 bash + tc agent，默认 1 Mbps，SSH 不限）+ 按端口 / 服务的流量明细（nftables / iptables 只计数，今日 / 本月 Top，保留 90 天，TG `/ports`）；OneDrive 绑定按钮更醒目、备份密码不再限制长度，Web + Android + iOS |
 | 1.6.0（build 21） | OneDrive 定期备份（设备码绑定、每天 / 每周、保留 N 份、立即备份、列表与恢复、解绑、TG `/backup`、离线解密工具），Web + Android + iOS |
 | 1.6.0（build 17） | 首页 AWS 实例数包含 Lightsail（显示为「N 台（运行 X）· EC2 a · Lightsail b」） |
 | 1.6.0（build 16） | 移除第四家可选云厂商（彻底删除其后端、Web、演示、Android、iOS 代码），只保留 OCI / AWS / Azure；`/api/meta` 只返回三家云 |

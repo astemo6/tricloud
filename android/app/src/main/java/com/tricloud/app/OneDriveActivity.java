@@ -3,6 +3,7 @@ package com.tricloud.app;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.View;
 import android.widget.LinearLayout;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -17,6 +18,7 @@ import java.util.Arrays;
 public class OneDriveActivity extends BaseActivity {
     static final String LOGIN_URL = "https://microsoft.com/devicelogin";
     static final String[] WD = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"};
+    private boolean justSaved = false;   // build 22：刚保存 client_id 且未绑定 → 卡片里提示「点绑定 OneDrive 获取代码」
     private int pollGen = 0;          // 每次开始绑定 / 离开页面 +1，旧的轮询自动作废
     private boolean visible = false;
 
@@ -77,16 +79,25 @@ public class OneDriveActivity extends BaseActivity {
         muted(ap, "在 Azure 门户注册你自己的应用（公共客户端、允许个人 Microsoft 帐户、启用「允许公共客户端流」），把「应用程序(客户端) ID」填到这里。只申请 Files.ReadWrite.AppFolder + offline_access，看不到网盘里的其他文件。教程见 docs/api-credentials.md「OneDrive 备份」。");
         String cid = str(s, "client_id", "");
         text(ap, "client_id：" + (cid.isEmpty() ? "未填写" : cid) + "\n登录端点：" + s.optString("tenant", "consumers"), 13, false);
+        if (!bound && !cid.isEmpty()) {   // build 22：未绑定时「绑定 OneDrive」做成醒目的主按钮放在最前面，代码点它才出现
+            muted(ap, (justSaved ? "✅ 已保存。" : "") + "点下面蓝色「绑定 OneDrive」获取代码，代码会显示在下方。");
+            filledButton(ap, "绑定 OneDrive", v -> Api.post(this, "/onedrive/bind", null, x -> showPending(Api.obj(x))));
+        } else if (!bound) muted(ap, "先点「填写 client_id」保存，然后点蓝色「绑定 OneDrive」获取代码。");
+        justSaved = false;
         LinearLayout apr = row(ap);
-        button(apr, "修改 client_id", v -> form("Azure 应用", "client_id 为「应用程序(客户端) ID」；换应用会解除当前绑定。", Arrays.asList(
+        button(apr, cid.isEmpty() ? "填写 client_id" : "修改 client_id", v -> form("Azure 应用", "client_id 为「应用程序(客户端) ID」；换应用会解除当前绑定。", Arrays.asList(
                 Field.text("client_id", "client_id", cid),
                 Field.select("tenant", "登录端点", s.optString("tenant", "consumers"), new String[]{"consumers", "common"},
                         new String[]{"consumers（个人 Microsoft 帐户，推荐）", "common（个人 + 工作/学校帐户）"})), "保存",
                 f -> Api.post(this, "/onedrive/config", f, x -> {
-                    toast(Api.obj(x).optJSONArray("changed") != null && Api.obj(x).optJSONArray("changed").toString().contains("unbound") ? "已保存；换了应用，原绑定已解除" : "已保存");
+                    JSONObject o = Api.obj(x);
+                    boolean unb = o.optJSONArray("changed") != null && o.optJSONArray("changed").toString().contains("unbound");
+                    boolean need = !o.optBoolean("bound") && !str(o, "client_id", "").isEmpty();
+                    toast(unb ? "已保存；换了应用，原绑定已解除。点「绑定 OneDrive」获取代码" : need ? "已保存，点「绑定 OneDrive」获取代码" : "已保存");
+                    justSaved = need;
                     refresh();
                 })));
-        if (!cid.isEmpty()) button(apr, bound ? "重新绑定" : "绑定 OneDrive", v -> Api.post(this, "/onedrive/bind", null, x -> showPending(Api.obj(x))));
+        if (!cid.isEmpty() && bound) button(apr, "重新绑定", v -> Api.post(this, "/onedrive/bind", null, x -> showPending(Api.obj(x))));
 
         LinearLayout pl = card("2. 计划、保留与备份密码");
         muted(pl, "启用：" + (c.optBoolean("enabled", true) ? "是" : "否") + " · " + plan(c) + "\n备份文件用备份密码加密（scrypt + AES-256-GCM）；为了无人值守定时运行，密码用面板 Fernet 密钥加密后保存在面板数据库里。");
@@ -98,9 +109,10 @@ public class OneDriveActivity extends BaseActivity {
                 Field.text("time", "时间 HH:MM", c.optString("time", "03:30")),
                 Field.num("keep", "保留最近几份（1–365）", String.valueOf(c.optInt("keep", 30)))), "保存",
                 f -> Api.post(this, "/onedrive/config", f, x -> { toast("已保存"); refresh(); })));
-        button(plr, pwSet ? "修改备份密码" : "设置备份密码", v -> form("备份密码", "≥10 位，恢复时需要，丢失无法恢复，请另外记下来。",
+        button(plr, pwSet ? "修改备份密码" : "设置备份密码", v -> form("备份密码", "不能为空，长度不限；恢复时需要，丢失无法恢复，请另外记下来。",
                 Arrays.asList(Field.pass("password", "备份密码"), Field.pass("password2", "再输一次")), "保存", f -> {
-                    if (f.optString("password").isEmpty()) { toast("请输入备份密码"); return; }
+                    if (f.optString("password").trim().isEmpty()) { toast("备份密码不能为空"); return; }
+                    if (!f.optString("password").equals(f.optString("password2"))) { toast("两次输入的备份密码不一致"); return; }
                     Api.post(this, "/onedrive/config", f, x -> { toast("备份密码已保存"); refresh(); });
                 }));
 
@@ -124,6 +136,18 @@ public class OneDriveActivity extends BaseActivity {
                 button(row(ls), "恢复这份", v -> restore(iid, nm));
             }
         });
+    }
+
+    /** Material 3 Filled button（主操作），整行宽度，放在卡片里。 */
+    private void filledButton(LinearLayout card, String label, View.OnClickListener l) {
+        com.google.android.material.button.MaterialButton b = new com.google.android.material.button.MaterialButton(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        b.setMinHeight(dp(52));
+        b.setOnClickListener(l);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.setMargins(0, dp(6), 0, dp(6));
+        card.addView(b, lp);
     }
 
     private void showPending(JSONObject p) {

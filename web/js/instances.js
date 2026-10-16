@@ -1,4 +1,5 @@
 // TriCloud 前端 v1.6.0 · 账号页框架与实例：列表 / 卡片 / 表格、实例操作、开放端口与安全组弹窗、迁移、流量守护弹窗、v1.6 实例弹窗（重装 / 附加 IP / IP 质量 / 500M / 磁盘 / Lightsail 防火墙）
+import { agentLine, guardAgentDialog, guardPortsDialog } from "./guard.js";
 import { $, ACCOUNTS, act, api, confirmBox, ensureLsRegion, esc, form, instView, isDesktop, lastModal, modal, NO_CHANGE_IP, NO_CREATE, NOREG, OP_NAMES, PNAME, post, regionLabel, regionOf, regionSelect, rq, TAB_FNS_EXTRA, TABS, toast, TRAFFIC_DIALOG, view } from "./core.js";
 import { ociOsFields, ociShapeOpts, PUBLIC_CIDR, tabOciCreate, tabOciLimits, tabOciObjects, tabOciSecGroup, tabOciSnatch, tabOciStorage, tabOciTraffic, wireOciOs } from "./oci.js";
 import { ec2Create, lightsailCreate, tabAwsCredit, tabAwsRegions, tabCloudFront, tabLightsailV16, tabQuota, tabRecycle } from "./aws.js";
@@ -362,12 +363,25 @@ export async function trafficDialog(acc, inst, kind, onSaved) {
     <div><label>方向</label><select name="direction">${[["out", "出站"], ["in", "入站"], ["both", "双向（出+入）"]].map(([v, l]) => `<option value="${v}" ${dir === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
     <div><label><span data-show-when="mode=monthly">每月</span><span data-show-when="mode=rolling">窗口内</span>上限 GB（免费出站 ${FREE_OUT[acc.provider]} GB/月）</label><input name="limit_gb" type="number" min="1" value="${g.limit_gb || FREE_OUT[acc.provider]}"></div>
     <div><label>预警比例 %</label><input name="warn_pct" type="number" min="10" max="99" value="${g.warn_pct || 80}"></div>
-    <div><label>到达上限后</label><select name="action"><option value="notify">只推送</option><option value="stop" ${g.action === "stop" ? "selected" : ""}>推送并自动停机</option></select></div>
-    <div data-show-when="action=stop"><label>关机多少小时后自动开机（0 = 不自动开机）</label><input name="shutdown_hours" type="number" min="0" max="720" step="0.5" value="${g.shutdown_hours || 0}"></div></div>
+    <div><label>到达上限后</label><select name="action"><option value="notify">只推送</option><option value="stop" ${g.action === "stop" ? "selected" : ""}>推送并自动停机</option><option value="throttle" ${g.action === "throttle" ? "selected" : ""}>推送并限速（需在实例上装 agent）</option></select></div>
+    <div data-show-when="action=stop"><label>关机多少小时后自动开机（0 = 不自动开机）</label><input name="shutdown_hours" type="number" min="0" max="720" step="0.5" value="${g.shutdown_hours || 0}"></div>
+    <div data-show-when="action=throttle"><label>限速到（Mbps，出站，0.1–10000）</label><input name="throttle_mbps" type="number" min="0.1" max="10000" step="0.1" value="${g.throttle_mbps || 1}"></div></div>
     <p class="muted" data-show-when="action=stop">自动开机失败只推送 Telegram 告警，不会反复重试。</p>
-    <label><input type="checkbox" name="enabled" ${g.enabled === 0 ? "" : "checked"}> 启用这条规则</label>`,
-    (bg) => post("/traffic-guards", { account_id: acc.id, instance_id: inst.id, region: inst.region || regionOf(acc) || undefined, kind, name: inst.name, ...form(bg) }), "保存");
-  if (r) { toast(r.warning || `已保存，当前已用 ${r.last_gb ?? "-"} GB（${r.last_pct ?? "-"}%）`, !!r.warning); if (onSaved) onSaved(); }
+    <p class="muted" data-show-when="action=throttle">限速由实例上的 agent（bash + tc，systemd timer 每 5 分钟）执行，SSH 端口不限速；滚动窗口回落或下月 1 日自动解除。agent 未安装或离线时只能推送「无法限速」。保存后在「agent」里复制安装命令。</p>
+    <label><input type="checkbox" name="acct_enabled" ${g.acct_enabled ? "checked" : ""}> 流量明细：按端口 / 服务统计（同一个 agent，只计数不拦截；任何动作都可以开）</label>
+    <label><input type="checkbox" name="enabled" ${g.enabled === 0 ? "" : "checked"}> 启用这条规则</label>
+    ${g.id ? `<div class="bar" style="margin-top:8px"><span class="grow">${agentLine(g.agent, g)}</span><button type="button" class="btn sm" id="tgAgent">agent</button><button type="button" class="btn sm" id="tgPorts">端口明细</button></div>` : ""}`,
+    (bg) => post("/traffic-guards", { account_id: acc.id, instance_id: inst.id, region: inst.region || regionOf(acc) || undefined, kind, name: inst.name, ...form(bg) }), "保存", false,
+    (bg) => {
+      if (bg.querySelector("#tgAgent")) bg.querySelector("#tgAgent").onclick = () => { bg.remove(); guardAgentDialog(g, onSaved); };
+      if (bg.querySelector("#tgPorts")) bg.querySelector("#tgPorts").onclick = () => { bg.remove(); guardPortsDialog(g); };
+    });
+  if (r) {
+    toast(r.warning || `已保存，当前已用 ${r.last_gb ?? "-"} GB（${r.last_pct ?? "-"}%）`, !!r.warning);
+    if (onSaved) onSaved();
+    const ng = (await api("/traffic-guards").catch(() => [])).find((x) => x.id === r.id);
+    if (ng && (ng.action === "throttle" || ng.acct_enabled) && !(ng.agent && ng.agent.installed)) guardAgentDialog(ng, onSaved);   // 首次选限速 / 流量明细：直接给安装命令
+  }
 }
 
 // ---------- 实例表格视图 ----------

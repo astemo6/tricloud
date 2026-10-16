@@ -134,17 +134,53 @@
 
 
   // ---------- v1.3 数据 ----------
-  var tguards = [{ id: 1, account_id: 1, account_name: "东京主力", provider: "oci", instance_id: "ocid1.instance.oc1.ap-tokyo-1.demo1", name: "arm-main", limit_gb: 10240, warn_pct: 80, action: "notify", count_in: 0, last_gb: 1834.2, last_pct: 17.9, checked_at: now - 900, mode: "monthly", direction: "out", window_hours: 24, enabled: 1, shutdown_hours: 0, state: "ok" },
+  var tguards = [{ id: 1, account_id: 1, account_name: "东京主力", provider: "oci", instance_id: "ocid1.instance.oc1.ap-tokyo-1.demo1", name: "arm-main", limit_gb: 10240, warn_pct: 80, action: "throttle", throttle_mbps: 1, throttled: 0, acct_enabled: 1, count_in: 0, last_gb: 1834.2, last_pct: 17.9, checked_at: now - 900, mode: "monthly", direction: "out", window_hours: 24, enabled: 1, shutdown_hours: 0, state: "ok",
+                   agent_seen: now - 140, agent_info: { iface: "enp0s6", ssh: "22", applied: "0", v: "2", acct: "nft", nports: "5" } },
                  { id: 2, account_id: 3, account_name: "AWS 学生号", provider: "aws", instance_id: "i-0demo1234abcd", name: "tokyo-t3", limit_gb: 100, warn_pct: 80, action: "stop", count_in: 0, last_gb: 83.6, last_pct: 83.6, checked_at: now - 1200, mode: "monthly", direction: "out", window_hours: 24, enabled: 1, shutdown_hours: 0, state: "ok" },
                  { id: 3, account_id: 2, account_name: "首尔备用", provider: "oci", instance_id: "ocid1.instance.oc1.ap-seoul-1.demo3", name: "seoul-arm", limit_gb: 20, warn_pct: 80, action: "stop", count_in: 1, last_gb: 21.7, last_pct: 108.5, checked_at: now - 2400, mode: "rolling", direction: "both", window_hours: 6, enabled: 1, shutdown_hours: 3, state: "tripped", resume_at: now + 3600 * 2 + 600, state_msg: "超限停机，预计自动开机" },
                  { id: 4, account_id: 4, account_name: "Azure 学生", provider: "azure", instance_id: "/subscriptions/demo/resourceGroups/rg-demo/providers/Microsoft.Compute/virtualMachines/az-b1s", name: "az-b1s", limit_gb: 15, warn_pct: 80, action: "notify", count_in: 0, last_gb: 2.1, last_pct: 14, checked_at: now - 600, mode: "rolling", direction: "in", window_hours: 24, enabled: 0, shutdown_hours: 0, state: "ok" }];
   var DIRT = { out: "出站", in: "入站", both: "双向" }, GSTT = { ok: "正常", warn: "已到预警", over: "已超限", tripped: "已触发关机", resume_failed: "自动开机失败", disabled: "已停用" };
   function fmtTs(ts) { var t = new Date(ts * 1000); return ("0" + (t.getMonth() + 1)).slice(-2) + "-" + ("0" + t.getDate()).slice(-2) + " " + ("0" + t.getHours()).slice(-2) + ":" + ("0" + t.getMinutes()).slice(-2); }
+  GSTT.throttled = "已限速";
+  // build 22：agent 状态（演示：arm-main 装了 agent 并开了流量明细）
+  var BE_TEXT = { nft: "nftables", iptables: "iptables", none: "无可用计数后端（需要 nft 或 iptables）", off: "未启用" };
+  function agentView(g) {
+    var i = g.agent_info || {}, seen = g.agent_seen || null, nowS = Math.floor(Date.now() / 1000);
+    return { installed: !!seen, online: !!seen && nowS - seen < 900, last_seen: seen, last_seen_text: seen ? fmtTs(seen) : null, iface: i.iface || null, ssh_ports: i.ssh || null,
+      applied: i.applied === "1", version: i.v || null, acct_enabled: !!g.acct_enabled, acct_backend: i.acct || null, acct_backend_text: i.acct ? BE_TEXT[i.acct] : null,
+      acct_ports: i.nports ? +i.nports : null, acct_active: i.acct === "nft" || i.acct === "iptables", acct_seen: g.acct_enabled && seen ? seen : null, acct_seen_text: g.acct_enabled && seen ? fmtTs(seen) : null };
+  }
   function guardView(g) {
     var a = accounts.find(function (x) { return x.id == g.account_id; });
-    var st = g.state === "tripped" ? "tripped" : g.state === "resume_failed" ? "resume_failed" : !g.enabled ? "disabled" : g.last_pct >= 100 ? "over" : g.last_pct >= g.warn_pct ? "warn" : "ok";
-    return Object.assign({}, g, { account_name: a ? a.name : g.account_name, provider: a ? a.provider : g.provider, status: st, status_text: GSTT[st],
-      scope: g.mode === "rolling" ? "最近 " + g.window_hours + " 小时" + DIRT[g.direction] : "本月" + DIRT[g.direction], resume_at_text: g.resume_at ? fmtTs(g.resume_at) : null });
+    var st = g.throttled ? "throttled" : g.state === "tripped" ? "tripped" : g.state === "resume_failed" ? "resume_failed" : !g.enabled ? "disabled" : g.last_pct >= 100 ? "over" : g.last_pct >= g.warn_pct ? "warn" : "ok";
+    var v = Object.assign({}, g, { account_name: a ? a.name : g.account_name, provider: a ? a.provider : g.provider, status: st, status_text: GSTT[st],
+      scope: g.mode === "rolling" ? "最近 " + g.window_hours + " 小时" + DIRT[g.direction] : "本月" + DIRT[g.direction], resume_at_text: g.resume_at ? fmtTs(g.resume_at) : null,
+      throttle_mbps: g.throttle_mbps || 1, throttled: g.throttled ? 1 : 0, acct_enabled: g.acct_enabled ? 1 : 0,
+      agent: g.action === "throttle" || g.agent_seen || g.acct_enabled ? agentView(g) : null });
+    delete v.agent_info; delete v.agent_token;
+    return v;
+  }
+  function demoToken(g) { if (!g.agent_token) g.agent_token = "tg_demo" + Math.random().toString(36).slice(2, 12) + "xxxxxxxxxxxxxxxxxxxxxxxxxxxx"; return g.agent_token; }
+  function agentPayload(g) {
+    var base = "https://panel.example.com", t = demoToken(g);
+    return { guard_id: g.id, commands: { install: "curl -fsSL '" + base + "/api/guard-agent/install.sh?token=" + t + "' | sudo bash", uninstall: "curl -fsSL '" + base + "/api/guard-agent/uninstall.sh' | sudo bash",
+      uninstall_local: "sudo tricloud-guard uninstall", status: "sudo tricloud-guard status" }, agent: agentView(g), throttled: !!g.throttled, throttle_mbps: g.throttle_mbps || 1, poll_secs: 300, offline_secs: 900 };
+  }
+  // 端口流量明细演示数据（字节）：今日 / 本月
+  var GB = 1024 * 1024 * 1024, MB = 1024 * 1024;
+  var portDemo = { today: [["tcp", 443, "xray", 3.1 * GB, 9.8 * GB], ["udp", 443, "xray", 0.4 * GB, 1.2 * GB], ["tcp", 54321, "x-ui", 3 * MB, 11 * MB], ["tcp", 22, "sshd", 6 * MB, 9 * MB], ["tcp", 8080, "docker:web", 120 * MB, 860 * MB], ["other", 0, "-", 2.2 * GB, 0.9 * GB]],
+    month: [["tcp", 443, "xray", 71 * GB, 240 * GB], ["udp", 443, "xray", 9 * GB, 27 * GB], ["tcp", 54321, "x-ui", 80 * MB, 260 * MB], ["tcp", 22, "sshd", 150 * MB, 210 * MB], ["tcp", 8080, "docker:web", 2.6 * GB, 19 * GB], ["other", 0, "-", 46 * GB, 21 * GB]] };
+  function fb(n) { var u = ["B", "KB", "MB", "GB", "TB"], i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return i ? n.toFixed(2) + " " + u[i] : Math.round(n) + " B"; }
+  function portsView(g, rng, limit) {
+    var d = new Date(), pad = function (x) { return ("0" + x).slice(-2); }, today = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+    var raw = g.acct_enabled && g.id === 1 ? portDemo[rng] : [];
+    var rows = raw.map(function (r) { return { proto: r[0], port: r[1], proc: r[2], in: Math.round(r[3]), out: Math.round(r[4]), total: Math.round(r[3] + r[4]), label: r[0] === "other" ? "其他/出站连接" : r[1] + "/" + r[0] + (r[2] !== "-" ? " · " + r[2] : "") }; });
+    var tin = rows.reduce(function (a, r) { return a + r.in; }, 0), tout = rows.reduce(function (a, r) { return a + r.out; }, 0), tot = tin + tout, svc = {};
+    rows.forEach(function (r) { var n = r.proto === "other" ? "其他/出站连接" : r.proc; var x = svc[n] || (svc[n] = { service: n, in: 0, out: 0, ports: [] }); x.in += r.in; x.out += r.out; if (r.proto !== "other") x.ports.push(r.port + "/" + r.proto); });
+    var services = Object.keys(svc).map(function (k) { var x = svc[k]; x.total = x.in + x.out; return x; });
+    function fin(l) { l.sort(function (a, b) { return b.total - a.total; }); l.forEach(function (r) { r.pct = tot ? Math.round(r.total * 1000 / tot) / 10 : 0; r.in_text = fb(r.in); r.out_text = fb(r.out); r.total_text = fb(r.total); }); return l.slice(0, limit || 20); }
+    return { range: rng, title: rng === "today" ? "今日" : "本月", start: rng === "today" ? today : today.slice(0, 8) + "01", end: today, ports: fin(rows), services: fin(services), total_in: tin, total_out: tout, total: tot,
+      total_text: fb(tot), in_text: fb(tin), out_text: fb(tout), updated_at: rows.length ? Math.floor(Date.now() / 1000) - 140 : null, count: rows.length, guard_id: g.id, acct_enabled: !!g.acct_enabled, agent: agentView(g), retain_days: 90 };
   }
   function fakeTraffic(acc) { var o = acc.provider === "oci" ? 1834.2 : acc.provider === "aws" ? 83.6 : 12.4; var d = new Date(); return { out_gb: o, in_gb: +(o * 0.31).toFixed(1), period: d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-01 ~ 今天" }; }
   // ---------- v1.5 数据与路由：已删账号 / 默认创建参数 / 账号编辑 / 代理账密 / OCI 安全组 / 删 IPv6 / CloudFront ----------
@@ -323,7 +359,7 @@
       if ("client_id" in body) { var cid = String(body.client_id || "").trim(); if (cid && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cid)) return { __status: 400, detail: "client_id 应为 Azure 应用的「应用程序(客户端) ID」，形如 00000000-0000-0000-0000-000000000000" };
         if (cid !== od.client_id) { od.client_id = cid; ch.push("client_id"); if (od.bound) { od.bound = false; ch.push("unbound"); } } }
       if ("tenant" in body) { if (["consumers", "common"].indexOf(body.tenant) < 0) return { __status: 400, detail: "登录端点只能是 consumers 或 common" }; od.tenant = body.tenant; }
-      if (body.password) { if (String(body.password).length < 10) return { __status: 400, detail: "备份密码至少 10 位" }; if ("password2" in body && body.password2 !== body.password) return { __status: 400, detail: "两次输入的备份密码不一致" }; od.pw = true; ch.push("password"); }
+      if (body.password) { if (!String(body.password).trim()) return { __status: 400, detail: "备份密码不能为空" }; if ("password2" in body && body.password2 !== body.password) return { __status: 400, detail: "两次输入的备份密码不一致" }; od.pw = true; ch.push("password"); }
       if ("freq" in body) { if (["daily", "weekly"].indexOf(body.freq) < 0) return { __status: 400, detail: "频率只能是每天或每周" }; od.cfg.freq = body.freq; }
       if ("time" in body) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(body.time)) return { __status: 400, detail: "时间格式应为 HH:MM（24 小时制）" }; od.cfg.time = body.time; }
       if ("weekday" in body) od.cfg.weekday = +body.weekday;
@@ -846,20 +882,36 @@
     if (p === "/traffic-guards" && method === "POST") {
       var ta2 = accounts.find(function (a) { return a.id == body.account_id; }); var lim = +body.limit_gb || ({ oci: 10240, aws: 100, azure: 100 })[ta2.provider];
       var used = fakeTraffic(ta2).out_gb + (body.count_in ? fakeTraffic(ta2).in_gb : 0);
+      var tguards0 = tguards.slice();
       tguards = tguards.filter(function (g) { return !(g.account_id == body.account_id && g.instance_id === body.instance_id); });
       var dir = body.direction || (body.count_in ? "both" : "out"), ft = fakeTraffic(ta2), rolling = body.mode === "rolling", wh = +body.window_hours || 24;
       if (rolling && (wh < 1 || wh > 720)) return { __status: 400, detail: "滚动窗口 1~720 小时" };
       var base = rolling ? wh / (24 * 30) : 1; used = (dir === "out" ? ft.out_gb : dir === "in" ? ft.in_gb : ft.out_gb + ft.in_gb) * base;
       var ng = { id: Date.now(), account_id: ta2.id, account_name: ta2.name, provider: ta2.provider, instance_id: body.instance_id, name: body.name, limit_gb: lim, warn_pct: +body.warn_pct || 80, action: body.action, count_in: dir === "both" ? 1 : 0, last_gb: +used.toFixed(1), last_pct: +(used / lim * 100).toFixed(1), checked_at: Math.floor(Date.now() / 1000),
-        mode: rolling ? "rolling" : "monthly", window_hours: wh, direction: dir, shutdown_hours: body.action === "stop" ? +body.shutdown_hours || 0 : 0, enabled: body.enabled === false ? 0 : 1, state: "ok" };
-      tguards.push(ng); audit1("POST /traffic-guards", body.name); return { ok: true, last_gb: ng.last_gb, last_pct: ng.last_pct };
+        mode: rolling ? "rolling" : "monthly", window_hours: wh, direction: dir, shutdown_hours: body.action === "stop" ? +body.shutdown_hours || 0 : 0, enabled: body.enabled === false ? 0 : 1, state: "ok",
+        throttle_mbps: +body.throttle_mbps || 1, throttled: 0, acct_enabled: body.acct_enabled ? 1 : 0 };
+      if (["notify", "stop", "throttle"].indexOf(ng.action) < 0) ng.action = "notify";
+      if (ng.action === "throttle" && (ng.throttle_mbps < 0.1 || ng.throttle_mbps > 10000)) return { __status: 400, detail: "限速 0.1~10000 Mbps" };
+      var old = (tguards0 || []).find(function (g) { return g.account_id == ng.account_id && g.instance_id === ng.instance_id; });
+      if (old) { ng.id = old.id; ng.agent_seen = old.agent_seen; ng.agent_info = old.agent_info; ng.agent_token = old.agent_token; }
+      tguards.push(ng); audit1("POST /traffic-guards", body.name); return { ok: true, id: ng.id, last_gb: ng.last_gb, last_pct: ng.last_pct };
+    }
+    // build 22：流量守护 agent 与端口流量明细
+    if ((m = p.match(/^\/traffic-guards\/(\d+)\/agent$/)) && method === "GET") { var ga = tguards.find(function (g) { return g.id == m[1]; }); return ga ? agentPayload(ga) : { __status: 404, detail: "规则不存在" }; }
+    if ((m = p.match(/^\/traffic-guards\/(\d+)\/agent\/reset$/)) && method === "POST") { var gr = tguards.find(function (g) { return g.id == m[1]; }); gr.agent_token = null; gr.agent_seen = null; gr.agent_info = null; audit1("POST /traffic-guards/agent/reset", "守护 #" + gr.id); return agentPayload(gr); }
+    if ((m = p.match(/^\/traffic-guards\/(\d+)\/ports$/)) && method === "GET") {
+      var gp = tguards.find(function (g) { return g.id == m[1]; }); if (!gp) return { __status: 404, detail: "规则不存在" };
+      var rg = q.get("range") || "today"; if (rg !== "today" && rg !== "month") return { __status: 400, detail: "range 只能是 today / month" };
+      return portsView(gp, rg, +q.get("limit") || 20);
     }
     if ((m = p.match(/^\/traffic-guards\/(\d+)\/check$/))) { var tg = tguards.find(function (g) { return g.id == m[1]; }); tg.checked_at = Math.floor(Date.now() / 1000); return guardView(tg); }
     if ((m = p.match(/^\/traffic-guards\/(\d+)$/)) && method === "PATCH") {
       var pg = tguards.find(function (g) { return g.id == m[1]; });
       if ("enabled" in body) pg.enabled = body.enabled ? 1 : 0;
       if (body.cancel_resume) { pg.resume_at = null; pg.state_msg = "已取消自动开机"; }
-      if (body.reset_state) { pg.state = "ok"; pg.resume_at = null; pg.state_msg = null; }
+      if (body.reset_state) { pg.state = "ok"; pg.resume_at = null; pg.state_msg = null; pg.throttled = 0; }
+      if ("acct_enabled" in body) { pg.acct_enabled = body.acct_enabled ? 1 : 0; demoToken(pg); }
+      if (body.release_throttle && pg.throttled) { pg.throttled = 0; pg.state_msg = "已手动解除限速"; }
       audit1("PATCH /traffic-guards", JSON.stringify(body)); return guardView(pg);
     }
     if ((m = p.match(/^\/traffic-guards\/(\d+)$/)) && method === "DELETE") { tguards = tguards.filter(function (g) { return g.id != m[1]; }); return { ok: true }; }

@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from . import core, security, tasks, telegram
-from .routers import (accounts, auth, aws, aws_credit, azure, billing, cloudflare, guard_health, instances, oci, onedrive, pages,
+from .routers import (accounts, auth, aws, aws_credit, azure, billing, cloudflare, guard_agent, guard_health, instances, oci, onedrive, pages,
                       settings, tasks_monitors)
 from .routers import security as security_routes
 from .routers.common import VERSION, _token, client_ip
@@ -30,8 +30,11 @@ async def lifespan(app):
 
 
 app = FastAPI(title="TriCloud", version=VERSION, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-PUBLIC = {"/api/login", "/api/health"}
-AUDIT_SKIP = {"/api/logout", "/api/onedrive/bind/poll"}   # 设备码轮询每几秒一次，绑定成功由路由自己写 onedrive-bind
+PUBLIC = {"/api/login", "/api/health",
+          "/api/guard-agent/state", "/api/guard-agent/install.sh", "/api/guard-agent/uninstall.sh"}   # agent 凭守护专属 token / 通用卸载脚本
+AUDIT_SKIP = {"/api/logout", "/api/onedrive/bind/poll",   # 设备码轮询每几秒一次，绑定成功由路由自己写 onedrive-bind
+              "/api/guard-agent/state"}                  # build 22：agent 每 5 分钟 POST 心跳 + 流量明细，不进审计
+AGENT_RESET_RE = re.compile(r"^/api/traffic-guards/\d+/agent/reset$")
 AUDIT_SKIP_OK = {("DELETE", "/api/audit")}   # 清空审计成功时路由自己写了 audit-clear，中间件不再追加一条
 
 
@@ -49,8 +52,10 @@ async def auth_mw(req: Request, call_next):
             # API Token 不能管理安全设置
             if path.startswith(("/api/2fa", "/api/tokens", "/api/password", "/api/backup", "/api/restore", "/api/secrets")) \
                     or (path == "/api/audit" and req.method == "DELETE") \
-                    or (path.startswith("/api/onedrive") and req.method != "GET" and path != "/api/onedrive/backup"):
-                # Token 不能抹掉审计痕迹；OneDrive 只能看状态 / 列表和「立即备份」，不能绑定（防止绑到别人的网盘）、改密码、恢复、解绑
+                    or (path.startswith("/api/onedrive") and req.method != "GET" and path != "/api/onedrive/backup") \
+                    or (req.method != "GET" and AGENT_RESET_RE.match(path)):
+                # Token 不能抹掉审计痕迹；OneDrive 只能看状态 / 列表和「立即备份」，不能绑定（防止绑到别人的网盘）、改密码、恢复、解绑；
+                # build 22：Token 不能重置流量守护 agent token（GET /agent 也不返回带 token 的安装命令）
                 return JSONResponse({"detail": "API Token 无权访问此接口"}, status_code=403)
         else:
             return JSONResponse({"detail": "未登录"}, status_code=401)
@@ -91,8 +96,8 @@ async def err(req, exc):
 
 
 # 注册顺序 = 匹配顺序。各模块内部的路径互不冲突；静态页与 /static 挂载放最后。
-ROUTERS = (auth, accounts, instances, oci, aws, aws_credit, azure, billing, tasks_monitors, settings, security_routes, onedrive, cloudflare,
-           guard_health, pages)
+ROUTERS = (auth, accounts, instances, oci, aws, aws_credit, azure, billing, tasks_monitors, settings, security_routes, onedrive, guard_agent,
+           cloudflare, guard_health, pages)
 for _m in ROUTERS:
     app.include_router(_m.router)
 app.mount("/static", StaticWithModules(directory=WEB_DIR), name="static")

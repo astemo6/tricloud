@@ -32,5 +32,6 @@
         <activity android:name=".DnsActivity" />
         <activity android:name=".SecurityActivity" />
         <activity android:name=".OneDriveActivity" />
+        <activity android:name=".GuardAgentActivity" />
     </application>
 </manifest>

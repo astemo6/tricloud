@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.0（build 22）(2026-10-16)
+- 新功能：流量守护「推送并限速」（`action=throttle`，默认 1 Mbps，0.1–10000）：用户自己在实例上运行安装命令装 agent（纯 bash + tc HTB + systemd timer 每 5 分钟，无常驻进程），按守护专属 token 拉取状态；超限出站限速、SSH 端口不限；回落 / 跨月自动解除，可手动解除；agent 离线时 TG 提示「无法限速」，15 分钟无心跳提醒一次。token 失效（401/404）立即解除，24 小时连不上面板也解除。
+- 新功能：同一 agent 按端口 / 服务统计入站、出站流量（流量明细开关，任何动作都能开）：nftables 独立 table `inet tricloud_acct`（只有 counter），无 nft 时退回 iptables / ip6tables mangle 计数链；按 `ss -lntup` 监听端口自动增删计数规则并映射进程名（Docker 发布端口 → `docker:容器名`），非监听端口流量归「其他/出站连接」；每 5 分钟 POST 增量，失败下次补报；关闭 / 卸载时清理干净。面板按日聚合（`guard_port_traffic`，保留 90 天），Web / Android / iOS 显示今日 / 本月按端口和服务的 Top（入站、出站、合计 + 占比条），TG `/ports 实例名`。
+- 新接口（7 个，/api 路由 169 → 176）：`GET|POST /api/guard-agent/state`、`GET /api/guard-agent/install.sh`、`GET /api/guard-agent/uninstall.sh`（公开，凭守护 token）、`GET /api/traffic-guards/{gid}/agent`、`POST /api/traffic-guards/{gid}/agent/reset`、`GET /api/traffic-guards/{gid}/ports`。API Token：reset 403，GET agent 不返回安装命令。
+- OneDrive：未绑定时「绑定 OneDrive」改为醒目的蓝色主按钮（Web 在「保存」右边，Android / iOS 为单独的主按钮），保存 client_id 后提示「已保存，点『绑定 OneDrive』获取代码」；文档第 2 步写明保存后点蓝色按钮才会弹出代码。备份密码取消长度 / 复杂度要求，只要求不能为空、两次输入一致。
+- 版本：Android versionCode 22 / iOS build 22（versionName 仍 1.6.0）。
+
 ## 1.6.0（build 21）(2026-10-16)
 - 新功能：OneDrive 定期备份（Web + Android + iOS + Telegram `/backup`）。Microsoft Graph 设备码登录（`/consumers` 默认，可选 `/common`），scope 仅 `Files.ReadWrite.AppFolder offline_access`；client_id 由用户注册自己的公共客户端应用后填写（`docs/api-credentials.md` 第四节）。refresh token、备份密码以 Fernet 加密存 settings 表。
 - 备份：`tricloud.db`（SQLite backup API 快照）+ `fernet.key` + `meta.json` 打 zip，scrypt（N=2^15,r=8,p=1）+ AES-256-GCM 加密为 `tricloud-backup-YYYYMMDD-HHMMSS.tcod`，上传到 approot（≤4MB 直接 PUT，否则 upload session 3.125 MiB 分片）；每天 / 每周 + HH:MM（面板时区），保留最近 N 份（默认 30，只删自己生成的文件）；后台任务 `onedrive_backup`（面板级，account_id=0），失败 TG 通知 + 1 小时后重试（每期最多 3 次），成功写审计 `onedrive-backup`。

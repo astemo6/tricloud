@@ -140,17 +140,53 @@
 
 
   // ---------- v1.3 数据 ----------
-  var tguards = [{ id: 1, account_id: 1, account_name: "东京主力", provider: "oci", instance_id: "ocid1.instance.oc1.ap-tokyo-1.demo1", name: "arm-main", limit_gb: 10240, warn_pct: 80, action: "notify", count_in: 0, last_gb: 1834.2, last_pct: 17.9, checked_at: now - 900, mode: "monthly", direction: "out", window_hours: 24, enabled: 1, shutdown_hours: 0, state: "ok" },
+  var tguards = [{ id: 1, account_id: 1, account_name: "东京主力", provider: "oci", instance_id: "ocid1.instance.oc1.ap-tokyo-1.demo1", name: "arm-main", limit_gb: 10240, warn_pct: 80, action: "throttle", throttle_mbps: 1, throttled: 0, acct_enabled: 1, count_in: 0, last_gb: 1834.2, last_pct: 17.9, checked_at: now - 900, mode: "monthly", direction: "out", window_hours: 24, enabled: 1, shutdown_hours: 0, state: "ok",
+                   agent_seen: now - 140, agent_info: { iface: "enp0s6", ssh: "22", applied: "0", v: "2", acct: "nft", nports: "5" } },
                  { id: 2, account_id: 3, account_name: "AWS 学生号", provider: "aws", instance_id: "i-0demo1234abcd", name: "tokyo-t3", limit_gb: 100, warn_pct: 80, action: "stop", count_in: 0, last_gb: 83.6, last_pct: 83.6, checked_at: now - 1200, mode: "monthly", direction: "out", window_hours: 24, enabled: 1, shutdown_hours: 0, state: "ok" },
                  { id: 3, account_id: 2, account_name: "首尔备用", provider: "oci", instance_id: "ocid1.instance.oc1.ap-seoul-1.demo3", name: "seoul-arm", limit_gb: 20, warn_pct: 80, action: "stop", count_in: 1, last_gb: 21.7, last_pct: 108.5, checked_at: now - 2400, mode: "rolling", direction: "both", window_hours: 6, enabled: 1, shutdown_hours: 3, state: "tripped", resume_at: now + 3600 * 2 + 600, state_msg: "超限停机，预计自动开机" },
                  { id: 4, account_id: 4, account_name: "Azure 学生", provider: "azure", instance_id: "/subscriptions/demo/resourceGroups/rg-demo/providers/Microsoft.Compute/virtualMachines/az-b1s", name: "az-b1s", limit_gb: 15, warn_pct: 80, action: "notify", count_in: 0, last_gb: 2.1, last_pct: 14, checked_at: now - 600, mode: "rolling", direction: "in", window_hours: 24, enabled: 0, shutdown_hours: 0, state: "ok" }];
   var DIRT = { out: "出站", in: "入站", both: "双向" }, GSTT = { ok: "正常", warn: "已到预警", over: "已超限", tripped: "已触发关机", resume_failed: "自动开机失败", disabled: "已停用" };
   function fmtTs(ts) { var t = new Date(ts * 1000); return ("0" + (t.getMonth() + 1)).slice(-2) + "-" + ("0" + t.getDate()).slice(-2) + " " + ("0" + t.getHours()).slice(-2) + ":" + ("0" + t.getMinutes()).slice(-2); }
+  GSTT.throttled = "已限速";
+  // build 22：agent 状态（演示：arm-main 装了 agent 并开了流量明细）
+  var BE_TEXT = { nft: "nftables", iptables: "iptables", none: "无可用计数后端（需要 nft 或 iptables）", off: "未启用" };
+  function agentView(g) {
+    var i = g.agent_info || {}, seen = g.agent_seen || null, nowS = Math.floor(Date.now() / 1000);
+    return { installed: !!seen, online: !!seen && nowS - seen < 900, last_seen: seen, last_seen_text: seen ? fmtTs(seen) : null, iface: i.iface || null, ssh_ports: i.ssh || null,
+      applied: i.applied === "1", version: i.v || null, acct_enabled: !!g.acct_enabled, acct_backend: i.acct || null, acct_backend_text: i.acct ? BE_TEXT[i.acct] : null,
+      acct_ports: i.nports ? +i.nports : null, acct_active: i.acct === "nft" || i.acct === "iptables", acct_seen: g.acct_enabled && seen ? seen : null, acct_seen_text: g.acct_enabled && seen ? fmtTs(seen) : null };
+  }
   function guardView(g) {
     var a = accounts.find(function (x) { return x.id == g.account_id; });
-    var st = g.state === "tripped" ? "tripped" : g.state === "resume_failed" ? "resume_failed" : !g.enabled ? "disabled" : g.last_pct >= 100 ? "over" : g.last_pct >= g.warn_pct ? "warn" : "ok";
-    return Object.assign({}, g, { account_name: a ? a.name : g.account_name, provider: a ? a.provider : g.provider, status: st, status_text: GSTT[st],
-      scope: g.mode === "rolling" ? "最近 " + g.window_hours + " 小时" + DIRT[g.direction] : "本月" + DIRT[g.direction], resume_at_text: g.resume_at ? fmtTs(g.resume_at) : null });
+    var st = g.throttled ? "throttled" : g.state === "tripped" ? "tripped" : g.state === "resume_failed" ? "resume_failed" : !g.enabled ? "disabled" : g.last_pct >= 100 ? "over" : g.last_pct >= g.warn_pct ? "warn" : "ok";
+    var v = Object.assign({}, g, { account_name: a ? a.name : g.account_name, provider: a ? a.provider : g.provider, status: st, status_text: GSTT[st],
+      scope: g.mode === "rolling" ? "最近 " + g.window_hours + " 小时" + DIRT[g.direction] : "本月" + DIRT[g.direction], resume_at_text: g.resume_at ? fmtTs(g.resume_at) : null,
+      throttle_mbps: g.throttle_mbps || 1, throttled: g.throttled ? 1 : 0, acct_enabled: g.acct_enabled ? 1 : 0,
+      agent: g.action === "throttle" || g.agent_seen || g.acct_enabled ? agentView(g) : null });
+    delete v.agent_info; delete v.agent_token;
+    return v;
+  }
+  function demoToken(g) { if (!g.agent_token) g.agent_token = "tg_demo" + Math.random().toString(36).slice(2, 12) + "xxxxxxxxxxxxxxxxxxxxxxxxxxxx"; return g.agent_token; }
+  function agentPayload(g) {
+    var base = "https://panel.example.com", t = demoToken(g);
+    return { guard_id: g.id, commands: { install: "curl -fsSL '" + base + "/api/guard-agent/install.sh?token=" + t + "' | sudo bash", uninstall: "curl -fsSL '" + base + "/api/guard-agent/uninstall.sh' | sudo bash",
+      uninstall_local: "sudo tricloud-guard uninstall", status: "sudo tricloud-guard status" }, agent: agentView(g), throttled: !!g.throttled, throttle_mbps: g.throttle_mbps || 1, poll_secs: 300, offline_secs: 900 };
+  }
+  // 端口流量明细演示数据（字节）：今日 / 本月
+  var GB = 1024 * 1024 * 1024, MB = 1024 * 1024;
+  var portDemo = { today: [["tcp", 443, "xray", 3.1 * GB, 9.8 * GB], ["udp", 443, "xray", 0.4 * GB, 1.2 * GB], ["tcp", 54321, "x-ui", 3 * MB, 11 * MB], ["tcp", 22, "sshd", 6 * MB, 9 * MB], ["tcp", 8080, "docker:web", 120 * MB, 860 * MB], ["other", 0, "-", 2.2 * GB, 0.9 * GB]],
+    month: [["tcp", 443, "xray", 71 * GB, 240 * GB], ["udp", 443, "xray", 9 * GB, 27 * GB], ["tcp", 54321, "x-ui", 80 * MB, 260 * MB], ["tcp", 22, "sshd", 150 * MB, 210 * MB], ["tcp", 8080, "docker:web", 2.6 * GB, 19 * GB], ["other", 0, "-", 46 * GB, 21 * GB]] };
+  function fb(n) { var u = ["B", "KB", "MB", "GB", "TB"], i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return i ? n.toFixed(2) + " " + u[i] : Math.round(n) + " B"; }
+  function portsView(g, rng, limit) {
+    var d = new Date(), pad = function (x) { return ("0" + x).slice(-2); }, today = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+    var raw = g.acct_enabled && g.id === 1 ? portDemo[rng] : [];
+    var rows = raw.map(function (r) { return { proto: r[0], port: r[1], proc: r[2], in: Math.round(r[3]), out: Math.round(r[4]), total: Math.round(r[3] + r[4]), label: r[0] === "other" ? "其他/出站连接" : r[1] + "/" + r[0] + (r[2] !== "-" ? " · " + r[2] : "") }; });
+    var tin = rows.reduce(function (a, r) { return a + r.in; }, 0), tout = rows.reduce(function (a, r) { return a + r.out; }, 0), tot = tin + tout, svc = {};
+    rows.forEach(function (r) { var n = r.proto === "other" ? "其他/出站连接" : r.proc; var x = svc[n] || (svc[n] = { service: n, in: 0, out: 0, ports: [] }); x.in += r.in; x.out += r.out; if (r.proto !== "other") x.ports.push(r.port + "/" + r.proto); });
+    var services = Object.keys(svc).map(function (k) { var x = svc[k]; x.total = x.in + x.out; return x; });
+    function fin(l) { l.sort(function (a, b) { return b.total - a.total; }); l.forEach(function (r) { r.pct = tot ? Math.round(r.total * 1000 / tot) / 10 : 0; r.in_text = fb(r.in); r.out_text = fb(r.out); r.total_text = fb(r.total); }); return l.slice(0, limit || 20); }
+    return { range: rng, title: rng === "today" ? "今日" : "本月", start: rng === "today" ? today : today.slice(0, 8) + "01", end: today, ports: fin(rows), services: fin(services), total_in: tin, total_out: tout, total: tot,
+      total_text: fb(tot), in_text: fb(tin), out_text: fb(tout), updated_at: rows.length ? Math.floor(Date.now() / 1000) - 140 : null, count: rows.length, guard_id: g.id, acct_enabled: !!g.acct_enabled, agent: agentView(g), retain_days: 90 };
   }
   function fakeTraffic(acc) { var o = acc.provider === "oci" ? 1834.2 : acc.provider === "aws" ? 83.6 : 12.4; var d = new Date(); return { out_gb: o, in_gb: +(o * 0.31).toFixed(1), period: d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-01 ~ 今天" }; }
   // ---------- v1.5 数据与路由：已删账号 / 默认创建参数 / 账号编辑 / 代理账密 / OCI 安全组 / 删 IPv6 / CloudFront ----------
@@ -329,7 +365,7 @@
       if ("client_id" in body) { var cid = String(body.client_id || "").trim(); if (cid && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cid)) return { __status: 400, detail: "client_id 应为 Azure 应用的「应用程序(客户端) ID」，形如 00000000-0000-0000-0000-000000000000" };
         if (cid !== od.client_id) { od.client_id = cid; ch.push("client_id"); if (od.bound) { od.bound = false; ch.push("unbound"); } } }
       if ("tenant" in body) { if (["consumers", "common"].indexOf(body.tenant) < 0) return { __status: 400, detail: "登录端点只能是 consumers 或 common" }; od.tenant = body.tenant; }
-      if (body.password) { if (String(body.password).length < 10) return { __status: 400, detail: "备份密码至少 10 位" }; if ("password2" in body && body.password2 !== body.password) return { __status: 400, detail: "两次输入的备份密码不一致" }; od.pw = true; ch.push("password"); }
+      if (body.password) { if (!String(body.password).trim()) return { __status: 400, detail: "备份密码不能为空" }; if ("password2" in body && body.password2 !== body.password) return { __status: 400, detail: "两次输入的备份密码不一致" }; od.pw = true; ch.push("password"); }
       if ("freq" in body) { if (["daily", "weekly"].indexOf(body.freq) < 0) return { __status: 400, detail: "频率只能是每天或每周" }; od.cfg.freq = body.freq; }
       if ("time" in body) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(body.time)) return { __status: 400, detail: "时间格式应为 HH:MM（24 小时制）" }; od.cfg.time = body.time; }
       if ("weekday" in body) od.cfg.weekday = +body.weekday;
@@ -852,20 +888,36 @@
     if (p === "/traffic-guards" && method === "POST") {
       var ta2 = accounts.find(function (a) { return a.id == body.account_id; }); var lim = +body.limit_gb || ({ oci: 10240, aws: 100, azure: 100 })[ta2.provider];
       var used = fakeTraffic(ta2).out_gb + (body.count_in ? fakeTraffic(ta2).in_gb : 0);
+      var tguards0 = tguards.slice();
       tguards = tguards.filter(function (g) { return !(g.account_id == body.account_id && g.instance_id === body.instance_id); });
       var dir = body.direction || (body.count_in ? "both" : "out"), ft = fakeTraffic(ta2), rolling = body.mode === "rolling", wh = +body.window_hours || 24;
       if (rolling && (wh < 1 || wh > 720)) return { __status: 400, detail: "滚动窗口 1~720 小时" };
       var base = rolling ? wh / (24 * 30) : 1; used = (dir === "out" ? ft.out_gb : dir === "in" ? ft.in_gb : ft.out_gb + ft.in_gb) * base;
       var ng = { id: Date.now(), account_id: ta2.id, account_name: ta2.name, provider: ta2.provider, instance_id: body.instance_id, name: body.name, limit_gb: lim, warn_pct: +body.warn_pct || 80, action: body.action, count_in: dir === "both" ? 1 : 0, last_gb: +used.toFixed(1), last_pct: +(used / lim * 100).toFixed(1), checked_at: Math.floor(Date.now() / 1000),
-        mode: rolling ? "rolling" : "monthly", window_hours: wh, direction: dir, shutdown_hours: body.action === "stop" ? +body.shutdown_hours || 0 : 0, enabled: body.enabled === false ? 0 : 1, state: "ok" };
-      tguards.push(ng); audit1("POST /traffic-guards", body.name); return { ok: true, last_gb: ng.last_gb, last_pct: ng.last_pct };
+        mode: rolling ? "rolling" : "monthly", window_hours: wh, direction: dir, shutdown_hours: body.action === "stop" ? +body.shutdown_hours || 0 : 0, enabled: body.enabled === false ? 0 : 1, state: "ok",
+        throttle_mbps: +body.throttle_mbps || 1, throttled: 0, acct_enabled: body.acct_enabled ? 1 : 0 };
+      if (["notify", "stop", "throttle"].indexOf(ng.action) < 0) ng.action = "notify";
+      if (ng.action === "throttle" && (ng.throttle_mbps < 0.1 || ng.throttle_mbps > 10000)) return { __status: 400, detail: "限速 0.1~10000 Mbps" };
+      var old = (tguards0 || []).find(function (g) { return g.account_id == ng.account_id && g.instance_id === ng.instance_id; });
+      if (old) { ng.id = old.id; ng.agent_seen = old.agent_seen; ng.agent_info = old.agent_info; ng.agent_token = old.agent_token; }
+      tguards.push(ng); audit1("POST /traffic-guards", body.name); return { ok: true, id: ng.id, last_gb: ng.last_gb, last_pct: ng.last_pct };
+    }
+    // build 22：流量守护 agent 与端口流量明细
+    if ((m = p.match(/^\/traffic-guards\/(\d+)\/agent$/)) && method === "GET") { var ga = tguards.find(function (g) { return g.id == m[1]; }); return ga ? agentPayload(ga) : { __status: 404, detail: "规则不存在" }; }
+    if ((m = p.match(/^\/traffic-guards\/(\d+)\/agent\/reset$/)) && method === "POST") { var gr = tguards.find(function (g) { return g.id == m[1]; }); gr.agent_token = null; gr.agent_seen = null; gr.agent_info = null; audit1("POST /traffic-guards/agent/reset", "守护 #" + gr.id); return agentPayload(gr); }
+    if ((m = p.match(/^\/traffic-guards\/(\d+)\/ports$/)) && method === "GET") {
+      var gp = tguards.find(function (g) { return g.id == m[1]; }); if (!gp) return { __status: 404, detail: "规则不存在" };
+      var rg = q.get("range") || "today"; if (rg !== "today" && rg !== "month") return { __status: 400, detail: "range 只能是 today / month" };
+      return portsView(gp, rg, +q.get("limit") || 20);
     }
     if ((m = p.match(/^\/traffic-guards\/(\d+)\/check$/))) { var tg = tguards.find(function (g) { return g.id == m[1]; }); tg.checked_at = Math.floor(Date.now() / 1000); return guardView(tg); }
     if ((m = p.match(/^\/traffic-guards\/(\d+)$/)) && method === "PATCH") {
       var pg = tguards.find(function (g) { return g.id == m[1]; });
       if ("enabled" in body) pg.enabled = body.enabled ? 1 : 0;
       if (body.cancel_resume) { pg.resume_at = null; pg.state_msg = "已取消自动开机"; }
-      if (body.reset_state) { pg.state = "ok"; pg.resume_at = null; pg.state_msg = null; }
+      if (body.reset_state) { pg.state = "ok"; pg.resume_at = null; pg.state_msg = null; pg.throttled = 0; }
+      if ("acct_enabled" in body) { pg.acct_enabled = body.acct_enabled ? 1 : 0; demoToken(pg); }
+      if (body.release_throttle && pg.throttled) { pg.throttled = 0; pg.state_msg = "已手动解除限速"; }
       audit1("PATCH /traffic-guards", JSON.stringify(body)); return guardView(pg);
     }
     if ((m = p.match(/^\/traffic-guards\/(\d+)$/)) && method === "DELETE") { tguards = tguards.filter(function (g) { return g.id != m[1]; }); return { ok: true }; }
@@ -2119,6 +2171,91 @@ async function loadExpiryAlerts(box) {
   } catch (_) { box.innerHTML = ""; }
 }
 
+// TriCloud 前端 v1.6.0 build 22 · 流量守护 agent：「推送并限速」安装 / 卸载命令、在线状态与最后心跳、重置 token、流量明细开关，
+// 以及按端口 / 服务的流量明细（今日 / 本月 Top，入站 / 出站 / 合计 + 占比条）。面板不会远程执行任何命令，agent 由用户自己在机器上安装。
+
+async function copyText(text, input) {
+  try { await navigator.clipboard.writeText(text); toast("已复制"); }
+  catch (_) { if (input) { input.select(); document.execCommand("copy"); toast("已复制"); } else toast("请手动复制", true); }
+}
+
+const cmdRow = (label, id, v) => `<label>${esc(label)}</label><div class="bar"><input class="mono grow" id="${id}" readonly value="${esc(v)}" onclick="this.select()">
+  <button class="btn sm" data-copy="${id}">复制</button></div>`;
+
+// agent 状态一行（守护列表 / 弹窗共用）
+function agentLine(a, g) {
+  if (!a) return "";
+  const st = !a.installed ? `<span class="badge">agent 未安装</span>` : a.online ? `<span class="badge done">agent 在线</span>` : `<span class="badge failed">agent 离线</span>`;
+  const seen = a.last_seen_text ? `最后心跳 ${esc(a.last_seen_text)}` : "";
+  const thr = g && g.action === "throttle" ? (a.applied ? " · 🐢 当前已限速" : g.throttled ? " · 应限速（等 agent 生效）" : " · 当前未限速") : "";
+  return `${st} <span class="muted">${seen}${thr}</span>`;
+}
+
+async function guardAgentDialog(g, onChange) {
+  let d;
+  try { d = await api(`/traffic-guards/${g.id}/agent?base=${encodeURIComponent(location.origin)}`); } catch (e) { toast(e.message, true); return; }
+  const a = d.agent || {};
+  const be = a.acct_backend ? `${esc(a.acct_backend_text || a.acct_backend)}${a.acct_ports != null ? `，${a.acct_ports} 个端口` : ""}` : "等待 agent 上报";
+  const body = `<p>${agentLine(a, g)}</p>
+    <ul class="guard">
+      <li>动作：${g.action === "throttle" ? `超限后出站限速到 <b>${esc(d.throttle_mbps)} Mbps</b>（SSH 端口不限），回落 / 下月自动解除` : g.action === "stop" ? "超限自动停机（agent 只做流量明细）" : "只推送（agent 只做流量明细）"}</li>
+      <li>当前：${d.throttled ? "<b>已触发限速</b>" : "未触发限速"}${a.applied ? "（agent 已生效）" : ""}${a.iface ? ` · 网卡 ${esc(a.iface)}` : ""}${a.ssh_ports ? ` · SSH 端口 ${esc(a.ssh_ports)}` : ""}</li>
+      <li>流量明细：${a.acct_enabled ? `已开启（${be}）` : "未开启"}</li>
+    </ul>
+    <label class="row-check"><input type="checkbox" id="gaAcct" style="width:auto" ${a.acct_enabled ? "checked" : ""}> 流量明细：按端口 / 服务统计入站、出站（nftables 独立 table，只计数不拦截；没有 nft 时用 iptables 计数链）</label>
+    ${d.commands ? `<p class="muted">在<b>这台实例</b>上用 root 运行安装命令（面板不会远程执行任何命令）。agent 是 bash 脚本 + systemd timer，每 ${Math.round(d.poll_secs / 60)} 分钟用这条守护的专属 token 拉取状态并上报流量明细；超过 ${Math.round(d.offline_secs / 60)} 分钟没心跳算离线。</p>
+    ${cmdRow("安装命令", "gaIns", d.commands.install)}${cmdRow("卸载命令（面板）", "gaUn", d.commands.uninstall)}${cmdRow("卸载命令（本机）", "gaUnL", d.commands.uninstall_local)}${cmdRow("查看状态", "gaSt", d.commands.status)}
+    <p class="muted">安装命令里含这条守护的 token，只能读写这条守护的状态和流量明细；泄露了点「重置 token」，旧 agent 会自动解除限速、删除计数规则。</p>`
+      : `<p class="muted">API Token 只能查看状态，不显示安装命令。</p>`}
+    <div class="bar" style="margin-top:8px">${d.commands ? `<button class="btn danger" id="gaReset">重置 token</button>` : ""}<button class="btn" id="gaPorts">端口流量明细</button></div>`;
+  let changed = false;
+  await modal(`流量守护 agent · ${g.name || g.instance_id.slice(-12)}`, body, null, "关闭", false, (bg) => {
+    bg.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => { const i = bg.querySelector("#" + b.dataset.copy); copyText(i.value, i); }));
+    $("#gaAcct", bg).onchange = (e) => act(null, () => api(`/traffic-guards/${g.id}`, { method: "PATCH", body: { acct_enabled: e.target.checked } }),
+      e.target.checked ? "已开启流量明细，agent 下次心跳（≤5 分钟）建立计数规则" : "已关闭流量明细，agent 下次心跳删除计数规则").then(() => { changed = true; });
+    if ($("#gaReset", bg)) $("#gaReset", bg).onclick = async () => {
+      if (!(await confirmBox("重置 agent token", "重置后旧的安装命令立即失效，实例上的旧 agent 会解除限速并删除计数规则，需要在实例上重新运行新的安装命令。确定重置？", true))) return;
+      const r = await act($("#gaReset", bg), () => api(`/traffic-guards/${g.id}/agent/reset?base=${encodeURIComponent(location.origin)}`, { method: "POST", body: {} }), "已重置，请重新安装");
+      if (r) { $("#gaIns", bg).value = r.commands.install; changed = true; }
+    };
+    $("#gaPorts", bg).onclick = () => { bg.remove(); guardPortsDialog(g); };
+  });
+  if (changed && onChange) onChange();
+}
+
+function portsTable(t, kind) {
+  const rows = kind === "services" ? t.services : t.ports;
+  if (!rows.length) return `<div class="empty">${esc(t.title)}还没有数据</div>`;
+  return `<table class="ptable"><tr><th>${kind === "services" ? "服务" : "端口 · 进程"}</th><th>入站</th><th>出站</th><th>合计</th><th style="min-width:120px">占比</th></tr>
+    ${rows.map((r) => `<tr><td>${esc(kind === "services" ? r.service : r.label)}${kind === "services" && r.ports.length ? `<div class="muted">${esc(r.ports.join(", "))}</div>` : ""}</td>
+      <td>${esc(r.in_text)}</td><td>${esc(r.out_text)}</td><td><b>${esc(r.total_text)}</b></td>
+      <td><div class="meter pbar" title="${r.pct}%"><i style="width:${Math.min(100, r.pct)}%"></i></div><span class="muted">${r.pct}%</span></td></tr>`).join("")}</table>`;
+}
+
+async function guardPortsDialog(g) {
+  let rng = "today", kind = "ports";
+  const load = async (bg) => {
+    const box = $("#gpBody", bg);
+    box.innerHTML = `<span class="spin"></span> 读取中…`;
+    let t;
+    try { t = await api(`/traffic-guards/${g.id}/ports?range=${rng}&limit=20`); } catch (e) { box.innerHTML = `<span class="err-text">${esc(e.message)}</span>`; return; }
+    const a = t.agent || {};
+    box.innerHTML = `<p>${esc(t.title)}（${esc(t.start === t.end ? t.start : t.start + " ~ " + t.end)}）合计 <b>${esc(t.total_text)}</b>：入站 ${esc(t.in_text)} / 出站 ${esc(t.out_text)}
+      ${t.updated_at ? `<span class="muted">· 更新于 ${esc(new Date(t.updated_at * 1000).toLocaleString())}</span>` : ""}</p>
+      ${!t.acct_enabled ? `<p class="muted">流量明细未开启：在「agent」里打开流量明细并在实例上安装 agent。</p>` : !a.installed ? `<p class="muted">agent 尚未安装 / 尚未上报。</p>` : ""}
+      ${portsTable(t, kind)}
+      <p class="muted">非监听端口的流量（比如本机主动访问外网、代理的出站连接）归为「其他/出站连接」。数据由实例上的 agent 每 5 分钟上报，按天保存 ${t.retain_days} 天。</p>`;
+  };
+  await modal(`端口流量明细 · ${g.name || g.instance_id.slice(-12)}`, `<div class="bar"><div class="seg" id="gpRng"><button data-r="today" class="on">今日</button><button data-r="month">本月</button></div>
+      <div class="seg" id="gpKind"><button data-k="ports" class="on">按端口</button><button data-k="services">按服务</button></div></div><div id="gpBody" style="margin-top:12px"></div>`,
+  null, "关闭", false, (bg) => {
+    bg.querySelector(".modal").classList.add("wide");
+    bg.querySelectorAll("#gpRng button").forEach((b) => (b.onclick = () => { rng = b.dataset.r; bg.querySelectorAll("#gpRng button").forEach((x) => x.classList.toggle("on", x === b)); load(bg); }));
+    bg.querySelectorAll("#gpKind button").forEach((b) => (b.onclick = () => { kind = b.dataset.k; bg.querySelectorAll("#gpKind button").forEach((x) => x.classList.toggle("on", x === b)); load(bg); }));
+    load(bg);
+  });
+}
+
 // TriCloud 前端 v1.6.0 · 监控、流量守护、账号健康度
 
 // ---------------- 监控 ----------------
@@ -2158,27 +2295,33 @@ async function pageHealth() {
     act(b, () => post("/account-health/refresh", { account_id: +b.dataset.chk }), "检测完成").then(pageHealth)));
 }
 
-const GST = { ok: "running", warn: "pending", over: "failed", tripped: "stopped", resume_failed: "failed", disabled: "" };
+const GST = { ok: "running", warn: "pending", over: "failed", tripped: "stopped", resume_failed: "failed", disabled: "", throttled: "pending" };
 async function pageTraffic() {
   loading();
   const list = await api("/traffic-guards");
   const fmt = (t) => (t ? new Date(t * 1000).toLocaleString() : "-");
-  const actText = (g) => g.action !== "stop" ? "只推送" : g.shutdown_hours > 0 ? `停机 ${g.shutdown_hours} 小时后自动开机` : "自动停机";
-  view.innerHTML = `<div class="card"><p class="muted">在实例卡片上点「流量守护」添加规则（OCI 在账号的「流量」标签里设置）：本月累计或滚动窗口（最近 N 小时，出站 / 入站 / 双向）。超限可自动停机，并可在 M 小时后自动开机（失败只告警、不重试）。也可以给 Telegram Bot 发 /traffic 查看。</p>
+  const actText = (g) => g.action === "throttle" ? `限速 ${g.throttle_mbps} Mbps` : g.action !== "stop" ? "只推送" : g.shutdown_hours > 0 ? `停机 ${g.shutdown_hours} 小时后自动开机` : "自动停机";
+  view.innerHTML = `<div class="card"><p class="muted">在实例卡片上点「流量守护」添加规则（OCI 在账号的「流量」标签里设置）：本月累计或滚动窗口（最近 N 小时，出站 / 入站 / 双向）。超限可自动停机，并可在 M 小时后自动开机（失败只告警、不重试）；或「推送并限速」（实例上装 agent，默认 1 Mbps，SSH 不限）。同一个 agent 还能按端口 / 服务统计流量明细。Telegram：/traffic、/ports 实例名。</p>
     ${list.length ? `<table><tr><th>实例</th><th>账号</th><th>统计</th><th>用量</th><th>上限</th><th>到上限</th><th>状态</th><th>启用</th><th>检查于</th><th></th></tr>
     ${list.map((g) => `<tr data-g="${g.id}"><td>${esc(g.name || g.instance_id.slice(-12))}</td><td><span class="dot ${g.provider}"></span>${esc(g.account_name || "-")}</td>
       <td>${esc(g.scope || "本月出站")}</td>
       <td><div class="meter"><i style="width:${Math.min(100, g.last_pct || 0)}%" class="${(g.last_pct || 0) >= 100 ? "bad" : (g.last_pct || 0) >= g.warn_pct ? "warn" : ""}"></i></div>
-        ${g.last_gb ?? "-"} GB · ${g.last_pct ?? "-"}%</td><td>${g.limit_gb} GB</td><td>${actText(g)}</td>
+        ${g.last_gb ?? "-"} GB · ${g.last_pct ?? "-"}%</td><td>${g.limit_gb} GB</td><td>${actText(g)}${g.agent ? `<div>${agentLine(g.agent, g)}</div>` : ""}</td>
       <td><span class="badge ${GST[g.status] || ""}">${esc(g.status_text || "正常")}</span>${g.resume_at_text ? `<div class="muted">预计 ${esc(g.resume_at_text)} 开机</div>` : g.state_msg && g.status !== "ok" ? `<div class="muted">${esc(g.state_msg)}</div>` : ""}</td>
       <td><label class="switch"><input type="checkbox" data-en="${g.id}" ${g.enabled ? "checked" : ""}><span></span></label></td>
       <td>${fmt(g.checked_at)}</td><td><button class="btn sm" data-chk="${g.id}">立即检查</button> <button class="btn sm" data-ed="${g.id}">编辑</button>
+      <button class="btn sm" data-ag="${g.id}">agent</button> <button class="btn sm" data-pt="${g.id}">端口明细</button>${g.throttled ? ` <button class="btn sm" data-rt="${g.id}">解除限速</button>` : ""}
       ${g.resume_at ? `<button class="btn sm" data-cr="${g.id}">取消自动开机</button>` : ""}${["tripped", "resume_failed"].includes(g.status) ? ` <button class="btn sm" data-rs="${g.id}">清除状态</button>` : ""}
       <button class="btn sm danger" data-del="${g.id}">删除</button></td></tr>`).join("")}</table>`
     : `<div class="empty">还没有流量守护规则</div>`}</div>`;
   view.querySelectorAll("[data-chk]").forEach((b) => (b.onclick = () => act(b, () => post(`/traffic-guards/${b.dataset.chk}/check`), "已检查").then(pageTraffic)));
   view.querySelectorAll("[data-en]").forEach((b) => (b.onchange = () => act(null, () => api(`/traffic-guards/${b.dataset.en}`, { method: "PATCH", body: { enabled: b.checked } }), b.checked ? "已启用" : "已停用").then(pageTraffic)));
   view.querySelectorAll("[data-cr]").forEach((b) => (b.onclick = () => act(b, () => api(`/traffic-guards/${b.dataset.cr}`, { method: "PATCH", body: { cancel_resume: true } }), "已取消自动开机").then(pageTraffic)));
+  view.querySelectorAll("[data-ag]").forEach((b) => (b.onclick = () => guardAgentDialog(list.find((x) => x.id == b.dataset.ag), pageTraffic)));
+  view.querySelectorAll("[data-pt]").forEach((b) => (b.onclick = () => guardPortsDialog(list.find((x) => x.id == b.dataset.pt))));
+  view.querySelectorAll("[data-rt]").forEach((b) => (b.onclick = async () => {
+    if (await confirmBox("解除限速", "手动解除这条守护的限速？本期内不会再自动限速（回落 / 下个月后恢复正常判断）。")) act(b, () => api(`/traffic-guards/${b.dataset.rt}`, { method: "PATCH", body: { release_throttle: true } }), "已解除，agent 下次心跳生效").then(pageTraffic);
+  }));
   view.querySelectorAll("[data-rs]").forEach((b) => (b.onclick = () => act(b, () => api(`/traffic-guards/${b.dataset.rs}`, { method: "PATCH", body: { reset_state: true } }), "已清除").then(pageTraffic)));
   view.querySelectorAll("[data-ed]").forEach((b) => (b.onclick = () => {
     const g = list.find((x) => x.id == b.dataset.ed); const acc = ACCOUNTS.find((a) => a.id === g.account_id);
@@ -2189,7 +2332,7 @@ async function pageTraffic() {
   }));
 }
 
-// TriCloud 前端 v1.6.0 build 21 · OneDrive 定期备份（设备码绑定、计划与保留、备份密码、立即备份、备份列表与恢复、解绑）
+// TriCloud 前端 v1.6.0 build 22 · OneDrive 定期备份（设备码绑定、计划与保留、备份密码、立即备份、备份列表与恢复、解绑）
 
 const OD_WD = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 const OD_LOGIN_URL = "https://microsoft.com/devicelogin";
@@ -2213,7 +2356,7 @@ async function odSettingsBind() {
 
 function stopPoll() { if (odTimer) { clearTimeout(odTimer); odTimer = null; } }
 
-async function pageOneDrive() {
+async function pageOneDrive(hint) {
   stopPoll();
   loading();
   const s = await api("/onedrive");
@@ -2234,7 +2377,10 @@ async function pageOneDrive() {
     <p class="muted">在 Azure 门户注册一个你自己的应用（公共客户端、允许个人 Microsoft 帐户、启用「允许公共客户端流」），把「应用程序(客户端) ID」填到这里。教程见文档 docs/api-credentials.md 的「OneDrive 备份」一节。只申请 <code>Files.ReadWrite.AppFolder</code> + <code>offline_access</code>，看不到网盘里的其他文件。</p>
     <label>client_id（应用程序(客户端) ID）</label><input name="client_id" class="mono" value="${esc(s.client_id || "")}" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off">
     <label>登录端点</label><select name="tenant"><option value="consumers" ${s.tenant === "consumers" ? "selected" : ""}>consumers（个人 Microsoft 帐户，推荐）</option><option value="common" ${s.tenant === "common" ? "selected" : ""}>common（个人 + 工作/学校帐户）</option></select>
-    <div class="bar" style="margin-top:12px"><button class="btn" id="odSaveApp">保存</button><button class="btn primary" id="odBind" ${s.client_id ? "" : "disabled"}>${s.bound ? "重新绑定" : "绑定 OneDrive"}</button></div>
+    <div class="bar" style="margin-top:12px">${s.bound
+      ? `<button class="btn" id="odSaveApp">保存</button><button class="btn" id="odBind">重新绑定</button>`
+      : `<button class="btn sm" id="odSaveApp">保存</button><button class="btn primary" id="odBind" style="font-weight:600;padding:10px 22px" ${s.client_id ? "" : "disabled"}>🔗 绑定 OneDrive</button>`}</div>
+    ${!s.bound && s.client_id ? `<p class="muted" id="odBindHint">${hint ? "✅ 已保存。" : ""}点右边蓝色「绑定 OneDrive」获取代码，代码会显示在下方。</p>` : !s.bound ? `<p class="muted" id="odBindHint">填好 client_id 后点右边蓝色「绑定 OneDrive」，下方会弹出代码（会自动先保存 client_id）。</p>` : ""}
     <div id="odPendBox"></div></div>
   <div class="card" id="odPlan"><h3>2. 计划、保留与备份密码</h3>
     <label><input type="checkbox" name="enabled" style="width:auto" ${c.enabled ? "checked" : ""}> 启用定时备份</label>
@@ -2242,7 +2388,7 @@ async function pageOneDrive() {
       <div><label>时间（${esc(s.timezone)}）</label><input name="time" type="time" value="${esc(c.time)}"></div></div>
     <div data-show-when="freq=weekly"><label>星期</label><select name="weekday">${OD_WD.map((w, i) => `<option value="${i}" ${+c.weekday === i ? "selected" : ""}>${w}</option>`).join("")}</select></div>
     <label>保留最近几份（1–365，多余的自动删除）</label><input name="keep" type="number" min="1" max="365" value="${esc(c.keep)}">
-    <label>备份密码（≥10 位）${s.password_set ? ` <span class="badge done">已设置</span>` : ""}</label><input name="password" type="password" autocomplete="new-password" placeholder="${s.password_set ? "留空保持不变" : "恢复时需要，丢失无法恢复"}">
+    <label>备份密码（不能为空，长度不限）${s.password_set ? ` <span class="badge done">已设置</span>` : ""}</label><input name="password" type="password" autocomplete="new-password" placeholder="${s.password_set ? "留空保持不变" : "恢复时需要，丢失无法恢复"}">
     <label>再输一次</label><input name="password2" type="password" autocomplete="new-password">
     <p class="muted">备份文件用这个密码加密（scrypt + AES-256-GCM），OneDrive 上的文件没有密码打不开。为了无人值守定时运行，密码用面板的 Fernet 密钥加密后保存在本机数据库里。</p>
     <div class="bar" style="margin-top:8px"><button class="btn primary" id="odSavePlan">保存</button></div></div>
@@ -2253,9 +2399,13 @@ async function pageOneDrive() {
   <div class="card" id="odList"><div class="bar"><h3 class="grow" style="margin:0">OneDrive 上的备份</h3>${s.bound ? `<button class="btn sm" id="odRefresh">刷新</button>` : ""}</div>
     <div id="odItems" class="muted">${s.bound ? `<span class="spin"></span> 读取中…` : "绑定后显示"}</div></div>`;
   applyShowWhen($("#odPlan")); $("#odPlan").addEventListener("change", () => applyShowWhen($("#odPlan")));
-  $("#odSaveApp").onclick = (e) => act(e.target, () => post("/onedrive/config", form($("#odApp"))), (r) => (r.changed.includes("unbound") ? "已保存；换了应用，原绑定已解除" : "已保存")).then((r) => r && pageOneDrive());
+  $("#odSaveApp").onclick = (e) => act(e.target, () => post("/onedrive/config", form($("#odApp"))),
+    (r) => (r.changed.includes("unbound") ? "已保存；换了应用，原绑定已解除。点「绑定 OneDrive」获取代码" : !r.bound && r.client_id ? "已保存，点「绑定 OneDrive」获取代码" : "已保存"))
+    .then((r) => r && pageOneDrive(!r.bound && !!r.client_id));
   $("#odSavePlan").onclick = (e) => {
     const f = form($("#odPlan"));
+    if (!f.password && f.password2) return toast("备份密码不能为空", true);
+    if (f.password && f.password !== f.password2) return toast("两次输入的备份密码不一致", true);
     if (!f.password) { delete f.password; delete f.password2; }
     act(e.target, () => post("/onedrive/config", f), "已保存").then((r) => r && pageOneDrive());
   };
@@ -2963,9 +3113,11 @@ async function tabOciTraffic(acc, box) {
     ${d.items.map((r, i) => `<tr><td>${esc(r.name)}<div class="muted mono" style="font-size:11px">${esc(r.shape || "")}</div></td><td>${esc(r.state || "")}</td><td class="mono">${esc(r.public_ip || "-")}</td>
       <td>${r.error ? `<span class="muted" title="${esc(r.error)}">读取失败</span>` : `<b>${gb(r.out_gb)}</b>`}</td><td>${r.error ? "-" : gb(r.in_gb)}</td>
       <td>${guardCell(gs.find((g) => g.instance_id === r.id))}</td>
-      <td>${(() => { const g = gs.find((x) => x.instance_id === r.id); return g ? `<button class="btn sm" data-tg="${i}">编辑</button> <button class="btn sm" data-tgchk="${g.id}">立即检查</button> <button class="btn sm danger" data-tgdel="${g.id}">删除</button>` : `<button class="btn sm" data-tg="${i}">设置守护</button>`; })()}</td></tr>`).join("") || `<tr><td colspan=7 class="muted">本区域没有实例</td></tr>`}</table></div>`;
+      <td>${(() => { const g = gs.find((x) => x.instance_id === r.id); return g ? `<button class="btn sm" data-tg="${i}">编辑</button> <button class="btn sm" data-tgag="${g.id}">agent</button> <button class="btn sm" data-tgpt="${g.id}">端口明细</button> <button class="btn sm" data-tgchk="${g.id}">立即检查</button> <button class="btn sm danger" data-tgdel="${g.id}">删除</button>` : `<button class="btn sm" data-tg="${i}">设置守护</button>`; })()}</td></tr>`).join("") || `<tr><td colspan=7 class="muted">本区域没有实例</td></tr>`}</table></div>`;
   box.querySelectorAll("[data-tg]").forEach((b) => (b.onclick = () => trafficDialog(acc, d.items[+b.dataset.tg], "vm", reload)));
   box.querySelectorAll("[data-tgchk]").forEach((b) => (b.onclick = () => act(b, () => post(`/traffic-guards/${b.dataset.tgchk}/check`), "已检查").then(reload)));
+  box.querySelectorAll("[data-tgag]").forEach((b) => (b.onclick = () => guardAgentDialog(gs.find((g) => g.id == b.dataset.tgag), reload)));
+  box.querySelectorAll("[data-tgpt]").forEach((b) => (b.onclick = () => guardPortsDialog(gs.find((g) => g.id == b.dataset.tgpt))));
   box.querySelectorAll("[data-tgdel]").forEach((b) => (b.onclick = async () => {
     if (await confirmBox("删除规则", "删除这台实例的流量守护？", true)) act(b, () => api(`/traffic-guards/${b.dataset.tgdel}`, { method: "DELETE" }), "已删除").then(reload);
   }));
@@ -2973,7 +3125,7 @@ async function tabOciTraffic(acc, box) {
 function guardCell(g) {
   if (!g) return `<span class="muted">未设置</span>`;
   const st = `<span class="badge ${GST[g.status] || ""}">${esc(g.enabled ? g.status_text || "正常" : "已关闭")}</span>`;
-  return `${st} <span class="muted">${g.last_gb ?? "-"} / ${g.limit_gb} GB${g.action === "stop" ? " · 超限停机" : " · 只推送"}</span>`;
+  return `${st} <span class="muted">${g.last_gb ?? "-"} / ${g.limit_gb} GB${g.action === "stop" ? " · 超限停机" : g.action === "throttle" ? ` · 超限限速 ${g.throttle_mbps} Mbps` : " · 只推送"}${g.acct_enabled ? " · 流量明细" : ""}</span>`;
 }
 
 // ---------- 7. OCI 区域订阅（v1.6 build 18：不再单独占标签，收在「配额/网络」页底部默认折叠的「高级」区，展开才加载） ----------
@@ -3929,12 +4081,25 @@ async function trafficDialog(acc, inst, kind, onSaved) {
     <div><label>方向</label><select name="direction">${[["out", "出站"], ["in", "入站"], ["both", "双向（出+入）"]].map(([v, l]) => `<option value="${v}" ${dir === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
     <div><label><span data-show-when="mode=monthly">每月</span><span data-show-when="mode=rolling">窗口内</span>上限 GB（免费出站 ${FREE_OUT[acc.provider]} GB/月）</label><input name="limit_gb" type="number" min="1" value="${g.limit_gb || FREE_OUT[acc.provider]}"></div>
     <div><label>预警比例 %</label><input name="warn_pct" type="number" min="10" max="99" value="${g.warn_pct || 80}"></div>
-    <div><label>到达上限后</label><select name="action"><option value="notify">只推送</option><option value="stop" ${g.action === "stop" ? "selected" : ""}>推送并自动停机</option></select></div>
-    <div data-show-when="action=stop"><label>关机多少小时后自动开机（0 = 不自动开机）</label><input name="shutdown_hours" type="number" min="0" max="720" step="0.5" value="${g.shutdown_hours || 0}"></div></div>
+    <div><label>到达上限后</label><select name="action"><option value="notify">只推送</option><option value="stop" ${g.action === "stop" ? "selected" : ""}>推送并自动停机</option><option value="throttle" ${g.action === "throttle" ? "selected" : ""}>推送并限速（需在实例上装 agent）</option></select></div>
+    <div data-show-when="action=stop"><label>关机多少小时后自动开机（0 = 不自动开机）</label><input name="shutdown_hours" type="number" min="0" max="720" step="0.5" value="${g.shutdown_hours || 0}"></div>
+    <div data-show-when="action=throttle"><label>限速到（Mbps，出站，0.1–10000）</label><input name="throttle_mbps" type="number" min="0.1" max="10000" step="0.1" value="${g.throttle_mbps || 1}"></div></div>
     <p class="muted" data-show-when="action=stop">自动开机失败只推送 Telegram 告警，不会反复重试。</p>
-    <label><input type="checkbox" name="enabled" ${g.enabled === 0 ? "" : "checked"}> 启用这条规则</label>`,
-    (bg) => post("/traffic-guards", { account_id: acc.id, instance_id: inst.id, region: inst.region || regionOf(acc) || undefined, kind, name: inst.name, ...form(bg) }), "保存");
-  if (r) { toast(r.warning || `已保存，当前已用 ${r.last_gb ?? "-"} GB（${r.last_pct ?? "-"}%）`, !!r.warning); if (onSaved) onSaved(); }
+    <p class="muted" data-show-when="action=throttle">限速由实例上的 agent（bash + tc，systemd timer 每 5 分钟）执行，SSH 端口不限速；滚动窗口回落或下月 1 日自动解除。agent 未安装或离线时只能推送「无法限速」。保存后在「agent」里复制安装命令。</p>
+    <label><input type="checkbox" name="acct_enabled" ${g.acct_enabled ? "checked" : ""}> 流量明细：按端口 / 服务统计（同一个 agent，只计数不拦截；任何动作都可以开）</label>
+    <label><input type="checkbox" name="enabled" ${g.enabled === 0 ? "" : "checked"}> 启用这条规则</label>
+    ${g.id ? `<div class="bar" style="margin-top:8px"><span class="grow">${agentLine(g.agent, g)}</span><button type="button" class="btn sm" id="tgAgent">agent</button><button type="button" class="btn sm" id="tgPorts">端口明细</button></div>` : ""}`,
+    (bg) => post("/traffic-guards", { account_id: acc.id, instance_id: inst.id, region: inst.region || regionOf(acc) || undefined, kind, name: inst.name, ...form(bg) }), "保存", false,
+    (bg) => {
+      if (bg.querySelector("#tgAgent")) bg.querySelector("#tgAgent").onclick = () => { bg.remove(); guardAgentDialog(g, onSaved); };
+      if (bg.querySelector("#tgPorts")) bg.querySelector("#tgPorts").onclick = () => { bg.remove(); guardPortsDialog(g); };
+    });
+  if (r) {
+    toast(r.warning || `已保存，当前已用 ${r.last_gb ?? "-"} GB（${r.last_pct ?? "-"}%）`, !!r.warning);
+    if (onSaved) onSaved();
+    const ng = (await api("/traffic-guards").catch(() => [])).find((x) => x.id === r.id);
+    if (ng && (ng.action === "throttle" || ng.acct_enabled) && !(ng.agent && ng.agent.installed)) guardAgentDialog(ng, onSaved);   // 首次选限速 / 流量明细：直接给安装命令
+  }
 }
 
 // ---------- 实例表格视图 ----------

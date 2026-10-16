@@ -774,6 +774,20 @@ async def schedule_loop():
             except Exception as e:
                 core.ex("UPDATE traffic_guards SET checked_at=? WHERE id=?", (int(time.time()), g["id"]))
                 print("traffic guard failed", g["id"], e, flush=True)
+        # build 22 流量守护限速：月度跨月解除（不查云指标）+ agent 离线提醒
+        try:
+            for txt in traffic_guard.release_due() + traffic_guard.agent_alerts():
+                await telegram.send(txt)
+        except Exception as e:
+            print("traffic guard agent check failed", e, flush=True)
+        # build 22 流量明细：每天清理一次 90 天前的按日记录
+        if core.get_setting("last_port_prune_date") != now.strftime("%Y-%m-%d"):
+            core.set_setting("last_port_prune_date", now.strftime("%Y-%m-%d"))
+            try:
+                from . import port_traffic
+                port_traffic.prune()
+            except Exception as e:
+                print("port traffic prune failed", e, flush=True)
         # build 21 OneDrive 定期备份（每天 / 每周 HH:MM，面板时区；失败 1 小时后重试，每期最多 3 次）
         try:
             from . import onedrive

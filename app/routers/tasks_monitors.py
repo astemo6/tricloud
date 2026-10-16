@@ -1,7 +1,7 @@
 """后台任务、实例监控、流量守护。"""
 from fastapi import APIRouter, Body, HTTPException
 
-from .. import core, tasks, telegram, traffic_guard
+from .. import core, port_traffic, tasks, telegram, traffic_guard
 from .common import need_acc, run
 
 router = APIRouter()
@@ -86,6 +86,10 @@ def del_monitor(mid: int):
 def _guard_view(g, a=None):
     a = a or {}
     st = traffic_guard.status_of(g)
+    agent = traffic_guard.agent_view(g) if g.get("action") == "throttle" or g.get("agent_seen") or g.get("acct_enabled") else None
+    g = {k: v for k, v in g.items() if k not in ("agent_token_enc", "agent_token_hash", "agent_info", "agent_alerted")}   # 不回传 token
+    g.update(throttle_mbps=traffic_guard.throttle_mbps(g), throttled=1 if g.get("throttled") else 0, agent=agent,
+             acct_enabled=1 if g.get("acct_enabled") else 0)
     return dict(g, account_name=a.get("name"), provider=a.get("provider"), mode=g.get("mode") or "monthly",
                 direction=traffic_guard.direction_of(g), enabled=0 if g.get("enabled") == 0 else 1,
                 status=st, status_text=traffic_guard.STATUS_TEXT[st],
@@ -106,7 +110,13 @@ async def traffic_guard_save(body: dict = Body(...)):
     warn = int(body.get("warn_pct") or 80)
     if limit <= 0 or not 10 <= warn <= 99:
         raise HTTPException(400, "上限需大于 0，预警比例 10~99")
-    action = "stop" if body.get("action") == "stop" else "notify"
+    action = body.get("action") if body.get("action") in traffic_guard.ACTIONS else "notify"
+    try:
+        mbps = float(body["throttle_mbps"]) if body.get("throttle_mbps") not in (None, "") else traffic_guard.THROTTLE_DEFAULT_MBPS
+    except (TypeError, ValueError):
+        raise HTTPException(400, "限速 Mbps 需为数字")
+    if not traffic_guard.THROTTLE_MIN_MBPS <= mbps <= traffic_guard.THROTTLE_MAX_MBPS:
+        raise HTTPException(400, f"限速 {traffic_guard.THROTTLE_MIN_MBPS:g}~{traffic_guard.THROTTLE_MAX_MBPS:g} Mbps")
     # v1.4：滚动窗口 / 方向 / 关机 M 小时 / 启停（都可省略，省略时与 v1.3 行为一致）
     mode = body.get("mode") or "monthly"
     if mode not in ("monthly", "rolling"):
@@ -125,15 +135,22 @@ async def traffic_guard_save(body: dict = Body(...)):
         raise HTTPException(400, "direction 只能是 out / in / both")
     enabled = 0 if body.get("enabled") in (False, 0, "0", "false") else 1
     core.ex("INSERT INTO traffic_guards(account_id,instance_id,region,kind,name,limit_gb,warn_pct,action,count_in,mode,window_hours,"
-            "direction,shutdown_hours,enabled) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "direction,shutdown_hours,enabled,throttle_mbps) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(account_id,instance_id) DO UPDATE SET limit_gb=excluded.limit_gb, warn_pct=excluded.warn_pct, "
             "action=excluded.action, count_in=excluded.count_in, name=excluded.name, region=excluded.region, checked_at=0, "
             "notified=CASE WHEN COALESCE(traffic_guards.mode,'monthly')=excluded.mode THEN traffic_guards.notified ELSE 0 END, "
             "mode=excluded.mode, window_hours=excluded.window_hours, direction=excluded.direction, "
-            "shutdown_hours=excluded.shutdown_hours, enabled=excluded.enabled",
+            "shutdown_hours=excluded.shutdown_hours, enabled=excluded.enabled, throttle_mbps=excluded.throttle_mbps, "
+            "throttled=CASE WHEN excluded.action='throttle' THEN traffic_guards.throttled ELSE 0 END",
             (acc["id"], body["instance_id"], body.get("region"), body.get("kind") or "vm", body.get("name"), limit, warn, action,
-             1 if direction == "both" else 0, mode, window, direction, shut if action == "stop" else 0, enabled))
+             1 if direction == "both" else 0, mode, window, direction, shut if action == "stop" else 0, enabled, mbps))
     g = core.q("SELECT * FROM traffic_guards WHERE account_id=? AND instance_id=?", (acc["id"], body["instance_id"]), one=True)
+    if "acct_enabled" in body:   # build 22：流量明细开关（可与任何动作搭配；只统计也行）
+        core.ex("UPDATE traffic_guards SET acct_enabled=? WHERE id=?",
+                (0 if body["acct_enabled"] in (False, 0, "0", "false", None) else 1, g["id"]))
+        g = core.q("SELECT * FROM traffic_guards WHERE id=?", (g["id"],), one=True)
+    if action == "throttle" or g.get("acct_enabled"):
+        traffic_guard.agent_token(g["id"])   # 首次选「推送并限速」/ 打开流量明细时生成这条守护的 agent token
     try:   # 立即读一次用量（不触发停机，避免刚设的上限立刻关机）
         await run(traffic_guard.check, g, False)
     except Exception as e:
@@ -152,7 +169,15 @@ def traffic_guard_patch(gid: int, body: dict = Body(...)):
     if body.get("cancel_resume") and g.get("state") == "tripped":
         core.ex("UPDATE traffic_guards SET resume_at=NULL, state_msg=? WHERE id=?", ("已取消自动开机", gid))
     if body.get("reset_state"):
-        core.ex("UPDATE traffic_guards SET state='ok', resume_at=NULL, tripped_at=NULL, state_msg=NULL, checked_at=0 WHERE id=?", (gid,))
+        core.ex("UPDATE traffic_guards SET state='ok', resume_at=NULL, tripped_at=NULL, state_msg=NULL, checked_at=0, throttled=0, "
+                "throttled_at=NULL WHERE id=?", (gid,))
+    if "acct_enabled" in body:   # build 22：流量明细开关（agent 下次心跳时按此建 / 删计数规则）
+        on = body["acct_enabled"] not in (False, 0, "0", "false", None)
+        core.ex("UPDATE traffic_guards SET acct_enabled=? WHERE id=?", (1 if on else 0, gid))
+        if on:
+            traffic_guard.agent_token(gid)
+    if body.get("release_throttle") and g.get("throttled"):   # build 22：手动解除限速（本期不再自动限速，直到回落 / 下个月）
+        core.ex("UPDATE traffic_guards SET throttled=0, throttled_at=NULL, state_msg=? WHERE id=?", ("已手动解除限速", gid))
     a = core.get_account(g["account_id"]) or {}
     return _guard_view(core.q("SELECT * FROM traffic_guards WHERE id=?", (gid,), one=True), a)
 
@@ -172,4 +197,5 @@ async def traffic_guard_check(gid: int):
 @router.delete("/api/traffic-guards/{gid}")
 def traffic_guard_del(gid: int):
     core.ex("DELETE FROM traffic_guards WHERE id=?", (gid,))
+    port_traffic.delete_guard(gid)   # build 22：流量明细一起删（agent 下次心跳 401，自行解除限速并删计数规则）
     return {"ok": True}

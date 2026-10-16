@@ -1,5 +1,5 @@
 // TriCloud 前端 v1.6.0 · 云账号管理：添加 / 批量添加 / 编辑 / 粘贴识别、测活、账号类型与停用、已删账号
-import { $, ACCOUNTS, act, ADD_BODY, api, confirmBox, del, esc, fmtDT, form, loadAccounts, loading, modal, PNAME, post, PROV_HINT, provOpts, PROVS, TEXTAREA_FIELDS, toast, view } from "./core.js";
+import { $, ACCOUNTS, act, ADD_BODY, api, confirmBox, del, esc, fmtDT, form, loadAccounts, loading, modal, PNAME, post, PROV_HINT, provOpts, PROVS, regionLabel, TEXTAREA_FIELDS, toast, view } from "./core.js";
 import { go, route } from "./router.js";
 
 // ---------------- 云账号管理 ----------------
@@ -19,7 +19,7 @@ export async function pageAccounts() {
     <button class="btn" id="testAll">⚡ 一键测活</button><a class="btn" href="#/deleted">🗑 已删账号</a><span class="grow"></span><span class="muted" id="tsum">凭证经 Fernet 加密保存在本机 SQLite，不经过任何第三方</span></div>
     <div class="card"><table><tr><th>名称</th><th>云</th><th>默认区域</th><th>云上创建 / 存活</th><th>连通</th><th>出口代理</th><th>添加时间</th><th></th></tr>
     ${ACCOUNTS.map((a) => `<tr data-acc="${a.id}" class="${a.disabled ? "acc-off" : ""}"><td><a href="#/${a.provider}/${a.id}">${esc(a.name)}</a>${a.disabled ? ` <span class="badge failed" title="${esc(a.disabled_reason || "")}">已停用</span>` : ""}${acctTypeTag(a)}</td><td><span class="dot ${a.provider}"></span> ${PNAME[a.provider]}</td>
-    <td>${esc(a.region || "-")}</td><td>${ageText(a)}</td><td class="tcell">${testCell(a)}</td><td class="mono">${esc(a.proxy || "直连")}${a.proxy_user ? `<div class="muted">${esc(a.proxy_user)}${a.proxy_pass_set ? " · ●●●" : ""}</div>` : ""}</td><td>${new Date(a.created * 1000).toLocaleString()}</td>
+    <td>${esc(a.region ? regionLabel(a.region) : "-")}</td><td>${ageText(a)}</td><td class="tcell">${testCell(a)}</td><td class="mono">${esc(a.proxy || "直连")}${a.proxy_user ? `<div class="muted">${esc(a.proxy_user)}${a.proxy_pass_set ? " · ●●●" : ""}</div>` : ""}</td><td>${new Date(a.created * 1000).toLocaleString()}</td>
     <td><button class="btn sm" data-test="${a.id}">测活</button> <button class="btn sm" data-info="${a.id}">信息</button> <button class="btn sm" data-type="${a.id}">类型</button>${a.disabled ? ` <button class="btn sm" data-off="${a.id}">启用</button>` : ""} <button class="btn sm" data-edit="${a.id}">编辑</button> <button class="btn sm" data-px="${a.id}">代理</button> <button class="btn sm danger" data-del="${a.id}">删除</button></td></tr>`).join("") || `<tr><td colspan=8 class="muted">暂无</td></tr>`}</table></div>`;
   $("#add").onclick = addAccount;
   $("#batch").onclick = batchAddAccounts;
@@ -254,7 +254,7 @@ export async function accountTypeDialog(a, refresh) {
   const ok = await modal(`账号类型 · ${a.name}`, `<div class="kv"><span>类型</span><span><b>${esc(r.label || "-")}</b></span>
     ${r.plan_type ? `<span>计划</span><span class="mono">${esc(r.plan_type)}</span>` : ""}${r.account_type ? `<span>账户</span><span>${esc(r.account_type)}</span>` : ""}
     ${r.upgrade_state ? `<span>升级状态</span><span>${esc(r.upgrade_state)}</span>` : ""}${r.time_start ? `<span>开户日期</span><span>${esc(r.time_start)}</span>` : ""}
-    ${r.age_days != null ? `<span>开户天数</span><span>${r.age_days} 天</span>` : ""}${r.home_region ? `<span>主区域</span><span>${esc(r.home_region)}</span>` : ""}
+    ${r.age_days != null ? `<span>开户天数</span><span>${r.age_days} 天</span>` : ""}${r.home_region ? `<span>主区域</span><span>${esc(regionLabel(r.home_region))}</span>` : ""}
     ${r.state ? `<span>订阅状态</span><span>${esc(r.state)}</span>` : ""}</div>${r.error || r.hint ? `<p class="muted">${esc(r.error || r.hint)}</p>` : ""}
     <p class="muted">查询于 ${new Date((r.checked_at || 0) * 1000).toLocaleString()}</p>`, null, "重新查询");
   if (ok) accountTypeDialog(a, true);

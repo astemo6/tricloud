@@ -1,5 +1,5 @@
 // TriCloud 前端 v1.6.0 · Hash 路由（#/aws/3/billing）、侧栏、顶栏账号快速切换器
-import { $, ACCOUNTS, esc, isDesktop, PLOGO, PNAME, PROVS, TAB_ALIAS, TABS, view } from "./core.js";
+import { $, ACCOUNTS, esc, isDesktop, PLOGO, PNAME, PROVS, regionLabel, TAB_ALIAS, TABS, view } from "./core.js";
 import { pageHome } from "./home.js";
 import { pageAccounts, pageDeletedAccounts } from "./accounts.js";
 import { closeOpsMenu, pageAccount } from "./instances.js";
@@ -93,10 +93,10 @@ export function openAccMenu() {
     const q = $("#accq").value.trim().toLowerCase();
     let html = "";
     for (const prov of PROVS) {
-      const l = ACCOUNTS.filter((a) => a.provider === prov && (!q || (a.name + " " + (a.region || "") + " " + PNAME[prov]).toLowerCase().includes(q)));
+      const l = ACCOUNTS.filter((a) => a.provider === prov && (!q || (a.name + " " + (a.region ? regionLabel(a.region) : "") + " " + PNAME[prov]).toLowerCase().includes(q)));
       if (!l.length) continue;
       html += `<div class="accg">${PNAME[prov]}</div>` + l.map((a) => `<button class="acci ${a.id == p[1] && a.provider === p[0] ? "on" : ""}" data-go="#/${prov}/${a.id}/${mapTab(curTab, prov)}">
-        <span class="dot ${prov}"></span><span class="grow">${esc(a.name)}</span><span class="muted">${esc(a.region || "")}</span></button>`).join("");
+        <span class="dot ${prov}"></span><span class="grow">${esc(a.name)}</span><span class="muted">${esc(a.region ? regionLabel(a.region) : "")}</span></button>`).join("");
     }
     $("#accl").innerHTML = html || `<div class="empty">没有匹配的账号</div>`;
     $("#accl").querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => { closeAccMenu(); go(b.dataset.go); }));

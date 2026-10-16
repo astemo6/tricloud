@@ -1,5 +1,5 @@
 // TriCloud 前端 v1.6.0 · Azure：创建 VM、资源组、配额、订阅、Foundry
-import { $, ACCOUNTS, act, api, confirmBox, esc, form, modal, post, SETTINGS, toast } from "./core.js";
+import { $, ACCOUNTS, act, api, confirmBox, esc, form, modal, post, regionLabel, regionOpt, SETTINGS, toast } from "./core.js";
 import { accountInfoDialog } from "./accounts.js";
 import { loginFields } from "./instances.js";
 import { saveDefaultBtn } from "./settings.js";
@@ -18,7 +18,7 @@ export async function tabAzCreate(acc, box) {
   const last = localStorage.getItem("tc_azloc_" + acc.id) || dz.location || "eastasia";
   box.innerHTML = `<div class="card" id="f"><h3>创建 Azure VM</h3><div class="row2">
     <div><label>名称</label><input name="name" value="vm-${Date.now().toString(36)}"></div>
-    <div><label>区域</label><select name="location">${locs.map((l) => `<option ${l === last ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <div><label>区域</label><select name="location">${locs.map((l) => regionOpt(l, l === last)).join("")}</select></div>
     <div><label>大小</label><input name="size" value="${esc(dz.size || "Standard_B1s")}" list="azs"><datalist id="azs">${["Standard_B1s", "Standard_B1ms", "Standard_B2ats_v2", "Standard_B2pts_v2", "Standard_B2s", "Standard_D2as_v5"].map((x) => `<option>${x}</option>`).join("")}</datalist></div>
     <div><label>系统</label><select name="os">${["debian-12", "ubuntu-24.04", "ubuntu-22.04"].map((x) => `<option ${x === dz.os ? "selected" : ""}>${x}</option>`).join("")}</select></div>
     <div><label>系统盘 GB</label><input name="disk_gb" type="number" min="30" value="${esc(dz.disk_gb || 30)}"></div>
@@ -107,8 +107,8 @@ export async function tabAzFoundry(acc, box) {
   try { d = await api(`/accounts/${acc.id}/azure/foundry?region=${encodeURIComponent(region)}`); }
   catch (e) { box.innerHTML = `<div class="card">❌ ${esc(e.message)}<p class="muted">需要服务主体对订阅有 Contributor 权限，并已注册 Microsoft.CognitiveServices 资源提供程序。</p></div>`; return; }
   const res = d.resources || [], models = d.models || [];
-  const regs = (d.regions || [region]).map((r) => `<option ${r === region ? "selected" : ""}>${esc(r)}</option>`).join("");
-  const resHtml = res.length ? res.map((r) => `<div class="card"><h3>${esc(r.name)} <span class="badge">${esc(r.kind)}</span> <span class="muted">${esc(r.region)} · ${esc(r.resource_group)} · ${esc(r.state || "")}</span></h3>
+  const regs = (d.regions || [region]).map((r) => regionOpt(r, r === region)).join("");
+  const resHtml = res.length ? res.map((r) => `<div class="card"><h3>${esc(r.name)} <span class="badge">${esc(r.kind)}</span> <span class="muted">${esc(regionLabel(r.region))} · ${esc(r.resource_group)} · ${esc(r.state || "")}</span></h3>
       <p class="mono" style="word-break:break-all">${esc(r.endpoint || "-")}</p>
       <div class="acts" style="justify-content:flex-start;flex-wrap:wrap"><button class="btn sm" data-key="${esc(r.id)}">查看 Endpoint / Key</button>
         <button class="btn sm primary" data-dep="${esc(r.id)}" data-reg="${esc(r.region)}">＋ 部署模型</button>
@@ -123,7 +123,7 @@ export async function tabAzFoundry(acc, box) {
       <div class="acts" style="justify-content:flex-start;flex-wrap:wrap"><label style="margin:0">区域</label><select id="fdReg" style="width:auto">${regs}</select>
         <button class="btn primary" id="fdNew">＋ 新建资源并部署模型</button></div></div>
     ${resHtml}
-    <div class="card"><h3>模型配额 · ${esc(region)}</h3>${q.length ? `<table><tr><th>配额项</th><th>已用 / 上限</th></tr>${q.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.used)} / ${esc(x.limit)}</td></tr>`).join("")}</table>`
+    <div class="card"><h3>模型配额 · ${esc(regionLabel(region))}</h3>${q.length ? `<table><tr><th>配额项</th><th>已用 / 上限</th></tr>${q.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.used)} / ${esc(x.limit)}</td></tr>`).join("")}</table>`
       : `<p class="muted">该区域没有可用配额（学生 / 免费订阅很多区域为 0）。</p>`}</div>`;
   $("#fdReg", box).onchange = (e) => { FOUNDRY_REGION[acc.id] = e.target.value; reload(); };
   const modelOpts = (list) => list.length ? list.map((m) => `<option value="${esc(m.name)}|${esc(m.version)}" data-skus="${esc(m.skus.join(","))}">${esc(m.name)} ${esc(m.version)}${m.default ? "（默认）" : ""}</option>`).join("")

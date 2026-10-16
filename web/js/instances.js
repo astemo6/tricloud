@@ -1,5 +1,5 @@
 // TriCloud 前端 v1.6.0 · 账号页框架与实例：列表 / 卡片 / 表格、实例操作、开放端口与安全组弹窗、迁移、流量守护弹窗、v1.6 实例弹窗（重装 / 附加 IP / IP 质量 / 500M / 磁盘 / Lightsail 防火墙）
-import { $, ACCOUNTS, act, api, confirmBox, esc, form, instView, isDesktop, lastModal, modal, NO_CHANGE_IP, NO_CREATE, NOREG, OP_NAMES, PNAME, post, regionOf, regionSelect, rq, TAB_FNS_EXTRA, TABS, toast, TRAFFIC_DIALOG, view } from "./core.js";
+import { $, ACCOUNTS, act, api, confirmBox, esc, form, instView, isDesktop, lastModal, modal, NO_CHANGE_IP, NO_CREATE, NOREG, OP_NAMES, PNAME, post, regionLabel, regionOf, regionSelect, rq, TAB_FNS_EXTRA, TABS, toast, TRAFFIC_DIALOG, view } from "./core.js";
 import { ociOsFields, ociShapeOpts, PUBLIC_CIDR, tabOciCreate, tabOciLimits, tabOciObjects, tabOciSecGroup, tabOciSnatch, tabOciStorage, tabOciTraffic, wireOciOs } from "./oci.js";
 import { ec2Create, lightsailCreate, tabAwsRegions, tabCloudFront, tabLightsailV16, tabQuota, tabRecycle } from "./aws.js";
 import { tabAzCreate, tabAzFoundry, tabAzQuota, tabAzRgs, tabAzSubscription } from "./azure.js";
@@ -82,7 +82,7 @@ export function instCard(acc, i, kind) {
     <div class="kv kv2"><span>公网</span><span class="mono">${esc(i.public_ip || "-")}</span>
     <span>内网</span><span class="mono">${esc(i.private_ip || "-")}</span>
     ${extra.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join("")}
-    <span>可用区</span><span>${esc(i.zone || "-")}</span>
+    <span>可用区</span><span>${esc(i.zone ? regionLabel(i.zone) : "-")}</span>
     ${ip6 !== "-" ? `<span>IPv6</span><span class="mono wide">${ip6}</span>` : ""}</div>
     <div class="ops">${inl.map(([o, l]) => opBtn(o, l, i)).join("")}${more ? `<button class="btn sm" data-more aria-label="更多操作">更多 ▾</button>` : ""}</div></div>`;
 }
@@ -388,7 +388,7 @@ export function instTable(acc, list, kind) {
   return `<table class="inst-table"><tr><th>名称</th><th>状态</th><th>规格</th><th>公网 IP</th><th>内网 IP</th><th>地域</th><th>创建时间</th><th>操作</th></tr>
     ${list.map((i) => `<tr data-id="${esc(i.id)}"><td><b title="${esc(i.id)}">${esc(i.name)}</b>${(i.ipv6 || []).length ? `<div class="muted mono" title="${esc(i.ipv6.join("\n"))}">${esc(i.ipv6[i.ipv6.length - 1])}${i.ipv6.length > 1 ? ` +${i.ipv6.length - 1}` : ""}</div>` : ""}</td>
     <td><span class="badge ${esc(i.state)}">${esc(i.state)}</span></td><td>${spec(i)}</td><td class="mono nowrap">${esc(i.public_ip || "-")}</td><td class="mono nowrap">${esc(i.private_ip || "-")}</td>
-    <td class="nowrap">${esc(i.zone || i.region || "-")}</td><td class="mono nowrap">${when(i.created)}</td>
+    <td class="nowrap">${esc(i.zone || i.region ? regionLabel(i.zone || i.region) : "-")}</td><td class="mono nowrap">${when(i.created)}</td>
     <td class="row-ops"><div class="row-ops-in">${ops.map(([o, l]) => opBtn(o, l, i, o === "terminate" ? "danger" : "")).join("")}</div></td></tr>`).join("")}</table>`;
 }
 export function opsMenu(anchor, ops, pick) {

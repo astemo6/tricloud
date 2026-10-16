@@ -1,5 +1,5 @@
 // TriCloud 前端 v1.6.0 · AWS：EC2 创建、Lightsail、区域、配额、闲置资源、CloudFront
-import { $, act, api, confirmBox, del, esc, form, modal, post, regionOf, regionSelect, rq, SETTINGS, toast } from "./core.js";
+import { $, act, api, confirmBox, del, esc, form, modal, post, regionLabel, regionOf, regionOpt, regionSelect, rq, SETTINGS, toast } from "./core.js";
 import { go } from "./router.js";
 import { loginFields, showCreated, tabInstances } from "./instances.js";
 import { saveDefaultBtn } from "./settings.js";
@@ -11,7 +11,7 @@ export async function lightsailCreate(acc, reload) {
   try { toast("正在读取镜像与套餐…"); o = await api(`/accounts/${acc.id}/lightsail/options?${rq(acc)}`); } catch (e) { return toast(e.message, true); }
   const d = SETTINGS.default_create?.lightsail || {};
   const r = await modal("创建 Lightsail 实例", `<label>名称</label><input name="name" value="ls-${Date.now().toString(36)}">
-    <label>可用区</label><select name="zone">${o.zones.map((z) => `<option ${z === d.zone ? "selected" : ""}>${esc(z)}</option>`).join("")}</select>
+    <label>可用区</label><select name="zone">${o.zones.map((z) => regionOpt(z, z === d.zone)).join("")}</select>
     <label>系统镜像</label><select name="blueprint">${o.blueprints.map((b) => `<option value="${esc(b.id)}" ${b.id === d.blueprint ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
     <label>套餐</label><select name="bundle">${o.bundles.map((b) => `<option value="${esc(b.id)}" ${b.id === d.bundle ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
     <label>网络</label><select name="ip_type"><option value="dualstack">IPv4 + IPv6</option><option value="ipv6" ${d.ip_type === "ipv6" ? "selected" : ""}>仅 IPv6（更便宜）</option></select>
@@ -28,12 +28,12 @@ export async function tabQuota(acc, box, refresh = false) {
   const v = q.standard_vcpu, cf = q.cloudfront_distributions || {};
   box.innerHTML = `<div class="grid">
     <div class="card"><h3>Standard vCPU 上限</h3><div class="big">${v ? esc(v.value) : "-"} ${esc(v?.unit || "")}</div>
-      <div class="muted">全区域最大值，来自 ${esc(v?.region || "-")}（L-1216C47A）</div></div>
+      <div class="muted">全区域最大值，来自 ${esc(v?.region ? regionLabel(v.region) : "-")}（L-1216C47A）</div></div>
     <div class="card"><h3>CloudFront 分发数上限</h3><div class="big">${cf.value ?? "-"} ${esc(cf.unit || "")}</div>
       <div class="muted">每账号（L-24B04930）${cf.default ? "· AWS 默认值" : ""}${cf.error ? " · " + esc(cf.error) : ""}</div></div></div>
     <div class="card"><div class="bar"><h3 class="grow" style="margin:0">各区域 vCPU</h3><span class="muted">更新于 ${esc(q.updated_at)}（缓存 6 小时）</span>
     <button class="btn sm" id="rf">重新查询</button></div>
-    <table><tr><th>区域</th><th>vCPU</th></tr>${q.per_region.map((r) => `<tr><td>${esc(r.region)}</td><td>${r.value ?? `<span class="muted">${esc(r.error || "-")}</span>`}</td></tr>`).join("")}</table></div>`;
+    <table><tr><th>区域</th><th>vCPU</th></tr>${q.per_region.map((r) => `<tr><td>${esc(regionLabel(r.region))}</td><td>${r.value ?? `<span class="muted">${esc(r.error || "-")}</span>`}</td></tr>`).join("")}</table></div>`;
   $("#rf", box).onclick = () => tabQuota(acc, box, true);
 }
 
@@ -48,7 +48,7 @@ export async function tabRecycle(acc, box) {
   try { r = await api(`/accounts/${acc.id}/recycle?${rq(acc)}`); } catch (e) { out.innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
   out.innerHTML = `<div class="grid">
     <div class="card"><h3>闲置资源月费估算</h3><div class="big">$${esc(r.monthly_total)}</div>
-      <div class="muted">区域 ${esc(r.region)} · ${r.items.length} 项 · 按公示单价估算，实际以账单为准</div></div>
+      <div class="muted">区域 ${esc(regionLabel(r.region))} · ${r.items.length} 项 · 按公示单价估算，实际以账单为准</div></div>
     <div class="card"><h3>账单参考（缓存）</h3><div class="big">${r.month_to_date == null ? "—" : "$" + esc(r.month_to_date)}</div>
       <div class="muted">本月已产生 · 数据更新于 ${esc(r.billing_updated_at)}（不调用 Cost Explorer）</div>
       ${r.credit_remaining != null ? `<div class="muted">Credit 余 $${esc(r.credit_remaining)}${r.credit_months_for_idle ? `，仅闲置资源可再扣约 ${esc(r.credit_months_for_idle)} 个月` : ""}</div>` : ""}</div></div>
@@ -76,7 +76,7 @@ export async function tabAwsRegions(acc, box, refresh = false) {
   box.innerHTML = `<div class="grid"><div class="card" id="st"><span class="spin"></span> 读取区域状态…</div><div class="card" id="sc"><span class="spin"></span> 全区域实例扫描（串行，约 30–60 秒）…</div></div>`;
   api(`/accounts/${acc.id}/aws/regions-status`).then((rs) => {
     $("#st", box).innerHTML = `<h3>区域激活</h3><p class="muted">香港、雅加达等 Opt-in 区域需先激活才能开机。</p><table><tr><th>区域</th><th>状态</th><th></th></tr>
-      ${rs.map((r) => `<tr><td>${esc(r.region)}</td><td><span class="badge ${r.status === "ENABLED_BY_DEFAULT" || r.status === "ENABLED" ? "running" : ""}">${esc(r.status)}</span></td>
+      ${rs.map((r) => `<tr><td>${esc(regionLabel(r.region))}</td><td><span class="badge ${r.status === "ENABLED_BY_DEFAULT" || r.status === "ENABLED" ? "running" : ""}">${esc(r.status)}</span></td>
       <td>${r.status === "DISABLED" ? `<button class="btn sm" data-en="${esc(r.region)}">激活</button>` : ""}</td></tr>`).join("")}</table>`;
     box.querySelectorAll("[data-en]").forEach((b) => (b.onclick = async () => {
       const r = await act(b, () => post(`/accounts/${acc.id}/aws/enable-region`, { region: b.dataset.en }));
@@ -86,7 +86,7 @@ export async function tabAwsRegions(acc, box, refresh = false) {
   api(`/accounts/${acc.id}/aws/scan${refresh ? "?refresh=true" : ""}`).then((d) => {
     const rows = d.regions.filter((r) => r.ec2 || r.lightsail);
     $("#sc", box).innerHTML = `<div class="bar"><h3 class="grow" style="margin:0">全区域实例</h3><span class="muted">${esc(d.updated_at)}</span><button class="btn sm" id="rs">重新扫描</button></div>
-      ${rows.length ? `<table><tr><th>区域</th><th>EC2（运行）</th><th>Lightsail</th><th></th></tr>${rows.map((r) => `<tr><td>${esc(r.region)}</td><td>${r.ec2}（${r.ec2_running}）</td><td>${r.lightsail ?? "-"}</td>
+      ${rows.length ? `<table><tr><th>区域</th><th>EC2（运行）</th><th>Lightsail</th><th></th></tr>${rows.map((r) => `<tr><td>${esc(regionLabel(r.region))}</td><td>${r.ec2}（${r.ec2_running}）</td><td>${r.lightsail ?? "-"}</td>
       <td><button class="btn sm" data-go="${esc(r.region)}">查看</button></td></tr>`).join("")}</table>` : `<div class="empty">所有区域都没有实例</div>`}`;
     $("#rs", box).onclick = () => tabAwsRegions(acc, box, true);
     box.querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => { localStorage.setItem("tc_region_" + acc.id, b.dataset.go); go(`#/aws/${acc.id}/ec2`); }));

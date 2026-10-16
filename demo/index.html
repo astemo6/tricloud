@@ -1506,6 +1506,64 @@ const provOpts = (blank) => (blank ? `<option value="">${esc(blank)}</option>` :
 const PLOGO = {"oci": "<svg class=\"plogo\" aria-hidden=\"true\" viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\"><path fill=\"#C74634\" d=\"M16.412 4.412h-8.82a7.588 7.588 0 0 0-.008 15.176h8.828a7.588 7.588 0 0 0 0-15.176zm-.193 12.502H7.786a4.915 4.915 0 0 1 0-9.828h8.433a4.914 4.914 0 1 1 0 9.828z\"/></svg>", "aws": "<svg class=\"plogo aws\" aria-hidden=\"true\" viewBox=\"0 0 304 182\" xmlns=\"http://www.w3.org/2000/svg\"><g><path fill=\"currentColor\" d=\"M86.4,66.4c0,3.7,0.4,6.7,1.1,8.9c0.8,2.2,1.8,4.6,3.2,7.2c0.5,0.8,0.7,1.6,0.7,2.3c0,1-0.6,2-1.9,3l-6.3,4.2 c-0.9,0.6-1.8,0.9-2.6,0.9c-1,0-2-0.5-3-1.4C76.2,90,75,88.4,74,86.8c-1-1.7-2-3.6-3.1-5.9c-7.8,9.2-17.6,13.8-29.4,13.8 c-8.4,0-15.1-2.4-20-7.2c-4.9-4.8-7.4-11.2-7.4-19.2c0-8.5,3-15.4,9.1-20.6c6.1-5.2,14.2-7.8,24.5-7.8c3.4,0,6.9,0.3,10.6,0.8 c3.7,0.5,7.5,1.3,11.5,2.2v-7.3c0-7.6-1.6-12.9-4.7-16c-3.2-3.1-8.6-4.6-16.3-4.6c-3.5,0-7.1,0.4-10.8,1.3c-3.7,0.9-7.3,2-10.8,3.4 c-1.6,0.7-2.8,1.1-3.5,1.3c-0.7,0.2-1.2,0.3-1.6,0.3c-1.4,0-2.1-1-2.1-3.1v-4.9c0-1.6,0.2-2.8,0.7-3.5c0.5-0.7,1.4-1.4,2.8-2.1 c3.5-1.8,7.7-3.3,12.6-4.5c4.9-1.3,10.1-1.9,15.6-1.9c11.9,0,20.6,2.7,26.2,8.1c5.5,5.4,8.3,13.6,8.3,24.6V66.4z M45.8,81.6 c3.3,0,6.7-0.6,10.3-1.8c3.6-1.2,6.8-3.4,9.5-6.4c1.6-1.9,2.8-4,3.4-6.4c0.6-2.4,1-5.3,1-8.7v-4.2c-2.9-0.7-6-1.3-9.2-1.7 c-3.2-0.4-6.3-0.6-9.4-0.6c-6.7,0-11.6,1.3-14.9,4c-3.3,2.7-4.9,6.5-4.9,11.5c0,4.7,1.2,8.2,3.7,10.6 C37.7,80.4,41.2,81.6,45.8,81.6z M126.1,92.4c-1.8,0-3-0.3-3.8-1c-0.8-0.6-1.5-2-2.1-3.9L96.7,10.2c-0.6-2-0.9-3.3-0.9-4 c0-1.6,0.8-2.5,2.4-2.5h9.8c1.9,0,3.2,0.3,3.9,1c0.8,0.6,1.4,2,2,3.9l16.8,66.2l15.6-66.2c0.5-2,1.1-3.3,1.9-3.9c0.8-0.6,2.2-1,4-1 h8c1.9,0,3.2,0.3,4,1c0.8,0.6,1.5,2,1.9,3.9l15.8,67l17.3-67c0.6-2,1.3-3.3,2-3.9c0.8-0.6,2.1-1,3.9-1h9.3c1.6,0,2.5,0.8,2.5,2.5 c0,0.5-0.1,1-0.2,1.6c-0.1,0.6-0.3,1.4-0.7,2.5l-24.1,77.3c-0.6,2-1.3,3.3-2.1,3.9c-0.8,0.6-2.1,1-3.8,1h-8.6c-1.9,0-3.2-0.3-4-1 c-0.8-0.7-1.5-2-1.9-4L156,23l-15.4,64.4c-0.5,2-1.1,3.3-1.9,4c-0.8,0.7-2.2,1-4,1H126.1z M254.6,95.1c-5.2,0-10.4-0.6-15.4-1.8 c-5-1.2-8.9-2.5-11.5-4c-1.6-0.9-2.7-1.9-3.1-2.8c-0.4-0.9-0.6-1.9-0.6-2.8v-5.1c0-2.1,0.8-3.1,2.3-3.1c0.6,0,1.2,0.1,1.8,0.3 c0.6,0.2,1.5,0.6,2.5,1c3.4,1.5,7.1,2.7,11,3.5c4,0.8,7.9,1.2,11.9,1.2c6.3,0,11.2-1.1,14.6-3.3c3.4-2.2,5.2-5.4,5.2-9.5 c0-2.8-0.9-5.1-2.7-7c-1.8-1.9-5.2-3.6-10.1-5.2L246,52c-7.3-2.3-12.7-5.7-16-10.2c-3.3-4.4-5-9.3-5-14.5c0-4.2,0.9-7.9,2.7-11.1 c1.8-3.2,4.2-6,7.2-8.2c3-2.3,6.4-4,10.4-5.2c4-1.2,8.2-1.7,12.6-1.7c2.2,0,4.5,0.1,6.7,0.4c2.3,0.3,4.4,0.7,6.5,1.1 c2,0.5,3.9,1,5.7,1.6c1.8,0.6,3.2,1.2,4.2,1.8c1.4,0.8,2.4,1.6,3,2.5c0.6,0.8,0.9,1.9,0.9,3.3v4.7c0,2.1-0.8,3.2-2.3,3.2 c-0.8,0-2.1-0.4-3.8-1.2c-5.7-2.6-12.1-3.9-19.2-3.9c-5.7,0-10.2,0.9-13.3,2.8c-3.1,1.9-4.7,4.8-4.7,8.9c0,2.8,1,5.2,3,7.1 c2,1.9,5.7,3.8,11,5.5l14.2,4.5c7.2,2.3,12.4,5.5,15.5,9.6c3.1,4.1,4.6,8.8,4.6,14c0,4.3-0.9,8.2-2.6,11.6 c-1.8,3.4-4.2,6.4-7.3,8.8c-3.1,2.5-6.8,4.3-11.1,5.6C264.4,94.4,259.7,95.1,254.6,95.1z\"/><g><path fill=\"#FF9900\" fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M273.5,143.7c-32.9,24.3-80.7,37.2-121.8,37.2c-57.6,0-109.5-21.3-148.7-56.7c-3.1-2.8-0.3-6.6,3.4-4.4 c42.4,24.6,94.7,39.5,148.8,39.5c36.5,0,76.6-7.6,113.5-23.2C274.2,133.6,278.9,139.7,273.5,143.7z\"/><path fill=\"#FF9900\" fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M287.2,128.1c-4.2-5.4-27.8-2.6-38.5-1.3c-3.2,0.4-3.7-2.4-0.8-4.5c18.8-13.2,49.7-9.4,53.3-5 c3.6,4.5-1,35.4-18.6,50.2c-2.7,2.3-5.3,1.1-4.1-1.9C282.5,155.7,291.4,133.4,287.2,128.1z\"/></g></g></svg>", "azure": "<svg class=\"plogo\" aria-hidden=\"true\" viewBox=\"0 0 96 96\" xmlns=\"http://www.w3.org/2000/svg\"><defs><linearGradient id=\"tcaz0\" x1=\"-1032.172\" x2=\"-1059.213\" y1=\"145.312\" y2=\"65.426\" gradientTransform=\"matrix(1 0 0 -1 1075 158)\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#114a8b\"/><stop offset=\"1\" stop-color=\"#0669bc\"/></linearGradient><linearGradient id=\"tcaz1\" x1=\"-1023.725\" x2=\"-1029.98\" y1=\"108.083\" y2=\"105.968\" gradientTransform=\"matrix(1 0 0 -1 1075 158)\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-opacity=\".3\"/><stop offset=\".071\" stop-opacity=\".2\"/><stop offset=\".321\" stop-opacity=\".1\"/><stop offset=\".623\" stop-opacity=\".05\"/><stop offset=\"1\" stop-opacity=\"0\"/></linearGradient><linearGradient id=\"tcaz2\" x1=\"-1027.165\" x2=\"-997.482\" y1=\"147.642\" y2=\"68.561\" gradientTransform=\"matrix(1 0 0 -1 1075 158)\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#3ccbf4\"/><stop offset=\"1\" stop-color=\"#2892df\"/></linearGradient></defs><path fill=\"url(#tcaz0)\" d=\"M33.338 6.544h26.038l-27.03 80.087a4.152 4.152 0 0 1-3.933 2.824H8.149a4.145 4.145 0 0 1-3.928-5.47L29.404 9.368a4.152 4.152 0 0 1 3.934-2.825z\"/><path fill=\"#0078d4\" d=\"M71.175 60.261h-41.29a1.911 1.911 0 0 0-1.305 3.309l26.532 24.764a4.171 4.171 0 0 0 2.846 1.121h23.38z\"/><path fill=\"url(#tcaz1)\" d=\"M33.338 6.544a4.118 4.118 0 0 0-3.943 2.879L4.252 83.917a4.14 4.14 0 0 0 3.908 5.538h20.787a4.443 4.443 0 0 0 3.41-2.9l5.014-14.777 17.91 16.705a4.237 4.237 0 0 0 2.666.972H81.24L71.024 60.261l-29.781.007L59.47 6.544z\"/><path fill=\"url(#tcaz2)\" d=\"M66.595 9.364a4.145 4.145 0 0 0-3.928-2.82H33.648a4.146 4.146 0 0 1 3.928 2.82l25.184 74.62a4.146 4.146 0 0 1-3.928 5.472h29.02a4.146 4.146 0 0 0 3.927-5.472z\"/></svg>"};
 
 // ---------------- 区域 ----------------
+// 区域代码 → 中文城市名（AWS 以官方区域列表为准，34 个商用区域；OCI 商用区域；Azure 常用 location）。未知区域只显示代码
+const REGION_CITY = {
+  // AWS
+  "us-east-1": "弗吉尼亚北部", "us-east-2": "俄亥俄", "us-west-1": "加州北部", "us-west-2": "俄勒冈",
+  "af-south-1": "开普敦", "ap-east-1": "香港", "ap-east-2": "台北", "ap-south-1": "孟买", "ap-south-2": "海得拉巴",
+  "ap-northeast-1": "东京", "ap-northeast-2": "首尔", "ap-northeast-3": "大阪",
+  "ap-southeast-1": "新加坡", "ap-southeast-2": "悉尼", "ap-southeast-3": "雅加达", "ap-southeast-4": "墨尔本",
+  "ap-southeast-5": "吉隆坡", "ap-southeast-6": "新西兰", "ap-southeast-7": "曼谷",
+  "ca-central-1": "蒙特利尔", "ca-west-1": "卡尔加里",
+  "eu-central-1": "法兰克福", "eu-central-2": "苏黎世", "eu-north-1": "斯德哥尔摩", "eu-south-1": "米兰", "eu-south-2": "西班牙",
+  "eu-west-1": "爱尔兰", "eu-west-2": "伦敦", "eu-west-3": "巴黎",
+  "il-central-1": "特拉维夫", "me-central-1": "阿联酋", "me-south-1": "巴林", "mx-central-1": "墨西哥", "sa-east-1": "圣保罗",
+  "cn-north-1": "北京", "cn-northwest-1": "宁夏", "us-gov-west-1": "GovCloud 西部", "us-gov-east-1": "GovCloud 东部",
+  // OCI
+  "ap-sydney-1": "悉尼", "ap-melbourne-1": "墨尔本", "sa-saopaulo-1": "圣保罗", "sa-vinhedo-1": "维涅杜",
+  "ca-montreal-1": "蒙特利尔", "ca-toronto-1": "多伦多", "sa-santiago-1": "圣地亚哥", "sa-valparaiso-1": "瓦尔帕莱索", "sa-bogota-1": "波哥大",
+  "eu-paris-1": "巴黎", "eu-marseille-1": "马赛", "eu-frankfurt-1": "法兰克福", "ap-hyderabad-1": "海得拉巴", "ap-mumbai-1": "孟买",
+  "ap-batam-1": "巴淡岛", "il-jerusalem-1": "耶路撒冷", "eu-milan-1": "米兰", "eu-turin-1": "都灵", "ap-osaka-1": "大阪", "ap-tokyo-1": "东京",
+  "ap-kulai-2": "古来", "mx-queretaro-1": "克雷塔罗", "mx-monterrey-1": "蒙特雷", "af-casablanca-1": "卡萨布兰卡", "eu-amsterdam-1": "阿姆斯特丹",
+  "me-riyadh-1": "利雅得", "me-jeddah-1": "吉达", "eu-jovanovac-1": "约瓦诺瓦茨", "ap-singapore-1": "新加坡", "ap-singapore-2": "新加坡西",
+  "af-johannesburg-1": "约翰内斯堡", "ap-seoul-1": "首尔", "ap-chuncheon-1": "春川", "eu-madrid-1": "马德里", "eu-madrid-3": "马德里 3",
+  "eu-stockholm-1": "斯德哥尔摩", "eu-zurich-1": "苏黎世", "me-abudhabi-1": "阿布扎比", "me-dubai-1": "迪拜", "uk-london-1": "伦敦",
+  "uk-cardiff-1": "纽波特", "us-ashburn-1": "阿什本", "us-chicago-1": "芝加哥", "us-phoenix-1": "凤凰城", "us-sanjose-1": "圣何塞",
+  // Azure
+  "eastasia": "香港", "southeastasia": "新加坡", "japaneast": "东日本", "japanwest": "西日本", "koreacentral": "韩国中部", "koreasouth": "韩国南部",
+  "australiaeast": "新南威尔士", "australiasoutheast": "维多利亚", "australiacentral": "堪培拉", "centralindia": "浦那", "southindia": "金奈", "westindia": "孟买",
+  "eastus": "弗吉尼亚", "eastus2": "弗吉尼亚 2", "westus": "加州", "westus2": "华盛顿州", "westus3": "亚利桑那", "centralus": "爱荷华",
+  "northcentralus": "伊利诺伊", "southcentralus": "德克萨斯", "westcentralus": "怀俄明", "canadacentral": "多伦多", "canadaeast": "魁北克",
+  "brazilsouth": "圣保罗", "mexicocentral": "克雷塔罗", "northeurope": "爱尔兰", "westeurope": "荷兰", "uksouth": "伦敦", "ukwest": "加的夫",
+  "francecentral": "巴黎", "germanywestcentral": "法兰克福", "switzerlandnorth": "苏黎世", "norwayeast": "奥斯陆", "swedencentral": "耶夫勒",
+  "polandcentral": "华沙", "italynorth": "米兰", "spaincentral": "马德里", "uaenorth": "迪拜", "qatarcentral": "多哈", "israelcentral": "以色列",
+  "southafricanorth": "约翰内斯堡", "indonesiacentral": "雅加达", "malaysiawest": "吉隆坡", "newzealandnorth": "奥克兰",
+};
+// OCI 可用域名形如「Uocm:NRT-AD-1」，用区域 Key 反查
+const OCI_KEY = { SYD: "ap-sydney-1", MEL: "ap-melbourne-1", GRU: "sa-saopaulo-1", VCP: "sa-vinhedo-1", YUL: "ca-montreal-1", YYZ: "ca-toronto-1",
+  SCL: "sa-santiago-1", VAP: "sa-valparaiso-1", BOG: "sa-bogota-1", CDG: "eu-paris-1", MRS: "eu-marseille-1", FRA: "eu-frankfurt-1",
+  HYD: "ap-hyderabad-1", BOM: "ap-mumbai-1", HSG: "ap-batam-1", MTZ: "il-jerusalem-1", LIN: "eu-milan-1", NRQ: "eu-turin-1", KIX: "ap-osaka-1",
+  NRT: "ap-tokyo-1", JBP: "ap-kulai-2", QRO: "mx-queretaro-1", MTY: "mx-monterrey-1", LEJ: "af-casablanca-1", AMS: "eu-amsterdam-1",
+  RUH: "me-riyadh-1", JED: "me-jeddah-1", BEG: "eu-jovanovac-1", SIN: "ap-singapore-1", XSP: "ap-singapore-2", JNB: "af-johannesburg-1",
+  ICN: "ap-seoul-1", YNY: "ap-chuncheon-1", MAD: "eu-madrid-1", ORF: "eu-madrid-3", ARN: "eu-stockholm-1", ZRH: "eu-zurich-1",
+  AUH: "me-abudhabi-1", DXB: "me-dubai-1", LHR: "uk-london-1", CWL: "uk-cardiff-1", IAD: "us-ashburn-1", ORD: "us-chicago-1",
+  PHX: "us-phoenix-1", SJC: "us-sanjose-1" };
+function regionCity(code) {
+  const c = String(code ?? "").trim().toLowerCase();
+  if (!c) return "";
+  if (REGION_CITY[c]) return REGION_CITY[c];
+  let m = c.match(/^([a-z]{2}(?:-[a-z]+)+-\d+)[a-z]$/);           // AWS / Lightsail 可用区 ap-northeast-1a
+  if (m && REGION_CITY[m[1]]) return REGION_CITY[m[1]];
+  m = c.match(/([a-z]+-[a-z]+-\d+)-ad-\d+$/);                       // ap-tokyo-1-ad-1
+  if (m && REGION_CITY[m[1]]) return REGION_CITY[m[1]];
+  m = String(code).trim().match(/(?:^|:)([A-Z]{3})-AD-\d+$/i);       // Uocm:NRT-AD-1
+  if (m && OCI_KEY[m[1].toUpperCase()]) return REGION_CITY[OCI_KEY[m[1].toUpperCase()]];
+  return "";
+}
+// 「ap-northeast-1 · 东京」；未知区域只返回代码（未转义，调用方自行 esc）
+const regionLabel = (code) => { const c = regionCity(code); return c ? `${code} · ${c}` : String(code ?? ""); };
+// 下拉选项：value 永远是纯代码，显示带城市名
+const regionOpt = (code, selected) => `<option value="${esc(code)}"${selected ? " selected" : ""}>${esc(regionLabel(code))}</option>`;
 const regionOf = (acc) => localStorage.getItem("tc_region_" + acc.id) || acc.region || "";
 async function regionSelect(acc, onChange) {
   if (NOREG(acc)) return "";
@@ -1516,12 +1574,13 @@ async function regionSelect(acc, onChange) {
     try {
       const rs = await api(`/accounts/${acc.id}/regions`);
       const cur = regionOf(acc);
-      sel.innerHTML = rs.map((r) => `<option ${r === cur ? "selected" : ""}>${esc(r)}</option>`).join("");
-      if (!rs.includes(cur)) sel.insertAdjacentHTML("afterbegin", `<option selected>${esc(cur)}</option>`);
+      sel.innerHTML = rs.map((r) => regionOpt(r, r === cur)).join("");
+      if (!rs.includes(cur)) sel.insertAdjacentHTML("afterbegin", regionOpt(cur, true));
+      sel.value = cur;                         // 插入带 selected 的 option 不一定会被选中，显式设置
     } catch (e) { /* 保持默认 */ }
     sel.onchange = () => { localStorage.setItem("tc_region_" + acc.id, sel.value); onChange(); };
   });
-  return `<select id="${id}" title="区域"><option>${esc(regionOf(acc))}</option></select>`;
+  return `<select id="${id}" title="区域">${regionOpt(regionOf(acc), true)}</select>`;
 }
 const rq = (acc) => (NOREG(acc) ? "" : `region=${encodeURIComponent(regionOf(acc))}`);
 const fmtTime = (t) => (t ? new Date(t * 1000).toLocaleTimeString([], { hour12: false }) : "");
@@ -1569,7 +1628,7 @@ async function pageAccounts() {
     <button class="btn" id="testAll">⚡ 一键测活</button><a class="btn" href="#/deleted">🗑 已删账号</a><span class="grow"></span><span class="muted" id="tsum">凭证经 Fernet 加密保存在本机 SQLite，不经过任何第三方</span></div>
     <div class="card"><table><tr><th>名称</th><th>云</th><th>默认区域</th><th>云上创建 / 存活</th><th>连通</th><th>出口代理</th><th>添加时间</th><th></th></tr>
     ${ACCOUNTS.map((a) => `<tr data-acc="${a.id}" class="${a.disabled ? "acc-off" : ""}"><td><a href="#/${a.provider}/${a.id}">${esc(a.name)}</a>${a.disabled ? ` <span class="badge failed" title="${esc(a.disabled_reason || "")}">已停用</span>` : ""}${acctTypeTag(a)}</td><td><span class="dot ${a.provider}"></span> ${PNAME[a.provider]}</td>
-    <td>${esc(a.region || "-")}</td><td>${ageText(a)}</td><td class="tcell">${testCell(a)}</td><td class="mono">${esc(a.proxy || "直连")}${a.proxy_user ? `<div class="muted">${esc(a.proxy_user)}${a.proxy_pass_set ? " · ●●●" : ""}</div>` : ""}</td><td>${new Date(a.created * 1000).toLocaleString()}</td>
+    <td>${esc(a.region ? regionLabel(a.region) : "-")}</td><td>${ageText(a)}</td><td class="tcell">${testCell(a)}</td><td class="mono">${esc(a.proxy || "直连")}${a.proxy_user ? `<div class="muted">${esc(a.proxy_user)}${a.proxy_pass_set ? " · ●●●" : ""}</div>` : ""}</td><td>${new Date(a.created * 1000).toLocaleString()}</td>
     <td><button class="btn sm" data-test="${a.id}">测活</button> <button class="btn sm" data-info="${a.id}">信息</button> <button class="btn sm" data-type="${a.id}">类型</button>${a.disabled ? ` <button class="btn sm" data-off="${a.id}">启用</button>` : ""} <button class="btn sm" data-edit="${a.id}">编辑</button> <button class="btn sm" data-px="${a.id}">代理</button> <button class="btn sm danger" data-del="${a.id}">删除</button></td></tr>`).join("") || `<tr><td colspan=8 class="muted">暂无</td></tr>`}</table></div>`;
   $("#add").onclick = addAccount;
   $("#batch").onclick = batchAddAccounts;
@@ -1804,7 +1863,7 @@ async function accountTypeDialog(a, refresh) {
   const ok = await modal(`账号类型 · ${a.name}`, `<div class="kv"><span>类型</span><span><b>${esc(r.label || "-")}</b></span>
     ${r.plan_type ? `<span>计划</span><span class="mono">${esc(r.plan_type)}</span>` : ""}${r.account_type ? `<span>账户</span><span>${esc(r.account_type)}</span>` : ""}
     ${r.upgrade_state ? `<span>升级状态</span><span>${esc(r.upgrade_state)}</span>` : ""}${r.time_start ? `<span>开户日期</span><span>${esc(r.time_start)}</span>` : ""}
-    ${r.age_days != null ? `<span>开户天数</span><span>${r.age_days} 天</span>` : ""}${r.home_region ? `<span>主区域</span><span>${esc(r.home_region)}</span>` : ""}
+    ${r.age_days != null ? `<span>开户天数</span><span>${r.age_days} 天</span>` : ""}${r.home_region ? `<span>主区域</span><span>${esc(regionLabel(r.home_region))}</span>` : ""}
     ${r.state ? `<span>订阅状态</span><span>${esc(r.state)}</span>` : ""}</div>${r.error || r.hint ? `<p class="muted">${esc(r.error || r.hint)}</p>` : ""}
     <p class="muted">查询于 ${new Date((r.checked_at || 0) * 1000).toLocaleString()}</p>`, null, "重新查询");
   if (ok) accountTypeDialog(a, true);
@@ -2235,7 +2294,7 @@ async function tabOciLimits(acc, box) {
   box.appendChild(regionSubSection(acc));   // 页面最底部，默认折叠
   let r;
   try { r = await api(`/accounts/${acc.id}/oci/limits?${rq(acc)}`); } catch (e) { $("#lb", box).innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
-  $("#lb", box).innerHTML = `<div class="card"><h3>计算配额 · ${esc(r.region)}</h3><table><tr><th>项目</th><th>上限</th><th>已用</th><th>可用</th><th>免费剩余</th></tr>
+  $("#lb", box).innerHTML = `<div class="card"><h3>计算配额 · ${esc(regionLabel(r.region))}</h3><table><tr><th>项目</th><th>上限</th><th>已用</th><th>可用</th><th>免费剩余</th></tr>
     ${r.items.map((i) => `<tr><td>${esc(i.name)}</td><td>${i.limit}</td><td>${i.used ?? "-"}</td><td>${i.available ?? "-"}</td><td>${i.free == null ? "-" : `${i.free_left ?? "?"} / ${i.free}`}</td></tr>`).join("") || `<tr><td colspan=5 class="muted">无数据</td></tr>`}</table>
     <p class="muted">「上限」是 OCI 允许开的量，升级按量付费（PAYG）后会很大；「免费剩余」A1 按${r.a1_basis === "paid" ? "付费号 4 OCPU / 24GB" : r.a1_basis === "free" ? "免费号 2 OCPU / 12GB" : "免费号 2 OCPU / 12GB（未识别账号类型，可在「类型」里刷新）"}计算（2026-06 起免费号减半），E2.1.Micro 2 台，超出部分计费。可用量为 0 时抢机必然失败。</p></div>`;
 }
@@ -2436,7 +2495,7 @@ function bkScanHtml(s) {
     s.unknown_count ? `${s.unknown_count} 个 Bucket 读不到大小（显示 —，未计入）` : "",
     (s.errors || []).length ? `部分区域读取失败：${s.errors.map((e) => esc(e.region)).join("、")}` : "",
     s.compartments_truncated ? `区间太多，只检测了前 ${s.compartments} 个` : ""].filter(Boolean);
-  const rows = s.buckets.map((b) => `<tr><td class="mono">${esc(b.name)}${b.billing_keep ? ` <span class="badge">保号</span>` : ""}</td><td class="mono">${esc(b.region)}</td><td>${tierLabel(b)}</td>
+  const rows = s.buckets.map((b) => `<tr><td class="mono">${esc(b.name)}${b.billing_keep ? ` <span class="badge">保号</span>` : ""}</td><td class="mono">${esc(regionLabel(b.region))}</td><td>${tierLabel(b)}</td>
     <td>${b.size == null ? "—" : fmtBytes(b.size)}</td><td>${b.count == null ? "—" : esc(b.count)}</td></tr>`).join("");
   return head + verdict + (extra.length ? `<p class="muted">${extra.join("；")}。</p>` : "")
     + (rows ? `<details id="bkBuckets"><summary>已有 Bucket（${s.buckets.length}）</summary><table><tr><th>Bucket</th><th>区域</th><th>存储层</th><th>大小</th><th>对象数</th></tr>${rows}</table></details>` : `<p class="muted">没有找到已有 Bucket。</p>`)
@@ -2472,7 +2531,7 @@ async function billingKeepCard(acc, el, again, rescan) {
   const scanHtml = s ? bkScanHtml(s) : `<p class="al warn">⚠️ 检测已有存储失败：${esc(scanErr)}。无法确认标准层已用量，默认按 ${d.default_gb} GB 生成。</p><button class="btn sm" id="bkRescan">重新检测</button>`;
   const over = !!(s && s.over_free), used = s ? +s.standard_gb : 0, defGb = s ? s.fill_gb : d.default_gb;
   if (d.exists) {
-    body += `<div id="bkDone">✅ 已存在保号对象 <span class="mono">${esc(d.bucket)}/${esc(d.object)}</span>：<b>${gib(d.size)}</b>（${esc(d.region)} · ${esc(d.storage_tier || "Standard")}）</div>
+    body += `<div id="bkDone">✅ 已存在保号对象 <span class="mono">${esc(d.bucket)}/${esc(d.object)}</span>：<b>${gib(d.size)}</b>（${esc(regionLabel(d.region))} · ${esc(d.storage_tier || "Standard")}）</div>
       <div id="bkScan">${scanHtml}</div><div class="bar"><button class="btn danger" id="bkDel">删除</button></div>`;
   } else {
     const pend = (d.pending_uploads || []).length, resumable = pend && t && ["failed", "stopped", "interrupted"].includes(t.status) && t.uploaded;
@@ -2567,7 +2626,7 @@ async function tabOciRegionSub(acc, box) {
   const subd = d.regions.filter((r) => r.subscribed);
   box.innerHTML = `<h3>已订阅 ${subd.length} 个区域 · 主区域 ${esc(d.home || "-")}</h3>
     <p class="muted">${esc(d.limit_hint)}。订阅<b>不可撤销</b>，订阅后可在顶部区域下拉里切换。</p>
-    <table><tr><th>区域</th><th>Key</th><th>状态</th><th></th></tr>${d.regions.map((r) => `<tr><td>${esc(r.name)}${r.home ? ` <span class="badge done">主区域</span>` : ""}</td><td class="mono">${esc(r.key)}</td>
+    <table><tr><th>区域</th><th>Key</th><th>状态</th><th></th></tr>${d.regions.map((r) => `<tr><td>${esc(regionLabel(r.name))}${r.home ? ` <span class="badge done">主区域</span>` : ""}</td><td class="mono">${esc(r.key)}</td>
       <td>${r.subscribed ? esc(r.status || "已订阅") : `<span class="muted">未订阅</span>`}</td><td>${r.subscribed ? "" : `<button class="btn sm danger" data-sub="${esc(r.key)}" data-n="${esc(r.name)}">订阅</button>`}</td></tr>`).join("")}</table>`;
   box.querySelectorAll("[data-sub]").forEach((b) => (b.onclick = async () => {
     if (!(await confirmBox("订阅区域", `订阅 ${esc(b.dataset.n)}（${esc(b.dataset.sub)}）？<br>⚠️ 订阅后<b>无法取消</b>，免费账号的额外区域名额通常只有 1 个；Always Free 资源仍只在主区域。`, true))) return;
@@ -2604,7 +2663,7 @@ async function lightsailCreate(acc, reload) {
   try { toast("正在读取镜像与套餐…"); o = await api(`/accounts/${acc.id}/lightsail/options?${rq(acc)}`); } catch (e) { return toast(e.message, true); }
   const d = SETTINGS.default_create?.lightsail || {};
   const r = await modal("创建 Lightsail 实例", `<label>名称</label><input name="name" value="ls-${Date.now().toString(36)}">
-    <label>可用区</label><select name="zone">${o.zones.map((z) => `<option ${z === d.zone ? "selected" : ""}>${esc(z)}</option>`).join("")}</select>
+    <label>可用区</label><select name="zone">${o.zones.map((z) => regionOpt(z, z === d.zone)).join("")}</select>
     <label>系统镜像</label><select name="blueprint">${o.blueprints.map((b) => `<option value="${esc(b.id)}" ${b.id === d.blueprint ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
     <label>套餐</label><select name="bundle">${o.bundles.map((b) => `<option value="${esc(b.id)}" ${b.id === d.bundle ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
     <label>网络</label><select name="ip_type"><option value="dualstack">IPv4 + IPv6</option><option value="ipv6" ${d.ip_type === "ipv6" ? "selected" : ""}>仅 IPv6（更便宜）</option></select>
@@ -2621,12 +2680,12 @@ async function tabQuota(acc, box, refresh = false) {
   const v = q.standard_vcpu, cf = q.cloudfront_distributions || {};
   box.innerHTML = `<div class="grid">
     <div class="card"><h3>Standard vCPU 上限</h3><div class="big">${v ? esc(v.value) : "-"} ${esc(v?.unit || "")}</div>
-      <div class="muted">全区域最大值，来自 ${esc(v?.region || "-")}（L-1216C47A）</div></div>
+      <div class="muted">全区域最大值，来自 ${esc(v?.region ? regionLabel(v.region) : "-")}（L-1216C47A）</div></div>
     <div class="card"><h3>CloudFront 分发数上限</h3><div class="big">${cf.value ?? "-"} ${esc(cf.unit || "")}</div>
       <div class="muted">每账号（L-24B04930）${cf.default ? "· AWS 默认值" : ""}${cf.error ? " · " + esc(cf.error) : ""}</div></div></div>
     <div class="card"><div class="bar"><h3 class="grow" style="margin:0">各区域 vCPU</h3><span class="muted">更新于 ${esc(q.updated_at)}（缓存 6 小时）</span>
     <button class="btn sm" id="rf">重新查询</button></div>
-    <table><tr><th>区域</th><th>vCPU</th></tr>${q.per_region.map((r) => `<tr><td>${esc(r.region)}</td><td>${r.value ?? `<span class="muted">${esc(r.error || "-")}</span>`}</td></tr>`).join("")}</table></div>`;
+    <table><tr><th>区域</th><th>vCPU</th></tr>${q.per_region.map((r) => `<tr><td>${esc(regionLabel(r.region))}</td><td>${r.value ?? `<span class="muted">${esc(r.error || "-")}</span>`}</td></tr>`).join("")}</table></div>`;
   $("#rf", box).onclick = () => tabQuota(acc, box, true);
 }
 
@@ -2641,7 +2700,7 @@ async function tabRecycle(acc, box) {
   try { r = await api(`/accounts/${acc.id}/recycle?${rq(acc)}`); } catch (e) { out.innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
   out.innerHTML = `<div class="grid">
     <div class="card"><h3>闲置资源月费估算</h3><div class="big">$${esc(r.monthly_total)}</div>
-      <div class="muted">区域 ${esc(r.region)} · ${r.items.length} 项 · 按公示单价估算，实际以账单为准</div></div>
+      <div class="muted">区域 ${esc(regionLabel(r.region))} · ${r.items.length} 项 · 按公示单价估算，实际以账单为准</div></div>
     <div class="card"><h3>账单参考（缓存）</h3><div class="big">${r.month_to_date == null ? "—" : "$" + esc(r.month_to_date)}</div>
       <div class="muted">本月已产生 · 数据更新于 ${esc(r.billing_updated_at)}（不调用 Cost Explorer）</div>
       ${r.credit_remaining != null ? `<div class="muted">Credit 余 $${esc(r.credit_remaining)}${r.credit_months_for_idle ? `，仅闲置资源可再扣约 ${esc(r.credit_months_for_idle)} 个月` : ""}</div>` : ""}</div></div>
@@ -2669,7 +2728,7 @@ async function tabAwsRegions(acc, box, refresh = false) {
   box.innerHTML = `<div class="grid"><div class="card" id="st"><span class="spin"></span> 读取区域状态…</div><div class="card" id="sc"><span class="spin"></span> 全区域实例扫描（串行，约 30–60 秒）…</div></div>`;
   api(`/accounts/${acc.id}/aws/regions-status`).then((rs) => {
     $("#st", box).innerHTML = `<h3>区域激活</h3><p class="muted">香港、雅加达等 Opt-in 区域需先激活才能开机。</p><table><tr><th>区域</th><th>状态</th><th></th></tr>
-      ${rs.map((r) => `<tr><td>${esc(r.region)}</td><td><span class="badge ${r.status === "ENABLED_BY_DEFAULT" || r.status === "ENABLED" ? "running" : ""}">${esc(r.status)}</span></td>
+      ${rs.map((r) => `<tr><td>${esc(regionLabel(r.region))}</td><td><span class="badge ${r.status === "ENABLED_BY_DEFAULT" || r.status === "ENABLED" ? "running" : ""}">${esc(r.status)}</span></td>
       <td>${r.status === "DISABLED" ? `<button class="btn sm" data-en="${esc(r.region)}">激活</button>` : ""}</td></tr>`).join("")}</table>`;
     box.querySelectorAll("[data-en]").forEach((b) => (b.onclick = async () => {
       const r = await act(b, () => post(`/accounts/${acc.id}/aws/enable-region`, { region: b.dataset.en }));
@@ -2679,7 +2738,7 @@ async function tabAwsRegions(acc, box, refresh = false) {
   api(`/accounts/${acc.id}/aws/scan${refresh ? "?refresh=true" : ""}`).then((d) => {
     const rows = d.regions.filter((r) => r.ec2 || r.lightsail);
     $("#sc", box).innerHTML = `<div class="bar"><h3 class="grow" style="margin:0">全区域实例</h3><span class="muted">${esc(d.updated_at)}</span><button class="btn sm" id="rs">重新扫描</button></div>
-      ${rows.length ? `<table><tr><th>区域</th><th>EC2（运行）</th><th>Lightsail</th><th></th></tr>${rows.map((r) => `<tr><td>${esc(r.region)}</td><td>${r.ec2}（${r.ec2_running}）</td><td>${r.lightsail ?? "-"}</td>
+      ${rows.length ? `<table><tr><th>区域</th><th>EC2（运行）</th><th>Lightsail</th><th></th></tr>${rows.map((r) => `<tr><td>${esc(regionLabel(r.region))}</td><td>${r.ec2}（${r.ec2_running}）</td><td>${r.lightsail ?? "-"}</td>
       <td><button class="btn sm" data-go="${esc(r.region)}">查看</button></td></tr>`).join("")}</table>` : `<div class="empty">所有区域都没有实例</div>`}`;
     $("#rs", box).onclick = () => tabAwsRegions(acc, box, true);
     box.querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => { localStorage.setItem("tc_region_" + acc.id, b.dataset.go); go(`#/aws/${acc.id}/ec2`); }));
@@ -2804,7 +2863,7 @@ async function tabAzCreate(acc, box) {
   const last = localStorage.getItem("tc_azloc_" + acc.id) || dz.location || "eastasia";
   box.innerHTML = `<div class="card" id="f"><h3>创建 Azure VM</h3><div class="row2">
     <div><label>名称</label><input name="name" value="vm-${Date.now().toString(36)}"></div>
-    <div><label>区域</label><select name="location">${locs.map((l) => `<option ${l === last ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <div><label>区域</label><select name="location">${locs.map((l) => regionOpt(l, l === last)).join("")}</select></div>
     <div><label>大小</label><input name="size" value="${esc(dz.size || "Standard_B1s")}" list="azs"><datalist id="azs">${["Standard_B1s", "Standard_B1ms", "Standard_B2ats_v2", "Standard_B2pts_v2", "Standard_B2s", "Standard_D2as_v5"].map((x) => `<option>${x}</option>`).join("")}</datalist></div>
     <div><label>系统</label><select name="os">${["debian-12", "ubuntu-24.04", "ubuntu-22.04"].map((x) => `<option ${x === dz.os ? "selected" : ""}>${x}</option>`).join("")}</select></div>
     <div><label>系统盘 GB</label><input name="disk_gb" type="number" min="30" value="${esc(dz.disk_gb || 30)}"></div>
@@ -2893,8 +2952,8 @@ async function tabAzFoundry(acc, box) {
   try { d = await api(`/accounts/${acc.id}/azure/foundry?region=${encodeURIComponent(region)}`); }
   catch (e) { box.innerHTML = `<div class="card">❌ ${esc(e.message)}<p class="muted">需要服务主体对订阅有 Contributor 权限，并已注册 Microsoft.CognitiveServices 资源提供程序。</p></div>`; return; }
   const res = d.resources || [], models = d.models || [];
-  const regs = (d.regions || [region]).map((r) => `<option ${r === region ? "selected" : ""}>${esc(r)}</option>`).join("");
-  const resHtml = res.length ? res.map((r) => `<div class="card"><h3>${esc(r.name)} <span class="badge">${esc(r.kind)}</span> <span class="muted">${esc(r.region)} · ${esc(r.resource_group)} · ${esc(r.state || "")}</span></h3>
+  const regs = (d.regions || [region]).map((r) => regionOpt(r, r === region)).join("");
+  const resHtml = res.length ? res.map((r) => `<div class="card"><h3>${esc(r.name)} <span class="badge">${esc(r.kind)}</span> <span class="muted">${esc(regionLabel(r.region))} · ${esc(r.resource_group)} · ${esc(r.state || "")}</span></h3>
       <p class="mono" style="word-break:break-all">${esc(r.endpoint || "-")}</p>
       <div class="acts" style="justify-content:flex-start;flex-wrap:wrap"><button class="btn sm" data-key="${esc(r.id)}">查看 Endpoint / Key</button>
         <button class="btn sm primary" data-dep="${esc(r.id)}" data-reg="${esc(r.region)}">＋ 部署模型</button>
@@ -2909,7 +2968,7 @@ async function tabAzFoundry(acc, box) {
       <div class="acts" style="justify-content:flex-start;flex-wrap:wrap"><label style="margin:0">区域</label><select id="fdReg" style="width:auto">${regs}</select>
         <button class="btn primary" id="fdNew">＋ 新建资源并部署模型</button></div></div>
     ${resHtml}
-    <div class="card"><h3>模型配额 · ${esc(region)}</h3>${q.length ? `<table><tr><th>配额项</th><th>已用 / 上限</th></tr>${q.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.used)} / ${esc(x.limit)}</td></tr>`).join("")}</table>`
+    <div class="card"><h3>模型配额 · ${esc(regionLabel(region))}</h3>${q.length ? `<table><tr><th>配额项</th><th>已用 / 上限</th></tr>${q.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.used)} / ${esc(x.limit)}</td></tr>`).join("")}</table>`
       : `<p class="muted">该区域没有可用配额（学生 / 免费订阅很多区域为 0）。</p>`}</div>`;
   $("#fdReg", box).onchange = (e) => { FOUNDRY_REGION[acc.id] = e.target.value; reload(); };
   const modelOpts = (list) => list.length ? list.map((m) => `<option value="${esc(m.name)}|${esc(m.version)}" data-skus="${esc(m.skus.join(","))}">${esc(m.name)} ${esc(m.version)}${m.default ? "（默认）" : ""}</option>`).join("")
@@ -3121,7 +3180,7 @@ function instCard(acc, i, kind) {
     <div class="kv kv2"><span>公网</span><span class="mono">${esc(i.public_ip || "-")}</span>
     <span>内网</span><span class="mono">${esc(i.private_ip || "-")}</span>
     ${extra.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join("")}
-    <span>可用区</span><span>${esc(i.zone || "-")}</span>
+    <span>可用区</span><span>${esc(i.zone ? regionLabel(i.zone) : "-")}</span>
     ${ip6 !== "-" ? `<span>IPv6</span><span class="mono wide">${ip6}</span>` : ""}</div>
     <div class="ops">${inl.map(([o, l]) => opBtn(o, l, i)).join("")}${more ? `<button class="btn sm" data-more aria-label="更多操作">更多 ▾</button>` : ""}</div></div>`;
 }
@@ -3427,7 +3486,7 @@ function instTable(acc, list, kind) {
   return `<table class="inst-table"><tr><th>名称</th><th>状态</th><th>规格</th><th>公网 IP</th><th>内网 IP</th><th>地域</th><th>创建时间</th><th>操作</th></tr>
     ${list.map((i) => `<tr data-id="${esc(i.id)}"><td><b title="${esc(i.id)}">${esc(i.name)}</b>${(i.ipv6 || []).length ? `<div class="muted mono" title="${esc(i.ipv6.join("\n"))}">${esc(i.ipv6[i.ipv6.length - 1])}${i.ipv6.length > 1 ? ` +${i.ipv6.length - 1}` : ""}</div>` : ""}</td>
     <td><span class="badge ${esc(i.state)}">${esc(i.state)}</span></td><td>${spec(i)}</td><td class="mono nowrap">${esc(i.public_ip || "-")}</td><td class="mono nowrap">${esc(i.private_ip || "-")}</td>
-    <td class="nowrap">${esc(i.zone || i.region || "-")}</td><td class="mono nowrap">${when(i.created)}</td>
+    <td class="nowrap">${esc(i.zone || i.region ? regionLabel(i.zone || i.region) : "-")}</td><td class="mono nowrap">${when(i.created)}</td>
     <td class="row-ops"><div class="row-ops-in">${ops.map(([o, l]) => opBtn(o, l, i, o === "terminate" ? "danger" : "")).join("")}</div></td></tr>`).join("")}</table>`;
 }
 function opsMenu(anchor, ops, pick) {
@@ -3807,10 +3866,10 @@ function openAccMenu() {
     const q = $("#accq").value.trim().toLowerCase();
     let html = "";
     for (const prov of PROVS) {
-      const l = ACCOUNTS.filter((a) => a.provider === prov && (!q || (a.name + " " + (a.region || "") + " " + PNAME[prov]).toLowerCase().includes(q)));
+      const l = ACCOUNTS.filter((a) => a.provider === prov && (!q || (a.name + " " + (a.region ? regionLabel(a.region) : "") + " " + PNAME[prov]).toLowerCase().includes(q)));
       if (!l.length) continue;
       html += `<div class="accg">${PNAME[prov]}</div>` + l.map((a) => `<button class="acci ${a.id == p[1] && a.provider === p[0] ? "on" : ""}" data-go="#/${prov}/${a.id}/${mapTab(curTab, prov)}">
-        <span class="dot ${prov}"></span><span class="grow">${esc(a.name)}</span><span class="muted">${esc(a.region || "")}</span></button>`).join("");
+        <span class="dot ${prov}"></span><span class="grow">${esc(a.name)}</span><span class="muted">${esc(a.region ? regionLabel(a.region) : "")}</span></button>`).join("");
     }
     $("#accl").innerHTML = html || `<div class="empty">没有匹配的账号</div>`;
     $("#accl").querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => { closeAccMenu(); go(b.dataset.go); }));

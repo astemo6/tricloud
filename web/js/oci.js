@@ -1,5 +1,5 @@
 // TriCloud 前端 v1.6.0 · OCI：创建 / 抢机、配额、安全组、存储、对象存储、流量、区域订阅、免费额度体检
-import { $, ACCOUNTS, act, api, confirmBox, del, esc, fmtBytes, form, loading, modal, post, regionOf, regionSelect, rq, SETTINGS, toast, view } from "./core.js";
+import { $, ACCOUNTS, act, api, confirmBox, del, esc, fmtBytes, form, loading, modal, post, regionLabel, regionOf, regionSelect, rq, SETTINGS, toast, view } from "./core.js";
 import { loginFields, portModeFields, portsOf, publicWarn, showCreated, trafficDialog } from "./instances.js";
 import { GST } from "./monitors.js";
 import { saveDefaultBtn } from "./settings.js";
@@ -107,7 +107,7 @@ export async function tabOciLimits(acc, box) {
   box.appendChild(regionSubSection(acc));   // 页面最底部，默认折叠
   let r;
   try { r = await api(`/accounts/${acc.id}/oci/limits?${rq(acc)}`); } catch (e) { $("#lb", box).innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
-  $("#lb", box).innerHTML = `<div class="card"><h3>计算配额 · ${esc(r.region)}</h3><table><tr><th>项目</th><th>上限</th><th>已用</th><th>可用</th><th>免费剩余</th></tr>
+  $("#lb", box).innerHTML = `<div class="card"><h3>计算配额 · ${esc(regionLabel(r.region))}</h3><table><tr><th>项目</th><th>上限</th><th>已用</th><th>可用</th><th>免费剩余</th></tr>
     ${r.items.map((i) => `<tr><td>${esc(i.name)}</td><td>${i.limit}</td><td>${i.used ?? "-"}</td><td>${i.available ?? "-"}</td><td>${i.free == null ? "-" : `${i.free_left ?? "?"} / ${i.free}`}</td></tr>`).join("") || `<tr><td colspan=5 class="muted">无数据</td></tr>`}</table>
     <p class="muted">「上限」是 OCI 允许开的量，升级按量付费（PAYG）后会很大；「免费剩余」A1 按${r.a1_basis === "paid" ? "付费号 4 OCPU / 24GB" : r.a1_basis === "free" ? "免费号 2 OCPU / 12GB" : "免费号 2 OCPU / 12GB（未识别账号类型，可在「类型」里刷新）"}计算（2026-06 起免费号减半），E2.1.Micro 2 台，超出部分计费。可用量为 0 时抢机必然失败。</p></div>`;
 }
@@ -308,7 +308,7 @@ function bkScanHtml(s) {
     s.unknown_count ? `${s.unknown_count} 个 Bucket 读不到大小（显示 —，未计入）` : "",
     (s.errors || []).length ? `部分区域读取失败：${s.errors.map((e) => esc(e.region)).join("、")}` : "",
     s.compartments_truncated ? `区间太多，只检测了前 ${s.compartments} 个` : ""].filter(Boolean);
-  const rows = s.buckets.map((b) => `<tr><td class="mono">${esc(b.name)}${b.billing_keep ? ` <span class="badge">保号</span>` : ""}</td><td class="mono">${esc(b.region)}</td><td>${tierLabel(b)}</td>
+  const rows = s.buckets.map((b) => `<tr><td class="mono">${esc(b.name)}${b.billing_keep ? ` <span class="badge">保号</span>` : ""}</td><td class="mono">${esc(regionLabel(b.region))}</td><td>${tierLabel(b)}</td>
     <td>${b.size == null ? "—" : fmtBytes(b.size)}</td><td>${b.count == null ? "—" : esc(b.count)}</td></tr>`).join("");
   return head + verdict + (extra.length ? `<p class="muted">${extra.join("；")}。</p>` : "")
     + (rows ? `<details id="bkBuckets"><summary>已有 Bucket（${s.buckets.length}）</summary><table><tr><th>Bucket</th><th>区域</th><th>存储层</th><th>大小</th><th>对象数</th></tr>${rows}</table></details>` : `<p class="muted">没有找到已有 Bucket。</p>`)
@@ -344,7 +344,7 @@ export async function billingKeepCard(acc, el, again, rescan) {
   const scanHtml = s ? bkScanHtml(s) : `<p class="al warn">⚠️ 检测已有存储失败：${esc(scanErr)}。无法确认标准层已用量，默认按 ${d.default_gb} GB 生成。</p><button class="btn sm" id="bkRescan">重新检测</button>`;
   const over = !!(s && s.over_free), used = s ? +s.standard_gb : 0, defGb = s ? s.fill_gb : d.default_gb;
   if (d.exists) {
-    body += `<div id="bkDone">✅ 已存在保号对象 <span class="mono">${esc(d.bucket)}/${esc(d.object)}</span>：<b>${gib(d.size)}</b>（${esc(d.region)} · ${esc(d.storage_tier || "Standard")}）</div>
+    body += `<div id="bkDone">✅ 已存在保号对象 <span class="mono">${esc(d.bucket)}/${esc(d.object)}</span>：<b>${gib(d.size)}</b>（${esc(regionLabel(d.region))} · ${esc(d.storage_tier || "Standard")}）</div>
       <div id="bkScan">${scanHtml}</div><div class="bar"><button class="btn danger" id="bkDel">删除</button></div>`;
   } else {
     const pend = (d.pending_uploads || []).length, resumable = pend && t && ["failed", "stopped", "interrupted"].includes(t.status) && t.uploaded;
@@ -439,7 +439,7 @@ export async function tabOciRegionSub(acc, box) {
   const subd = d.regions.filter((r) => r.subscribed);
   box.innerHTML = `<h3>已订阅 ${subd.length} 个区域 · 主区域 ${esc(d.home || "-")}</h3>
     <p class="muted">${esc(d.limit_hint)}。订阅<b>不可撤销</b>，订阅后可在顶部区域下拉里切换。</p>
-    <table><tr><th>区域</th><th>Key</th><th>状态</th><th></th></tr>${d.regions.map((r) => `<tr><td>${esc(r.name)}${r.home ? ` <span class="badge done">主区域</span>` : ""}</td><td class="mono">${esc(r.key)}</td>
+    <table><tr><th>区域</th><th>Key</th><th>状态</th><th></th></tr>${d.regions.map((r) => `<tr><td>${esc(regionLabel(r.name))}${r.home ? ` <span class="badge done">主区域</span>` : ""}</td><td class="mono">${esc(r.key)}</td>
       <td>${r.subscribed ? esc(r.status || "已订阅") : `<span class="muted">未订阅</span>`}</td><td>${r.subscribed ? "" : `<button class="btn sm danger" data-sub="${esc(r.key)}" data-n="${esc(r.name)}">订阅</button>`}</td></tr>`).join("")}</table>`;
   box.querySelectorAll("[data-sub]").forEach((b) => (b.onclick = async () => {
     if (!(await confirmBox("订阅区域", `订阅 ${esc(b.dataset.n)}（${esc(b.dataset.sub)}）？<br>⚠️ 订阅后<b>无法取消</b>，免费账号的额外区域名额通常只有 1 个；Always Free 资源仍只在主区域。`, true))) return;

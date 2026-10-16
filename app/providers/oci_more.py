@@ -11,6 +11,7 @@
 """
 import base64
 import datetime as dt
+import hashlib
 import re
 import time
 
@@ -506,6 +507,173 @@ class OCIMore:
         self._bucket_ok(bucket)
         self.os_client.delete_object(self.namespace, bucket, name)
         return {"ok": True}
+
+    # ================= 18b. 保号账单（PAYG：标准层存约 11 GiB 全零对象，超出 10 GB 免费额度，每月约 $0.02–0.03） =================
+    BK_BUCKET = "tricloud-billing-keep"
+    BK_OBJECT = "billing-keep.bin"
+    BK_PART = 64 * 1024 * 1024          # 分片 64 MiB：一块全零缓冲区反复使用，串行上传，内存约 70 MB，不落盘
+
+    def _bk_home(self):
+        """主区域（Always Free / 对象存储免费额度都按租户算，固定放在主区域，便于查找）。"""
+        try:
+            subs = self.identity.list_region_subscriptions(self.cfg["tenancy"]).data
+            return next((s.region_name for s in subs if s.is_home_region), self.cfg["region"])
+        except Exception:
+            return self.cfg["region"]
+
+    def _bk_os(self, region=None):
+        region = region or self._bk_home()
+        c = self._c(oci.object_storage.ObjectStorageClient, dict(self.cfg, region=region))
+        if getattr(self, "_bk_ns", None) is None:
+            self._bk_ns = c.get_namespace(compartment_id=self.cfg["tenancy"]).data
+        return c, self._bk_ns, region
+
+    def _bk_uploads(self, c, ns):
+        try:
+            ups = oci.pagination.list_call_get_all_results(c.list_multipart_uploads, ns, self.BK_BUCKET).data
+        except oci.exceptions.ServiceError as e:
+            if e.status == 404:
+                return []
+            raise
+        return [u for u in ups if u.object == self.BK_OBJECT]
+
+    def billing_keep_status(self):
+        """保号对象当前状态：bucket 是否存在、对象大小、是否有未完成的分片上传。只读。"""
+        c, ns, region = self._bk_os()
+        out = {"region": region, "namespace": ns, "bucket": self.BK_BUCKET, "object": self.BK_OBJECT,
+               "bucket_exists": False, "exists": False, "size": 0, "storage_tier": None, "pending_uploads": []}
+        try:
+            b = c.get_bucket(ns, self.BK_BUCKET).data
+        except oci.exceptions.ServiceError as e:
+            if e.status == 404:
+                return out
+            raise
+        out.update(bucket_exists=True, storage_tier=b.storage_tier, auto_tiering=getattr(b, "auto_tiering", None))
+        try:
+            h = c.head_object(ns, self.BK_BUCKET, self.BK_OBJECT)
+            out.update(exists=True, size=int(h.headers.get("content-length") or 0),
+                       modified=h.headers.get("last-modified"))
+        except oci.exceptions.ServiceError as e:
+            if e.status != 404:
+                raise
+        out["pending_uploads"] = [{"upload_id": u.upload_id, "created": str(u.time_created)[:16]} for u in self._bk_uploads(c, ns)]
+        return out
+
+    def _bk_bucket(self, c, ns):
+        """建（或复用）标准层私有 bucket，并关闭自动分层（否则对象会被转到低频层，不再产生账单）。"""
+        try:
+            b = c.get_bucket(ns, self.BK_BUCKET).data
+        except oci.exceptions.ServiceError as e:
+            if e.status != 404:
+                raise
+            c.create_bucket(ns, oci.object_storage.models.CreateBucketDetails(
+                name=self.BK_BUCKET, compartment_id=self.compartment, public_access_type="NoPublicAccess",
+                storage_tier="Standard", auto_tiering="Disabled", freeform_tags={"tricloud": "billing-keep"}))
+            return "created"
+        if b.storage_tier != "Standard":
+            raise RuntimeError(f"已有同名 Bucket {self.BK_BUCKET} 但不是标准层（{b.storage_tier}），请先在控制台删除")
+        if getattr(b, "public_access_type", "NoPublicAccess") != "NoPublicAccess":
+            raise RuntimeError(f"已有同名 Bucket {self.BK_BUCKET} 但不是私有的，请检查")
+        if getattr(b, "auto_tiering", None) not in (None, "Disabled"):
+            c.update_bucket(ns, self.BK_BUCKET, oci.object_storage.models.UpdateBucketDetails(auto_tiering="Disabled"))
+        return "reused"
+
+    def billing_keep_upload(self, total, resume=None, progress=None, checkpoint=None, report=None):
+        """multipart 流式上传 total 字节全零数据。resume={"upload_id", "total"}：续传未完成的上传（跳过已传分片）。
+        report(uploaded, total, upload_id) 每片回调一次；checkpoint(msg) 在分片之间检查是否被停止（停止时保留已传分片，可续传）。"""
+        say = progress or (lambda m: None)
+        c, ns, region = self._bk_os()
+        say(f"主区域 {region}：准备 Bucket {self.BK_BUCKET}（标准层、私有、关闭自动分层）…")
+        self._bk_bucket(c, ns)
+        try:
+            h = c.head_object(ns, self.BK_BUCKET, self.BK_OBJECT)
+            size = int(h.headers.get("content-length") or 0)
+            return {"ok": True, "existed": True, "size": size, "region": region}
+        except oci.exceptions.ServiceError as e:
+            if e.status != 404:
+                raise
+        pending = {u.upload_id for u in self._bk_uploads(c, ns)}
+        upload_id, done = None, {}
+        if resume and resume.get("upload_id") in pending:
+            upload_id, total = resume["upload_id"], int(resume.get("total") or total)
+            for pt in oci.pagination.list_call_get_all_results(c.list_multipart_upload_parts, ns, self.BK_BUCKET,
+                                                                self.BK_OBJECT, upload_id).data:
+                done[pt.part_number] = (pt.etag, int(pt.size or 0))
+            say(f"续传上次未完成的上传：已有 {len(done)} 个分片")
+        for u in pending - {upload_id}:      # 其他残留的分片上传（不知道大小，无法续）直接中止，避免未提交分片持续计费
+            try:
+                c.abort_multipart_upload(ns, self.BK_BUCKET, self.BK_OBJECT, u)
+            except Exception:
+                pass
+        if not upload_id:
+            upload_id = c.create_multipart_upload(ns, self.BK_BUCKET, oci.object_storage.models.CreateMultipartUploadDetails(
+                object=self.BK_OBJECT, content_type="application/octet-stream", storage_tier="Standard")).data.upload_id
+        nparts = (total + self.BK_PART - 1) // self.BK_PART
+        if nparts > 10000:
+            raise RuntimeError("对象过大")
+        buf = bytes(self.BK_PART)
+        md5 = base64.b64encode(hashlib.md5(buf).digest()).decode()
+        uploaded = 0
+        for n in range(1, nparts + 1):
+            ln = min(self.BK_PART, total - (n - 1) * self.BK_PART)
+            if n in done and done[n][1] == ln:
+                uploaded += ln
+                continue
+            if checkpoint:
+                checkpoint(f"上传分片 {n}/{nparts}…")
+            if ln != self.BK_PART:      # 最后一片（只会出现一次）：先释放整片缓冲区再分配，峰值内存不翻倍
+                buf = None
+            body = buf if ln == self.BK_PART else bytes(ln)
+            pmd5 = md5 if ln == self.BK_PART else base64.b64encode(hashlib.md5(body).digest()).decode()
+            for i in range(3):
+                try:
+                    r = c.upload_part(ns, self.BK_BUCKET, self.BK_OBJECT, upload_id, n, body, content_length=ln, content_md5=pmd5)
+                    done[n] = (r.headers.get("etag"), ln)
+                    break
+                except Exception:
+                    if i == 2:
+                        raise
+                    time.sleep(3 * (i + 1))
+            del body
+            uploaded += ln
+            if report:
+                report(uploaded, total, upload_id)
+        say("合并分片…")
+        c.commit_multipart_upload(ns, self.BK_BUCKET, self.BK_OBJECT, upload_id,
+                                  oci.object_storage.models.CommitMultipartUploadDetails(parts_to_commit=[
+                                      oci.object_storage.models.CommitMultipartUploadPartDetails(part_num=k, etag=done[k][0])
+                                      for k in sorted(done)]))
+        h = c.head_object(ns, self.BK_BUCKET, self.BK_OBJECT)
+        return {"ok": True, "existed": False, "size": int(h.headers.get("content-length") or total), "region": region, "parts": nparts}
+
+    def billing_keep_delete(self):
+        """删除保号对象、中止未完成的分片上传，bucket 空了就一并删除。只动 tricloud-billing-keep 这个 bucket。"""
+        c, ns, region = self._bk_os()
+        aborted = 0
+        try:
+            c.get_bucket(ns, self.BK_BUCKET)
+        except oci.exceptions.ServiceError as e:
+            if e.status == 404:
+                return {"ok": True, "deleted": False, "aborted": 0, "bucket_deleted": False}
+            raise
+        for u in self._bk_uploads(c, ns):
+            c.abort_multipart_upload(ns, self.BK_BUCKET, self.BK_OBJECT, u.upload_id)
+            aborted += 1
+        deleted = False
+        try:
+            c.delete_object(ns, self.BK_BUCKET, self.BK_OBJECT)
+            deleted = True
+        except oci.exceptions.ServiceError as e:
+            if e.status != 404:
+                raise
+        bucket_deleted = False
+        if not c.list_objects(ns, self.BK_BUCKET, limit=1).data.objects and not self._bk_uploads(c, ns):
+            try:
+                c.delete_bucket(ns, self.BK_BUCKET)
+                bucket_deleted = True
+            except oci.exceptions.ServiceError:
+                pass
+        return {"ok": True, "deleted": deleted, "aborted": aborted, "bucket_deleted": bucket_deleted, "region": region}
 
     # ================= 20. 免费额度体检 =================
     def free_check(self, a1_free=None):

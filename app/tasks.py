@@ -10,7 +10,8 @@ RUNNING = set()
 LOG_KEEP = 500          # 每个任务最多保留的日志行数（抢机任务可能跑几千次）
 TYPE_NAME = {"snatch": "抢机", "change_ip": "换 IP", "resize": "改配置", "ipv6": "IPv6", "azure_create": "创建 VM",
              "ensure_network": "自动建网", "snapshot": "快照（已移除）", "migrate": "迁移", "cf_delete": "删除 CDN 分发",
-             "reinstall": "重装系统", "net500m": "下行 500Mbps", "foundry": "部署 AI 模型"}
+             "reinstall": "重装系统", "net500m": "下行 500Mbps", "foundry": "部署 AI 模型",
+             "billing_keep": "保号账单"}
 CF_POLL_SECONDS = 30          # 删除 CloudFront 分发：等待停用部署完成的轮询间隔
 CF_WAIT_SECONDS = 45 * 60     # 最长等待
 
@@ -250,6 +251,31 @@ async def _do_foundry(c):
     await telegram.send(f"✅ <b>AI 模型已部署</b>\n{telegram.esc(acc['name'])} / {telegram.esc(r['model'])}\nEndpoint <code>{telegram.esc(r['endpoint'] or '-')}</code>")
 
 
+async def _do_billing_keep(c):
+    """OCI PAYG 保号账单：主区域标准层私有 bucket 里 multipart 流式上传全零对象（串行 64 MiB 分片，不落盘）。
+    进度写在 result（uploaded / total / upload_id）；失败或停止时保留已传分片，再次发起会续传；删除接口会中止它。"""
+    t, p, prov, progress, checkpoint, tlog = c.t, c.p, c.prov, c.progress, c.checkpoint, c.tlog
+    total = int(p["size_bytes"])
+    gib = 1024 ** 3
+    state = {"upload_id": None, "logged": -1}
+
+    def report(uploaded, tot, upload_id):
+        state["upload_id"] = upload_id
+        pct = int(uploaded * 100 / tot) if tot else 100
+        _update(t["id"], quiet=True, message=f"已上传 {uploaded / gib:.2f} / {tot / gib:.2f} GiB（{pct}%）",
+                result={"uploaded": uploaded, "total": tot, "upload_id": upload_id})
+        if pct // 10 != state["logged"]:
+            state["logged"] = pct // 10
+            tlog(f"进度 {uploaded / gib:.2f} / {tot / gib:.2f} GiB（{pct}%）")
+    _update(t["id"], quiet=True, result={"uploaded": 0, "total": total, "upload_id": (p.get("resume") or {}).get("upload_id")})
+    r = await asyncio.to_thread(prov.billing_keep_upload, total, p.get("resume"), progress, checkpoint, report)
+    if r.get("existed"):
+        msg = f"对象已存在（{r['size'] / gib:.2f} GiB），未重复上传"
+    else:
+        msg = f"保号对象已就绪：{r['size'] / gib:.2f} GiB（{r.get('region')}，标准层）"
+    _update(t["id"], status="done", message=msg, result={"uploaded": r["size"], "total": r["size"], "size": r["size"],
+                                                        "region": r.get("region"), "done": True})
+
 # 一次性长任务：任务类型 → 处理函数（c 为 _TaskCtx）。新增任务类型在这里登记即可。
 ONCE_HANDLERS = {
     "change_ip": _do_change_ip,
@@ -262,6 +288,7 @@ ONCE_HANDLERS = {
     "reinstall": _do_reinstall,
     "net500m": _do_net500m,
     "foundry": _do_foundry,
+    "billing_keep": _do_billing_keep,
 }
 
 

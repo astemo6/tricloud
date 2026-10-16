@@ -55,7 +55,11 @@ export function modal(title, bodyHtml, onOk, okText = "确定", danger = false, 
     if (onOpen) onOpen(bg);
     const close = (v) => { bg.remove(); resolve(v); };
     bg.querySelector("[data-x]").onclick = () => close(null);
-    bg.onclick = (e) => { if (e.target === bg) close(null); };
+    // 只有按下和松开都在遮罩本身时才关闭：在输入框里拖选文字、松开时落到遮罩上，click 的目标也是遮罩，不能因此关窗
+    let downOnBg = false;
+    const markDown = (e) => { downOnBg = e.target === bg; };
+    bg.addEventListener("pointerdown", markDown); bg.addEventListener("mousedown", markDown);
+    bg.onclick = (e) => { if (e.target === bg && downOnBg) close(null); downOnBg = false; };
     bg.querySelector("[data-ok]").onclick = async (e) => {
       const b = e.target; b.disabled = true;
       try { const v = onOk ? await onOk(bg) : true; if (v !== false) close(v ?? true); }

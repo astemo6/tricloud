@@ -444,3 +444,113 @@ async def oci_free_check():
             except Exception as e:
                 return {"account_id": a["id"], "name": a["name"], "error": str(e)[:200]}
     return await asyncio.gather(*[one(a) for a in accs])
+
+
+# ================= 18b. 保号账单（仅 PAYG） =================
+# PAYG 账号对象存储标准层免费 10 GB：在主区域的私有标准层 bucket 里放一个约 11 GiB 的全零对象，
+# 超出部分每月约 $0.02–0.03，让账号每月有一笔小额账单。上传是入网流量，不计费。
+BK_GIB = 1024 ** 3
+BK_MIN_GB, BK_MAX_GB, BK_DEFAULT_GB = 10.5, 20, 11
+BK_FREE_HINT = "免费号 20GB 内不收费，无需操作"
+BK_NOTE = ("会在主区域标准层私有 Bucket tricloud-billing-keep 里存放约 11 GB 的全零对象，超出 10 GB 免费额度，"
+           "每月约 $0.02–0.03 账单；上传走入网流量，不计费，也不会产生出网流量。")
+
+
+async def _bk_plan(acc_id):
+    """复用账号类型缓存（core.oci_a1_free）：paid / free / unknown；未缓存时查一次并缓存。"""
+    basis = core.oci_a1_free(acc_id)[2]
+    if basis == "unknown":
+        from . import accounts as _accounts
+        try:
+            await _accounts.account_type(acc_id, refresh=True)
+        except Exception:
+            pass
+        basis = core.oci_a1_free(acc_id)[2]
+    return basis
+
+
+def _bk_last_task(acc_id):
+    return core.q("SELECT * FROM tasks WHERE account_id=? AND type='billing_keep' ORDER BY id DESC LIMIT 1", (acc_id,), one=True)
+
+
+def _bk_task_view(t):
+    if not t:
+        return None
+    import json as _json
+    try:
+        res = _json.loads(t["result"]) if t.get("result") else {}
+    except ValueError:
+        res = {}
+    return {"id": t["id"], "status": t["status"], "message": t["message"], "updated": t["updated"],
+            "uploaded": int(res.get("uploaded") or 0), "total": int(res.get("total") or 0), "size": res.get("size")}
+
+
+async def _bk_oci(fn, *a):
+    try:
+        return await call(fn, *a)
+    except HTTPException:
+        raise
+    except Exception as e:      # oci.exceptions.ServiceError 等：给出明确原因而不是 500
+        raise HTTPException(400, str(getattr(e, "message", None) or e)[:300])
+
+
+@router.get("/api/accounts/{acc_id}/oci/billing-keep")
+async def oci_billing_keep_status(acc_id: int):
+    need_acc(acc_id, "oci")
+    plan = await _bk_plan(acc_id)
+    out = {"plan": plan, "eligible": plan == "paid", "note": BK_NOTE, "default_gb": BK_DEFAULT_GB,
+           "min_gb": BK_MIN_GB, "max_gb": BK_MAX_GB, "task": _bk_task_view(_bk_last_task(acc_id))}
+    if plan == "free":
+        return dict(out, hint=BK_FREE_HINT)
+    if plan != "paid":
+        return dict(out, hint="未能识别账号类型（需 osp-gateway 读权限），无法确认是 PAYG 升级号，暂不开放")
+    return dict(out, **(await _bk_oci(P(acc_id).billing_keep_status)))
+
+
+@router.post("/api/accounts/{acc_id}/oci/billing-keep")
+async def oci_billing_keep_start(acc_id: int, body: dict = Body(default={})):
+    need_acc(acc_id, "oci")
+    try:
+        size_gb = float(body.get("size_gb") if body.get("size_gb") not in (None, "") else BK_DEFAULT_GB)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "size_gb 需为数字")
+    if not BK_MIN_GB <= size_gb <= BK_MAX_GB:
+        raise HTTPException(400, f"size_gb 范围 {BK_MIN_GB:g}–{BK_MAX_GB:g}")
+    plan = await _bk_plan(acc_id)
+    if plan == "free":
+        raise HTTPException(400, f"该账号是免费号：{BK_FREE_HINT}")
+    if plan != "paid":
+        raise HTTPException(400, "未能识别账号类型（需 osp-gateway 读权限），无法确认是 PAYG 升级号")
+    if not body.get("confirm"):
+        raise HTTPException(400, "会产生每月约 $0.02–0.03 的账单，需确认")
+    t = _bk_last_task(acc_id)
+    if t and t["status"] == "running":
+        return {"ok": True, "task_id": t["id"], "running": True}
+    st = await _bk_oci(P(acc_id).billing_keep_status)
+    if st.get("exists"):
+        return {"ok": True, "existed": True, "size": st["size"], "region": st["region"]}
+    resume = None
+    tv = _bk_task_view(t)
+    if t and t["status"] in ("failed", "stopped", "interrupted"):
+        import json as _json
+        try:
+            res = _json.loads(t["result"] or "{}")
+        except ValueError:
+            res = {}
+        if res.get("upload_id") and res["upload_id"] in {u["upload_id"] for u in st.get("pending_uploads") or []}:
+            resume = {"upload_id": res["upload_id"], "total": int(res.get("total") or 0)}
+    total = int((resume or {}).get("total") or round(size_gb * BK_GIB))
+    tid = tasks.create_task("billing_keep", acc_id, {"name": "保号账单", "size_bytes": total, "resume": resume})
+    return {"ok": True, "task_id": tid, "total": total, "resumed": bool(resume),
+            "resumed_from": tv["uploaded"] if resume and tv else 0}
+
+
+@router.delete("/api/accounts/{acc_id}/oci/billing-keep")
+async def oci_billing_keep_delete(acc_id: int, confirm: bool = False):
+    need_acc(acc_id, "oci")
+    if not confirm:
+        raise HTTPException(400, "删除保号对象需确认")
+    t = _bk_last_task(acc_id)
+    if t and t["status"] == "running":
+        raise HTTPException(409, "上传任务仍在运行，请先在任务里停止")
+    return await _bk_oci(P(acc_id).billing_keep_delete)

@@ -1,5 +1,5 @@
 // TriCloud 前端 v1.6.0 · OCI：创建 / 抢机、配额、安全组、存储、对象存储、流量、区域订阅、免费额度体检
-import { $, ACCOUNTS, act, api, confirmBox, esc, fmtBytes, form, loading, modal, post, regionOf, regionSelect, rq, SETTINGS, toast, view } from "./core.js";
+import { $, ACCOUNTS, act, api, confirmBox, del, esc, fmtBytes, form, loading, modal, post, regionOf, regionSelect, rq, SETTINGS, toast, view } from "./core.js";
 import { loginFields, portModeFields, portsOf, publicWarn, showCreated, trafficDialog } from "./instances.js";
 import { GST } from "./monitors.js";
 import { saveDefaultBtn } from "./settings.js";
@@ -236,7 +236,8 @@ export async function tabOciStorage(acc, box) {
 export async function tabOciObjects(acc, box, bucket, prefix = "") {
   const reload = () => tabOciObjects(acc, box, bucket, prefix);
   if (!bucket) {
-    box.innerHTML = `<div class="bar">${await regionSelect(acc, () => tabOciObjects(acc, box))}<button class="btn" id="rf">刷新</button><button class="btn primary" id="nb">新建 Bucket</button><span class="grow"></span><span class="muted" id="ns"></span></div><div id="lb"><div class="card"><span class="spin"></span></div></div>`;
+    box.innerHTML = `<div class="bar">${await regionSelect(acc, () => tabOciObjects(acc, box))}<button class="btn" id="rf">刷新</button><button class="btn primary" id="nb">新建 Bucket</button><span class="grow"></span><span class="muted" id="ns"></span></div><div id="bkCard" class="card"><span class="spin"></span> 保号账单…</div><div id="lb"><div class="card"><span class="spin"></span></div></div>`;
+    billingKeepCard(acc, $("#bkCard", box));
     $("#rf", box).onclick = reload;
     let d;
     try { d = await api(`/accounts/${acc.id}/oci/buckets?${rq(acc)}`); } catch (e) { $("#lb", box).innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
@@ -282,6 +283,50 @@ export async function tabOciObjects(acc, box, bucket, prefix = "") {
   box.querySelectorAll("[data-delo]").forEach((b) => (b.onclick = async () => {
     if (await confirmBox("删除对象", `删除「${esc(b.dataset.delo)}」？`, true) && await act(b, () => post(`/accounts/${acc.id}/oci/objects`, { op: "delete", region: regionOf(acc) || undefined, bucket, name: b.dataset.delo }), "已删除")) reload();
   }));
+}
+
+// ---------- 18b. 保号账单（仅 PAYG 升级号）：主区域标准层存约 11 GB 全零对象，超出 10 GB 免费额度，每月约 $0.02–0.03 ----------
+export const BK_TITLE = "一键生成保号账单";
+const gib = (n) => `${((+n || 0) / 1024 ** 3).toFixed(2)} GiB`;
+export async function billingKeepCard(acc, el, again) {
+  if (!el || !el.isConnected) return;
+  const reload = () => billingKeepCard(acc, el, true);
+  let d;
+  try { d = await api(`/accounts/${acc.id}/oci/billing-keep`); } catch (e) { el.innerHTML = `<h3>${BK_TITLE}</h3><div>❌ ${esc(e.message)}</div>`; return; }
+  if (!el.isConnected) return;
+  const t = d.task, running = t && t.status === "running";
+  const head = `<h3>${BK_TITLE} <span class="badge">${d.plan === "paid" ? "PAYG" : d.plan === "free" ? "免费号" : "类型未知"}</span></h3>`;
+  if (!d.eligible) { el.innerHTML = `${head}<p class="muted" id="bkHint">${esc(d.hint || "")}</p>`; return; }
+  let body = `<p class="muted" id="bkNote">${esc(d.note)}</p>`;
+  if (running) {
+    const pct = t.total ? Math.floor((t.uploaded * 100) / t.total) : 0;
+    body += `<div id="bkProg"><progress max="100" value="${pct}" style="width:100%"></progress>
+      <div>上传中：${gib(t.uploaded)} / ${gib(t.total)}（${pct}%） · <a href="javascript:void 0" id="bkTask">任务 #${t.id}</a></div></div>`;
+  } else if (d.exists) {
+    body += `<div id="bkDone">✅ 已存在保号对象 <span class="mono">${esc(d.bucket)}/${esc(d.object)}</span>：<b>${gib(d.size)}</b>（${esc(d.region)} · ${esc(d.storage_tier || "Standard")}）</div>
+      <div class="bar"><button class="btn danger" id="bkDel">删除</button></div>`;
+  } else {
+    const pend = (d.pending_uploads || []).length, resumable = pend && t && ["failed", "stopped", "interrupted"].includes(t.status) && t.uploaded;
+    body += (t && t.status !== "done" ? `<p class="muted">上次任务 #${t.id}：${esc(t.status)} · ${esc(t.message || "")}</p>` : "")
+      + `<div class="bar"><label style="margin:0">大小 GB</label><input id="bkSize" type="number" step="0.5" min="${d.min_gb}" max="${d.max_gb}" value="${d.default_gb}" style="width:6em">
+      <button class="btn primary" id="bkGo">${resumable ? `继续上传（已传 ${gib(t.uploaded)}）` : "生成保号账单"}</button>
+      ${pend ? `<button class="btn danger" id="bkDel">删除未完成的上传</button>` : ""}</div>`;
+  }
+  el.innerHTML = head + body;
+  const tl = $("#bkTask", el); if (tl) tl.onclick = () => window.TaskDrawer && window.TaskDrawer.open(t.id);
+  const go = $("#bkGo", el);
+  if (go) go.onclick = async () => {
+    const size = +$("#bkSize", el).value || d.default_gb;
+    if (!(await confirmBox(BK_TITLE, `${esc(d.note)}<br><br>本次大小：<b>${size} GB</b>（标准层超出 10 GB 的部分按量计费）。删除对象即停止计费。确认开始？`))) return;
+    const r = await act(go, () => post(`/accounts/${acc.id}/oci/billing-keep`, { size_gb: size, confirm: true }));
+    if (r) { if (r.existed) toast(`对象已存在：${gib(r.size)}，未重复上传`); reload(); }
+  };
+  const dl = $("#bkDel", el);
+  if (dl) dl.onclick = async () => {
+    if (!(await confirmBox("删除保号对象", "删除 tricloud-billing-keep 里的保号对象并中止未完成的上传（Bucket 空了一并删除）？之后不再产生这笔账单。", true))) return;
+    if (await act(dl, () => del(`/accounts/${acc.id}/oci/billing-keep?confirm=true`), "已删除")) reload();
+  };
+  if (running) setTimeout(() => billingKeepCard(acc, el, true), again ? 3000 : 2000);
 }
 
 // ---------- OCI 流量：本区域实例本月出站 / 入站（OCI Monitoring，免费） ----------

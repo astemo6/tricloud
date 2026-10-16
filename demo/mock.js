@@ -211,6 +211,7 @@
   // ---------- v1.6 路由：重装 / 块存储 / 区域订阅 / 附加 IP / IP 质量 / 账号类型与停用 / Azure 磁盘 / 500M / 对象存储 / Lightsail 静态 IP / 免费体检 ----------
   var vols = { 1: [{ id: "ocid1.volume.demo1", name: "data-1", size_gb: 50, vpus_per_gb: 10, state: "AVAILABLE", attached_to: "ocid1.instance.oc1.ap-tokyo-1.demo1", attachment_id: "att-demo1", device: "/dev/oracleoci/oraclevdb" }] };
   var boots = { 1: [{ id: "bv1", name: "arm-main (Boot Volume)", size_gb: 100, vpus_per_gb: 10, state: "AVAILABLE" }, { id: "bv2", name: "amd-micro (Boot Volume)", size_gb: 47, vpus_per_gb: 10, state: "AVAILABLE" }] };
+  var bkeep = {};
   var buckets = { 1: [{ name: "backup", created: "2026-03-02 10:11", objs: [{ name: "db/2026-10-01.sql.gz", size: 12582912, created: "2026-10-01 03:00" }, { name: "db/2026-10-08.sql.gz", size: 13107200, created: "2026-10-08 03:00" }, { name: "readme.txt", size: 312, created: "2026-03-02 10:12" }] }] };
   var regionSubs = { 1: ["ap-tokyo-1", "ap-osaka-1"], 2: ["ap-seoul-1"] };
   var ALL_REGIONS = [["ap-tokyo-1", "NRT"], ["ap-osaka-1", "KIX"], ["ap-seoul-1", "ICN"], ["ap-chuncheon-1", "YNY"], ["ap-singapore-1", "SIN"], ["us-ashburn-1", "IAD"], ["us-phoenix-1", "PHX"], ["us-sanjose-1", "SJC"], ["eu-frankfurt-1", "FRA"], ["uk-london-1", "LHR"]];
@@ -325,6 +326,30 @@
       if (body.enable !== false) { if (i5.shape !== "VM.Standard.E2.1.Micro") return { __status: 400, detail: "仅支持免费 AMD 规格 VM.Standard.E2.1.Micro" }; if (!body.confirm) return { __status: 400, detail: "开启后入口 IP 会变成负载均衡器的公网 IP，需确认" };
         var nip = "203.0.113." + (60 + rnd(30)); return { ok: true, task_id: addTask("net500m", id, "下行 500Mbps · " + i5.name, { extra: ["准备 NAT 网关…", "创建网络负载均衡器（保留源地址，TCP+UDP 全端口转发）…", "创建 NAT 路由表并绑定到实例网卡…"], done: "已开启，新入口 IP " + nip, onDone: function () { nlb500[i5.id] = nip; } }) }; }
       return { ok: true, task_id: addTask("net500m", id, "关闭 500Mbps · " + i5.name, { extra: ["还原实例网卡路由…", "删除网络负载均衡器…"], done: "已关闭并还原原公网 IP 入站", onDone: function () { delete nlb500[i5.id]; } }) }; }
+    // v1.6 保号账单（仅 PAYG）：演示里 1 秒约 1 GiB，真实上传按 VPS 到 OCI 的带宽
+    if (p.match(/\/oci\/billing-keep$/)) { var plan = (ACCT_TYPES[id] || {}).plan_type, bks = bkeep[id] = bkeep[id] || { exists: false, size: 0, task: null };
+      var bkPlan = plan === "PAYG" ? "paid" : plan === "FREE_TIER" ? "free" : "unknown", BKN = "会在主区域标准层私有 Bucket tricloud-billing-keep 里存放约 11 GB 的全零对象，超出 10 GB 免费额度，每月约 $0.02–0.03 账单；上传走入网流量，不计费，也不会产生出网流量。";
+      var bkT = bks.task && tasks.find(function (x) { return x.id === bks.task.id; });
+      var bkView = bkT ? { id: bkT.id, status: bkT.status, message: bkT.message, updated: bkT.updated, uploaded: bks.task.uploaded, total: bks.task.total, size: bks.exists ? bks.size : null } : null;
+      if (method === "GET") { var bo = { plan: bkPlan, eligible: bkPlan === "paid", note: BKN, default_gb: 11, min_gb: 10.5, max_gb: 20, task: bkView };
+        if (bkPlan === "free") { bo.hint = "免费号 20GB 内不收费，无需操作"; return bo; }
+        if (bkPlan !== "paid") { bo.hint = "未能识别账号类型（需 osp-gateway 读权限），无法确认是 PAYG 升级号，暂不开放"; return bo; }
+        return Object.assign(bo, { region: (ACCT_TYPES[id] || {}).home_region || "ap-tokyo-1", namespace: "demonamespace", bucket: "tricloud-billing-keep", object: "billing-keep.bin",
+          bucket_exists: bks.exists || !!bkT, exists: bks.exists, size: bks.size, storage_tier: "Standard", pending_uploads: [] }); }
+      if (method === "DELETE") { if (q.get("confirm") !== "true") return { __status: 400, detail: "删除保号对象需确认" }; if (bkT && bkT.status === "running") return { __status: 409, detail: "上传任务仍在运行，请先在任务里停止" };
+        var had = bks.exists; bks.exists = false; bks.size = 0; bks.task = null; return { ok: true, deleted: had, aborted: 0, bucket_deleted: true, region: "ap-tokyo-1" }; }
+      var sg = body.size_gb === undefined || body.size_gb === "" ? 11 : +body.size_gb;
+      if (!(sg >= 10.5 && sg <= 20)) return { __status: 400, detail: "size_gb 范围 10.5–20" };
+      if (bkPlan === "free") return { __status: 400, detail: "该账号是免费号：免费号 20GB 内不收费，无需操作" };
+      if (bkPlan !== "paid") return { __status: 400, detail: "未能识别账号类型（需 osp-gateway 读权限），无法确认是 PAYG 升级号" };
+      if (!body.confirm) return { __status: 400, detail: "会产生每月约 $0.02–0.03 的账单，需确认" };
+      if (bkT && bkT.status === "running") return { ok: true, task_id: bkT.id, running: true };
+      if (bks.exists) return { ok: true, existed: true, size: bks.size, region: "ap-tokyo-1" };
+      var tot = Math.round(sg * 1073741824), tidk = addTask("billing_keep", id, "保号账单 · " + sg + " GB", { extra: ["主区域：准备 Bucket tricloud-billing-keep（标准层、私有、关闭自动分层）…"].concat(Array.from({ length: 4 }, function (_, k) { return "上传分片…（" + ((k + 1) * 25) + "%）"; }), ["合并分片…"]),
+        done: "保号对象已就绪：" + (tot / 1073741824).toFixed(2) + " GiB（ap-tokyo-1，标准层）", onDone: function () { bks.exists = true; bks.size = tot; bks.task.uploaded = tot; } });
+      bks.task = { id: tidk, uploaded: 0, total: tot };
+      var bkIv = setInterval(function () { var tt = tasks.find(function (x) { return x.id === tidk; }); if (!tt || tt.status !== "running" || !bks.task || bks.task.id !== tidk) return clearInterval(bkIv); bks.task.uploaded = Math.min(tot, bks.task.uploaded + Math.round(tot / 6)); }, 900);
+      return { ok: true, task_id: tidk, total: tot, resumed: false, resumed_from: 0 }; }
     if (p.match(/\/oci\/buckets$/) && method === "GET") return { namespace: "demonamespace", buckets: (buckets[id] || []).map(function (b) { return { name: b.name, created: b.created }; }), free_gb: 20 };
     if (p.match(/\/oci\/buckets$/)) { var B = buckets[id] = buckets[id] || [];
       if (body.op === "create") { if (!/^[A-Za-z0-9_.-]{1,256}$/.test(body.name || "")) return { __status: 400, detail: "Bucket 名称只能包含字母、数字、- _ ." }; B.push({ name: body.name, created: new Date().toISOString().slice(0, 16).replace("T", " "), objs: [] }); return { ok: true }; }
@@ -379,7 +404,7 @@
       var a = accounts.find(function (x) { return x.id == m[1]; });
       var F = { oci: { user: { set: true, hint: "…demo01" }, tenancy: { set: true, hint: "…demo02" }, fingerprint: { set: true, hint: "…:ab:cd" }, key_content: { set: true }, pass_phrase: { set: false }, region: a.region || "", compartment: "", home_region: "" },
         aws: { access_key: { set: true, hint: "…DEMO12" }, secret_key: { set: true }, region: a.region || "" },
-        azure: { tenant_id: { set: true, hint: "…000000" }, client_id: { set: true, hint: "…111111" }, client_secret: { set: true }, subscription_id: { set: true, hint: "…222222" }, region: "" } }[a.provider];
+        azure: { tenant_id: { set: true, hint: "…000000" }, client_id: { set: true, hint: "…111111" }, client_secret: { set: true }, subscription_id: { set: true, hint: "…222222" } } }[a.provider];
       return { id: a.id, name: a.name, provider: a.provider, region: a.region, proxy: a.proxy || "", proxy_user: a.proxy_user || "", proxy_pass_set: !!a.proxy_pass_set, fields: F };
     }
     if ((m = p.match(/^\/accounts\/(\d+)$/)) && method === "PATCH" && body) {

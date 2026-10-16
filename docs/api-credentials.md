@@ -71,6 +71,161 @@ allow group <你的组> to read usage-reports in tenancy
 
 > 面板对缺权限做了降级处理（如 DescribeRegions 失败会用内置区域列表），但缺关键权限对应功能会报错，届时按报错提示补权限即可。
 
+
+### AWS 新号 Credit：查询与一键完成活动
+
+2025-07-15 之后注册的 AWS 新账号，注册送 $100 credit，另外完成 5 个「Explore AWS」活动每个再送 $20（最多再送 $100）。面板 AWS 账号页的 **「新号 Credit」** 标签可以查看剩余 credit、到期时间和每个活动的状态，并能一键执行活动。
+
+#### 1. 给 IAM 用户加权限
+
+IAM → 用户 → 你给面板用的用户（如 `tricloud`）→ **权限** → **添加权限** → **创建内联策略** → 切到 **JSON**，粘贴下面其中一段 → 命名（如 `tricloud-credit`）→ 创建。
+
+**A. 只查看状态（只读，推荐至少加这段）**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "FreeTierRead",
+      "Effect": "Allow",
+      "Action": [
+        "freetier:GetAccountPlanState",
+        "freetier:ListAccountActivities",
+        "freetier:GetAccountActivity"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+缺 `freetier:ListAccountActivities` 时，面板能显示剩余 credit，但活动状态会显示「无权限读取」。
+
+**B. 查看 + 一键完成活动（完整）**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "FreeTierRead",
+      "Effect": "Allow",
+      "Action": [
+        "freetier:GetAccountPlanState",
+        "freetier:ListAccountActivities",
+        "freetier:GetAccountActivity"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EC2Activity",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances",
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceTypeOfferings",
+        "ec2:DescribeImages",
+        "ec2:TerminateInstances",
+        "ec2:CreateTags",
+        "ssm:GetParameter"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BudgetsActivity",
+      "Effect": "Allow",
+      "Action": [
+        "budgets:ViewBudget",
+        "budgets:ModifyBudget",
+        "budgets:TagResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LambdaActivity",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:ListFunctions",
+        "lambda:CreateFunction",
+        "lambda:GetFunction",
+        "lambda:CreateFunctionUrlConfig",
+        "lambda:DeleteFunctionUrlConfig",
+        "lambda:AddPermission",
+        "lambda:InvokeFunctionUrl",
+        "lambda:DeleteFunction",
+        "lambda:TagResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LambdaRoleOnlyTriCloud",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:GetRole",
+        "iam:TagRole",
+        "iam:PassRole",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
+        "iam:DetachRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:DeleteRole"
+      ],
+      "Resource": "arn:aws:iam::*:role/tricloud-credit-*"
+    },
+    {
+      "Sid": "RDSActivity",
+      "Effect": "Allow",
+      "Action": [
+        "rds:DescribeOrderableDBInstanceOptions",
+        "rds:CreateDBInstance",
+        "rds:DescribeDBInstances",
+        "rds:AddTagsToResource",
+        "rds:DeleteDBInstance"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BedrockActivity",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+IAM 角色权限限定在 `tricloud-credit-*` 名下，面板没法借此改动你其他的角色。如果用户本来就有 `AdministratorAccess`，就不用再加 B 段。
+
+#### 2. Bedrock 模型访问
+
+部分账号首次使用 Bedrock 需要先开通模型：控制台切到 **us-east-1** → Amazon Bedrock → **Model access** → 开通 **Amazon Nova Micro**。未开通时面板会提示。
+
+#### 3. 在面板里操作
+
+1. AWS 账号页 → **新号 Credit** → 点 **刷新**，确认能看到剩余 credit 和 5 个活动。
+2. 对状态为「未开始」的活动点 **一键完成**；或点 **一键全部完成**（需要确认两次）。
+3. 每个活动做什么、什么时候清理：
+
+| 活动 | 面板做的事 | 清理 | 费用（从 credit 扣） |
+|---|---|---|---|
+| EC2 | 默认区域启动 1 台 t3.micro / t2.micro（Amazon Linux 2023） | 约 5 分钟后终止，另有 30 分钟自动关机兜底 | 约 $0.001 |
+| Budgets | 建 $1 月度成本预算 `tricloud-credit-budget` | 预算免费，默认保留 | $0 |
+| Lambda | 建角色 + Python 函数 + 公开函数 URL，访问一次 | 10 分钟后删除函数、URL、角色 | 约 $0 |
+| RDS | 最小 MySQL（db.t4g.micro / db.t3.micro，20 GB，不开公网） | 可用后约 1 分钟删除，不留快照 | 约 $0.01 |
+| Bedrock | us-east-1 用 Nova Micro 发一句话 | 无 | < $0.0001 |
+
+4. 所有资源都打 `tricloud-credit=1` 标签；任务中途停止也会清理。万一有残留，点 **清理残留**（可勾选同时删除预算）。
+
+#### 4. 注意
+
+- AWS 没公开说明 API 完成的操作是否计入活动。面板执行后显示「已执行，等待 AWS 识别」，是否完成以 AWS 返回的状态为准，可能要几分钟到几小时才更新。
+- Bedrock 官方要求「在 playground 里使用」，API 调用可能不算。长时间不更新的话，到控制台 Bedrock → **Playgrounds → Chat** 手动发一句。
+- 升级为付费计划后剩余 credit 仍会显示；不是新免费计划的老账号会提示「不适用」。
+
 ---
 
 ## 三、Microsoft Azure

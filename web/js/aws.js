@@ -194,3 +194,89 @@ export async function tabLightsailV16(acc, box) {
   card.querySelectorAll("[data-lsdet]").forEach((b) => (b.onclick = async () => { if (await confirmBox("解绑静态 IP", "解绑后实例会换成新的动态 IP，静态 IP 开始计费。确定？", true)) op(b, { op: "detach", name: b.dataset.lsdet }); }));
   card.querySelectorAll("[data-lsrel]").forEach((b) => (b.onclick = async () => { if (await confirmBox("释放静态 IP", "释放后这个 IP 无法找回。确定？", true)) op(b, { op: "release", name: b.dataset.lsrel }, "已释放"); }));
 }
+
+// ---------------- build 20：新号 Credit（AWS 新免费计划 Free Tier credit + 5 个活动一键完成） ----------------
+const CR_BADGE = { COMPLETED: "done", IN_PROGRESS: "pending", EXPIRING: "interrupted", NOT_STARTED: "" };
+const CR_STEP = { executed: "已执行，等待 AWS 识别", failed: "执行失败", stopped: "已停止", skipped: "未执行", running: "执行中…", pending: "排队中" };
+export const crMoney = (v, u) => (v == null || v === "" ? "-" : `${u && u !== "USD" ? u + " " : "$"}${(+v).toFixed(2).replace(/\.00$/, "")}`);
+export const crDate = (s) => (s ? String(s).replace("T", " ").slice(0, 16) : "-");
+function crLastRun(a) {
+  const l = a.last_run;
+  if (!l) return "";
+  const cls = l.status === "executed" ? "ok" : l.status === "failed" ? "bad" : "";
+  return `<div class="muted cr-last ${cls}">任务 #${l.task_id}：${esc(CR_STEP[l.status] || l.status)}${l.status === "failed" && l.message ? "：" + esc(l.message) : ""}</div>`;
+}
+export async function tabAwsCredit(acc, box, refresh = false) {
+  const reload = (rf) => tabAwsCredit(acc, box, rf);
+  box.innerHTML = `<div class="card"><span class="spin"></span> 正在读取 Free Tier 计划与活动（freetier，免费接口）…</div>`;
+  let d;
+  try { d = await api(`/accounts/${acc.id}/aws/credits${refresh ? "?refresh=true" : ""}`); } catch (e) { box.innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
+  if (!box.isConnected) return;
+  const p = d.plan || {}, rt = d.running_task;
+  const head = d.state === "ok" ? `<div class="grid" id="crPlan">
+      <div class="card"><h3>剩余 Credit</h3><div class="big">${crMoney(p.remaining, p.unit)}</div><div class="muted">计划 ${esc(p.type || "-")} · ${esc(p.status || "-")}</div></div>
+      <div class="card"><h3>到期时间</h3><div class="big" style="font-size:20px">${esc(crDate(p.expires))}</div><div class="muted">到期后未用完的 credit 失效（以 AWS 为准）</div></div></div>`
+    : `<div class="card al warn" id="crState">⚠️ ${esc(d.message || "无法读取 Free Tier 状态")}${d.permissions ? `<div class="muted">需要的 IAM 只读权限：<span class="mono">${d.permissions.map(esc).join(" / ")}</span></div>` : ""}
+      ${d.state === "not_applicable" ? `<div class="muted">只有使用新免费计划（2025-07-15 之后注册）的账号才有这些活动；下面仍可手动执行，但不会有奖励。</div>` : ""}</div>`;
+  const rows = d.activities.map((a) => `<tr data-k="${a.key}"><td><b>${esc(a.label)}</b>${a.title ? `<div class="muted">${esc(a.title)}</div>` : ""}
+      <div class="muted cr-plan">${esc(a.plan)}</div>${a.note ? `<div class="al warn cr-note">ℹ️ ${esc(a.note)}</div>` : ""}${crLastRun(a)}</td>
+      <td><span class="badge ${CR_BADGE[a.status] || ""}">${esc(a.status_text)}</span></td><td>${crMoney(a.reward, a.unit)}</td>
+      <td>${a.completed_at ? esc(crDate(a.completed_at)) : a.started_at ? `开始于 ${esc(crDate(a.started_at))}` : "-"}</td>
+      <td>${a.runnable ? `<button class="btn sm primary" data-run="${a.key}" ${rt ? "disabled" : ""}>一键完成</button>` : `<span class="muted">✅</span>`}</td></tr>`).join("");
+  const extra = (d.extra_activities || []).length ? `<p class="muted">AWS 另外返回的活动（面板暂不支持一键完成）：${d.extra_activities.map((a) => `${esc(a.title)}（${esc(a.status_text)}）`).join("、")}</p>` : "";
+  box.innerHTML = `${head}
+    <div class="card"><div class="bar"><h3 class="grow" style="margin:0">新号 Credit 活动</h3>
+      <span class="muted">${esc(d.updated_at || "")}${d.cached ? `（缓存，${Math.round(d.age / 60)} 分钟前）` : ""}</span>
+      <button class="btn sm" id="crRf">刷新</button><button class="btn sm" id="crAll" ${rt || !d.pending.length ? "disabled" : ""}>一键全部完成</button>
+      <button class="btn sm danger" id="crClean" ${rt ? "disabled" : ""}>清理残留</button></div>
+      <div id="crRun"></div>
+      <table id="crTable"><tr><th>活动</th><th>状态</th><th>奖励</th><th>完成时间</th><th></th></tr>${rows}</table>${extra}
+      <ul class="muted" id="crNotes">${(d.notes || []).map((n) => `<li>${esc(n)}</li>`).join("")}</ul></div>`;
+  $("#crRf", box).onclick = () => reload(true);
+  if (rt) crProgress(acc, box, rt);
+  box.querySelectorAll("[data-run]").forEach((b) => (b.onclick = async () => {
+    const a = d.activities.find((x) => x.key === b.dataset.run);
+    const ok = await confirmBox(`一键完成：${a.label}`, `${esc(a.plan)}<br><br>${a.note ? esc(a.note) + "<br><br>" : ""}资源打标签 <span class="mono">tricloud-credit=1</span>，用完自动清理。
+      完成后显示「已执行，等待 AWS 识别」——AWS 未公开说明 API 操作是否计入活动，最终以 AWS 返回的活动状态为准（可能要几分钟到几小时）。确认执行？`);
+    if (!ok) return;
+    const r = await act(b, () => post(`/accounts/${acc.id}/aws/credits/activities/${a.key}/run`, { confirm: true }));
+    if (r) { toast(r.message); reload(false); }
+  }));
+  $("#crAll", box).onclick = async () => {
+    const names = d.activities.filter((a) => d.pending.includes(a.key)).map((a) => a.label).join("、");
+    if (!(await confirmBox("一键全部完成", `将按顺序执行未完成的活动：<b>${esc(names)}</b>。<br>每个活动用完自动清理；全部跑完约 20–40 分钟（RDS 最久）。`))) return;
+    if (!(await confirmBox("再次确认：会产生少量费用", `EC2、RDS 会各运行几分钟，Lambda / Bedrock 调用极少，费用金额极小，<b>从 credit 中扣</b>。<br>执行后只表示「已执行，等待 AWS 识别」，不代表已拿到奖励。确认开始？`, true))) return;
+    const r = await act($("#crAll", box), () => post(`/accounts/${acc.id}/aws/credits/run-all`, { confirm: true }));
+    if (r) { toast(r.message + (r.skipped?.length ? "：" + r.skipped.map((s) => s.reason).join("；") : "")); reload(false); }
+  };
+  $("#crClean", box).onclick = async () => {
+    const r0 = await modal("清理残留资源", `<p>删除带 <span class="mono">tricloud-credit=1</span> 标签的 EC2 实例、名称以 tricloud-credit-db 开头的 RDS 实例、Lambda 函数 tricloud-credit-web 和角色 tricloud-credit-lambda-role（不会动其他资源）。</p>
+      <label><input type="checkbox" name="include_budget" style="width:auto"> 同时删除预算 tricloud-credit-budget（预算免费，一般不用删）</label>`,
+      (bg) => post(`/accounts/${acc.id}/aws/credits/cleanup`, { confirm: true, ...form(bg) }), "清理", true);
+    if (!r0) return;
+    const n = r0.deleted.length, e = r0.errors.length;
+    toast(n ? `已清理 ${n} 项：${r0.deleted.map((x) => x.id).join("、")}` + (e ? `；${e} 项失败：${r0.errors.map((x) => x.error).join("；")}` : "") : e ? `清理失败：${r0.errors.map((x) => x.error).join("；")}` : "没有残留资源", e > 0);
+  };
+}
+async function crProgress(acc, box, rt) {
+  const el = $("#crRun", box);
+  let after = 0, lines = [];
+  const tick = async () => {
+    if (!el.isConnected) return;
+    let t;
+    try { t = await api(`/tasks/${rt.id}?after=${after}`); } catch (_) { setTimeout(tick, 5000); return; }
+    after = t.last_log_id || after;
+    lines = lines.concat((t.logs || []).map((l) => l.msg)).slice(-8);
+    const steps = (t.result && t.result.steps) || {};
+    const keys = rt.activities || [];
+    const done = keys.filter((k) => steps[k] && !["running", "pending"].includes(steps[k].status)).length;
+    el.innerHTML = `<div class="al" id="crProg"><b>任务 #${rt.id} 执行中</b>（${done}/${keys.length}）：${esc(t.message || "")}
+      <progress max="${keys.length || 1}" value="${done}" style="width:100%"></progress>
+      <pre class="mono" style="white-space:pre-wrap;margin:4px 0 0;font-size:12px">${lines.map(esc).join("\n")}</pre>
+      <a href="javascript:void 0" id="crTask">查看完整日志</a></div>`;
+    $("#crTask", el).onclick = () => window.TaskDrawer && window.TaskDrawer.open(rt.id);
+    if (t.status === "running") setTimeout(tick, 3000);
+    else { toast(t.message || "任务结束", t.status === "failed"); tabAwsCredit(acc, box, false); }
+  };
+  tick();
+}

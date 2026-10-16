@@ -379,6 +379,7 @@ def credits_report():
             parts.append(f"已存活 {sm['age_days']} 天")
         if parts:
             lines.append(f"{a['provider'].upper()} · {esc(a['name'])}：" + "；".join(parts))
+    lines += aws_free_plan_lines()
     alerts = credits.expiry_alerts()
     if alerts:
         lines.append("\n⏰ <b>30 天内到期</b>")
@@ -386,6 +387,25 @@ def credits_report():
     if len(lines) == 1:
         lines.append("还没有录入 Credit（在面板账单页添加）")
     return "\n".join(lines)
+
+
+def aws_free_plan_lines():
+    """build 20：AWS 新号 Free Tier Credit（只读面板里 5 分钟内查过的缓存，不额外调用 AWS）。"""
+    from .routers import aws_credit as rc
+    out = []
+    for a in core.list_accounts():
+        hit = rc._CREDITS.get(a["id"]) if a["provider"] == "aws" else None
+        if not hit or hit[1].get("state") != "ok":
+            continue
+        d = hit[1]
+        pl = d.get("plan") or {}
+        acts = [x for x in d.get("activities") or [] if x.get("key")]
+        done = sum(1 for x in acts if x.get("status") == "COMPLETED")
+        rem = pl.get("remaining")
+        out.append(f"AWS 新号 · {esc(a['name'])}：{esc(pl.get('type') or '-')} 计划，剩余 "
+                   + (f"${rem:g}" if isinstance(rem, (int, float)) else "-") + f"，到期 {esc(str(pl.get('expires') or '-')[:10])}"
+                   + (f"，活动 {done}/{len(acts)} 已完成" if acts else "") + f"（{esc(d.get('updated_at') or '')} 查询）")
+    return (["\n🎁 <b>AWS 新号 Free Tier</b>（面板「新号 Credit」页最近查询）"] + out) if out else []
 
 
 HELP = ("/start 按钮菜单（选云 → 账号 → 实例 → 操作）\n/bill 账单汇总\n/tasks 最近任务\n/credits Credit 与到期\n"

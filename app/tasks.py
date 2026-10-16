@@ -11,7 +11,7 @@ LOG_KEEP = 500          # 每个任务最多保留的日志行数（抢机任务
 TYPE_NAME = {"snatch": "抢机", "change_ip": "换 IP", "resize": "改配置", "ipv6": "IPv6", "azure_create": "创建 VM",
              "ensure_network": "自动建网", "snapshot": "快照（已移除）", "migrate": "迁移", "cf_delete": "删除 CDN 分发",
              "reinstall": "重装系统", "net500m": "下行 500Mbps", "foundry": "部署 AI 模型",
-             "billing_keep": "保号账单"}
+             "billing_keep": "保号账单", "aws_credit": "新号 Credit"}
 CF_POLL_SECONDS = 30          # 删除 CloudFront 分发：等待停用部署完成的轮询间隔
 CF_WAIT_SECONDS = 45 * 60     # 最长等待
 
@@ -276,6 +276,70 @@ async def _do_billing_keep(c):
     _update(t["id"], status="done", message=msg, result={"uploaded": r["size"], "total": r["size"], "size": r["size"],
                                                         "region": r.get("region"), "done": True})
 
+async def _do_aws_credit(c):
+    """build 20 AWS 新号 Credit：按顺序执行活动（EC2 / Budgets / Lambda / RDS / Bedrock），每个活动用完自动清理；
+    一个失败不影响后面的；全部结束后刷新一次 freetier 状态。结果写在 result.steps[key]（status=executed / failed / stopped）。
+    AWS 未公开 API 操作是否计入活动，所以成功也只写「已执行，等待 AWS 识别」。"""
+    from .providers.aws_credit import ACT_INFO, _Ctx, friendly
+    from .routers import aws_credit as rc
+    t, p, prov, progress, checkpoint, tlog = c.t, c.p, c.prov, c.progress, c.checkpoint, c.tlog
+    keys = [k for k in (p.get("activities") or []) if k in ACT_INFO]
+    steps, state = {}, {"current": None}
+
+    def save(msg=None):
+        kw = {"result": {"steps": steps, "current": state["current"]}, "quiet": True}
+        if msg:
+            kw["message"] = msg
+        _update(t["id"], **kw)
+    ctx = _Ctx(log=tlog, step=checkpoint, note=progress)
+    for i, k in enumerate(keys, 1):
+        label = ACT_INFO[k]["label"]
+        state["current"] = k
+        steps[k] = {"status": "running", "started": int(time.time())}
+        save(f"（{i}/{len(keys)}）{label}…")
+        tlog(f"===== （{i}/{len(keys)}）{label} =====")
+        try:
+            r = await asyncio.to_thread(prov.credit_run, k, p, ctx)
+            steps[k] = {"status": "executed", "message": "已执行，等待 AWS 识别", "finished": int(time.time()),
+                        "result": {x: v for x, v in (r or {}).items() if x != "reply"}}
+            tlog(f"{label}：已执行，等待 AWS 识别（活动状态可能需要几分钟到几小时才更新）", "ok")
+        except TaskStopped:
+            steps[k] = {"status": "stopped", "message": "已停止（已创建的资源已清理）", "finished": int(time.time())}
+            for k2 in keys[i:]:
+                steps[k2] = {"status": "skipped", "message": "任务已停止，未执行"}
+            state["current"] = None
+            save()
+            raise
+        except Exception as e:
+            msg = friendly(e, k)
+            steps[k] = {"status": "failed", "message": msg, "finished": int(time.time())}
+            tlog(f"{label} 失败：{msg}", "error")
+        save()
+    state["current"] = None
+    ok = [k for k in keys if steps.get(k, {}).get("status") == "executed"]
+    tlog("刷新 AWS Free Tier 活动状态…")
+    st = await asyncio.to_thread(rc.fetch_state, prov)
+    if st.get("state") != "error":
+        st["updated_at"] = services.now_local().strftime("%Y-%m-%d %H:%M:%S")
+        rc.credits_store(t["account_id"], st)
+    if st.get("state") == "ok":
+        cur = {a.get("key"): a.get("status") for a in st.get("activities") or [] if a.get("key")}
+        tlog("AWS 当前状态：" + "；".join(f"{ACT_INFO[k]['label']} {rc.STATUS_TEXT.get(cur.get(k) or '', cur.get(k) or '未返回')}" for k in keys))
+    else:
+        tlog("读取活动状态失败：" + str(st.get("message") or ""), "warn")
+    summary = "、".join(ACT_INFO[k]["label"] for k in ok)
+    if len(ok) == len(keys):
+        _update(t["id"], status="done", result={"steps": steps, "current": None},
+                message=f"已执行 {summary}，等待 AWS 识别（以 AWS 返回的活动状态为准）")
+    else:
+        bad = [k for k in keys if k not in ok]
+        _update(t["id"], status="failed", result={"steps": steps, "current": None},
+                message=f"{len(ok)}/{len(keys)} 已执行；失败：" + "；".join(f"{ACT_INFO[k]['label']}：{steps[k].get('message')}" for k in bad)[:400])
+    acc = c.acc or {}
+    await telegram.send(f"🎁 <b>新号 Credit 任务 #{t['id']}</b>\n{telegram.esc(acc.get('name'))}\n已执行 {len(ok)}/{len(keys)}：{telegram.esc(summary or '-')}"
+                        "\n（等待 AWS 识别，以活动状态为准）")
+
+
 # 一次性长任务：任务类型 → 处理函数（c 为 _TaskCtx）。新增任务类型在这里登记即可。
 ONCE_HANDLERS = {
     "change_ip": _do_change_ip,
@@ -289,6 +353,7 @@ ONCE_HANDLERS = {
     "net500m": _do_net500m,
     "foundry": _do_foundry,
     "billing_keep": _do_billing_keep,
+    "aws_credit": _do_aws_credit,
 }
 
 

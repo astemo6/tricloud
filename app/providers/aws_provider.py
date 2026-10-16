@@ -13,6 +13,7 @@ from botocore.config import Config
 
 from .. import hostname
 from ..core import LightsailRegionError
+from .aws_credit import AWSCredit
 from .aws_more import AWSMore
 from ..cloudinit import cloud_init, gen_password
 
@@ -73,7 +74,7 @@ CF_CACHE_POLICY = {   # AWS 托管缓存策略
 }
 
 
-class AWSProvider(AWSMore):
+class AWSProvider(AWSMore, AWSCredit):
     def __init__(self, cred, region=None):
         self.cred = cred
         self.region = region or cred.get("region") or "us-east-1"

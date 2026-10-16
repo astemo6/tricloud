@@ -24,7 +24,7 @@ public class AccountActivity extends BaseActivity {
         switch (p) {
             case "oci": return new String[][]{{"instances", "实例"}, {"create", "创建实例"}, {"snatch", "自动抢机"}, {"secgroup", "安全组"}, {"storage", "存储"},
                     {"objects", "对象存储"}, {"traffic", "流量"}, {"limits", "配额/网络"}, {"billing", "账单"}};   // 区域订阅收在「配额/网络」页底部（防误点）
-            case "aws": return new String[][]{{"ec2", "EC2"}, {"lightsail", "Lightsail"}, {"regions", "区域"}, {"cloudfront", "CloudFront"}, {"quota", "配额"}, {"recycle", "闲置资源"}, {"billing", "账单"}};
+            case "aws": return new String[][]{{"ec2", "EC2"}, {"lightsail", "Lightsail"}, {"regions", "区域"}, {"cloudfront", "CloudFront"}, {"quota", "配额"}, {"recycle", "闲置资源"}, {"billing", "账单"}, {"credit", "新号 Credit"}};
             default: return new String[][]{{"vms", "虚拟机"}, {"azcreate", "创建 VM"}, {"rgs", "资源组"}, {"azquota", "配额"}, {"foundry", "Foundry"}, {"subscription", "订阅"}, {"billing", "账单"}};
         }
     }
@@ -92,7 +92,7 @@ public class AccountActivity extends BaseActivity {
 
     private void header() {
         clear();
-        if (!MainActivity.noRegion(prov) && !Arrays.asList("cloudfront", "quota", "billing", "subscription", "regions").contains(tab)) {
+        if (!MainActivity.noRegion(prov) && !Arrays.asList("cloudfront", "quota", "billing", "subscription", "regions", "credit").contains(tab)) {
             LinearLayout r2 = row(body);
             boolean ls = "lightsail".equals(tab);   // build 19：Lightsail 只列它支持的区域（如台北 ap-east-2 没有）
             button(r2, "区域：" + Regions.label(region()), v -> {
@@ -166,6 +166,7 @@ public class AccountActivity extends BaseActivity {
             case "cloudfront": cloudfront(); break;
             case "quota": quota(false); break;
             case "recycle": recycle(); break;
+            case "credit": credit(false); break;
             case "billing": billing(false); break;
             case "subscription": subscription(); break;
             case "foundry": foundry(); break;
@@ -991,6 +992,168 @@ public class AccountActivity extends BaseActivity {
             muted(c2, "每账号（L-24B04930）· 更新于 " + q.optString("updated_at"));
             bigButton("重新查询", x -> { header(); quota(true); });
         });
+    }
+
+    // ---------------- build 20：新号 Credit（AWS 新免费计划 Free Tier credit + 5 个活动一键完成） ----------------
+    private int crGen = 0;
+
+    private static String crMoney(JSONObject o, String k) {
+        if (o == null || o.isNull(k) || !o.has(k)) return "-";
+        String u = o.optString("unit", "USD");
+        String v = new java.math.BigDecimal(String.valueOf(o.optDouble(k))).setScale(2, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
+        return ("USD".equals(u) || u.isEmpty() ? "$" : u + " ") + v;
+    }
+
+    private static String crDate(String s) {
+        if (s == null || s.isEmpty() || "null".equals(s)) return "-";
+        s = s.replace("T", " ");
+        return s.length() > 16 ? s.substring(0, 16) : s;
+    }
+
+    private static String crStep(String st) {
+        switch (st) {
+            case "executed": return "已执行，等待 AWS 识别";
+            case "failed": return "执行失败";
+            case "stopped": return "已停止";
+            case "skipped": return "未执行";
+            case "running": return "执行中…";
+            default: return "排队中";
+        }
+    }
+
+    private void credit(boolean refresh) {
+        final int g = ++crGen;
+        LinearLayout wait = card("正在读取 Free Tier 计划与活动…");
+        muted(wait, "freetier 免费接口，结果缓存 5 分钟");
+        Api.get(this, "/accounts/" + id + "/aws/credits" + (refresh ? "?refresh=true" : ""), r -> {
+            if (!"credit".equals(tab) || g != crGen) return;
+            header();
+            crRender(Api.obj(r), g);
+        });
+    }
+
+    private void crRender(JSONObject d, int g) {
+        JSONObject p = d.optJSONObject("plan"), rt = d.optJSONObject("running_task");
+        boolean running = rt != null;
+        if ("ok".equals(d.optString("state")) && p != null) {
+            LinearLayout pc = card("剩余 Credit");
+            text(pc, crMoney(p, "remaining"), 26, true);
+            muted(pc, "计划 " + str(p, "type", "-") + " · " + str(p, "status", "-") + " · 到期 " + crDate(p.optString("expires")));
+        } else {
+            LinearLayout sc = card("无法读取 Free Tier 状态");
+            text(sc, "⚠️ " + str(d, "message", "未知错误"), 13, false);
+            JSONArray perms = d.optJSONArray("permissions");
+            if (perms != null) muted(sc, "需要的 IAM 只读权限：" + join(perms));
+            if ("not_applicable".equals(d.optString("state"))) muted(sc, "只有使用新免费计划（2025-07-15 之后注册）的账号才有这些活动；下面仍可手动执行，但不会有奖励。");
+        }
+        if (running) {
+            LinearLayout rc = card("任务 #" + rt.optInt("id") + " 执行中");
+            JSONArray ks = rt.optJSONArray("activities");
+            JSONObject steps = rt.optJSONObject("steps");
+            int n = ks == null ? 0 : ks.length(), done = 0;
+            for (int i = 0; i < n; i++) {
+                JSONObject st = steps == null ? null : steps.optJSONObject(ks.optString(i));
+                if (st != null && !Arrays.asList("running", "pending").contains(st.optString("status"))) done++;
+            }
+            com.google.android.material.progressindicator.LinearProgressIndicator pi = new com.google.android.material.progressindicator.LinearProgressIndicator(this);
+            pi.setMax(Math.max(1, n));
+            pi.setProgressCompat(done, false);
+            rc.addView(pi, new LinearLayout.LayoutParams(-1, -2));
+            text(rc, "（" + done + "/" + n + "）" + str(rt, "message", ""), 13, false);
+            int tid = rt.optInt("id");
+            button(row(rc), "查看日志 #" + tid, v -> openTask(tid));
+            body.postDelayed(() -> { if (!isFinishing() && "credit".equals(tab) && g == crGen) { clear(); header(); credit(false); } }, 4000);
+        }
+        LinearLayout ac = card("操作");
+        muted(ac, str(d, "updated_at", "") + (d.optBoolean("cached") ? "（缓存，" + Math.round(d.optInt("age") / 60.0) + " 分钟前）" : ""));
+        LinearLayout ar = row(ac);
+        button(ar, "刷新", v -> { clear(); header(); credit(true); });
+        JSONArray pend = d.optJSONArray("pending");
+        android.widget.Button allB = button(ar, "一键全部完成", v -> crRunAll(d));
+        allB.setEnabled(!running && pend != null && pend.length() > 0);
+        android.widget.Button clB = button(ar, "清理残留", v -> crCleanup());
+        clB.setEnabled(!running);
+        JSONArray acts = d.optJSONArray("activities");
+        for (int i = 0; acts != null && i < acts.length(); i++) {
+            JSONObject a = acts.optJSONObject(i);
+            String key = a.optString("key");
+            LinearLayout c = card(a.optString("label") + " · " + a.optString("status_text"));
+            if (!a.isNull("title") && !a.optString("title").isEmpty()) muted(c, a.optString("title"));
+            String when = !a.isNull("completed_at") && !a.optString("completed_at").isEmpty() ? "完成于 " + crDate(a.optString("completed_at"))
+                    : !a.isNull("started_at") && !a.optString("started_at").isEmpty() ? "开始于 " + crDate(a.optString("started_at")) : "";
+            text(c, "奖励 " + crMoney(a, "reward") + (when.isEmpty() ? "" : " · " + when), 13, false);
+            muted(c, a.optString("plan"));
+            if (!a.isNull("note") && !a.optString("note").isEmpty()) muted(c, "ℹ️ " + a.optString("note"));
+            JSONObject lr = a.optJSONObject("last_run");
+            if (lr != null) {
+                String st = lr.optString("status");
+                text(c, "任务 #" + lr.optInt("task_id") + "：" + crStep(st) + ("failed".equals(st) && !lr.optString("message").isEmpty() ? "：" + lr.optString("message") : ""), 12, false);
+            }
+            if (a.optBoolean("runnable")) {
+                android.widget.Button rb = button(row(c), "一键完成", v -> crRun(a));
+                rb.setEnabled(!running);
+            } else if (a.optBoolean("completed")) muted(c, "✅ AWS 显示已完成");
+        }
+        JSONArray notes = d.optJSONArray("notes");
+        if (notes != null && notes.length() > 0) {
+            LinearLayout nc = card("说明");
+            for (int i = 0; i < notes.length(); i++) muted(nc, "• " + notes.optString(i));
+        }
+    }
+
+    private void crRun(JSONObject a) {
+        String key = a.optString("key");
+        confirm("一键完成：" + a.optString("label"), a.optString("plan") + "\n\n" + (a.isNull("note") ? "" : a.optString("note") + "\n\n")
+                + "资源打标签 tricloud-credit=1，用完自动清理。完成后显示「已执行，等待 AWS 识别」——AWS 未公开说明 API 操作是否计入活动，最终以 AWS 返回的活动状态为准（可能要几分钟到几小时）。确认执行？", () -> {
+            try {
+                Api.post(this, "/accounts/" + id + "/aws/credits/activities/" + key + "/run", new JSONObject().put("confirm", true), x -> {
+                    toast(Api.obj(x).optString("message"));
+                    if ("credit".equals(tab)) { clear(); header(); credit(false); }
+                });
+            } catch (Exception ignored) { }
+        });
+    }
+
+    private void crRunAll(JSONObject d) {
+        JSONArray acts = d.optJSONArray("activities"), pend = d.optJSONArray("pending");
+        List<String> names = new ArrayList<>();
+        List<String> pl = new ArrayList<>();
+        for (int i = 0; pend != null && i < pend.length(); i++) pl.add(pend.optString(i));
+        for (int i = 0; acts != null && i < acts.length(); i++) if (pl.contains(acts.optJSONObject(i).optString("key"))) names.add(acts.optJSONObject(i).optString("label"));
+        confirm("一键全部完成", "将按顺序执行未完成的活动：" + android.text.TextUtils.join("、", names) + "。\n每个活动用完自动清理；全部跑完约 20–40 分钟（RDS 最久）。",
+                () -> dangerConfirm("再次确认：会产生少量费用", "EC2、RDS 会各运行几分钟，Lambda / Bedrock 调用极少，费用金额极小，从 credit 中扣。\n执行后只表示「已执行，等待 AWS 识别」，不代表已拿到奖励。确认开始？", "开始执行", () -> {
+                    try {
+                        Api.post(this, "/accounts/" + id + "/aws/credits/run-all", new JSONObject().put("confirm", true), x -> {
+                            JSONObject o = Api.obj(x);
+                            JSONArray sk = o.optJSONArray("skipped");
+                            StringBuilder sb = new StringBuilder(o.optString("message"));
+                            for (int i = 0; sk != null && i < sk.length(); i++) sb.append(i == 0 ? "：" : "；").append(sk.optJSONObject(i).optString("reason"));
+                            toast(sb.toString());
+                            if ("credit".equals(tab)) { clear(); header(); credit(false); }
+                        });
+                    } catch (Exception ignored) { }
+                }));
+    }
+
+    private void crCleanup() {
+        form("清理残留资源", "删除带 tricloud-credit=1 标签的 EC2 实例、名称以 tricloud-credit-db 开头的 RDS 实例、Lambda 函数 tricloud-credit-web 和角色 tricloud-credit-lambda-role（不会动其他资源）。",
+                Arrays.asList(Field.check("include_budget", "同时删除预算 tricloud-credit-budget（预算免费，一般不用删）", false)), "清理", v -> {
+                    boolean ib = v.optBoolean("include_budget") || "1".equals(v.optString("include_budget")) || "true".equals(v.optString("include_budget"));
+                    try {
+                        Api.post(this, "/accounts/" + id + "/aws/credits/cleanup", new JSONObject().put("confirm", true).put("include_budget", ib), x -> {
+                            JSONObject o = Api.obj(x);
+                            JSONArray del = o.optJSONArray("deleted"), er = o.optJSONArray("errors");
+                            int n = del == null ? 0 : del.length(), e = er == null ? 0 : er.length();
+                            StringBuilder sb = new StringBuilder();
+                            if (n > 0) {
+                                sb.append("已清理 ").append(n).append(" 项：");
+                                for (int i = 0; i < n; i++) sb.append(i == 0 ? "" : "、").append(del.optJSONObject(i).optString("id"));
+                            } else if (e == 0) sb.append("没有残留资源");
+                            for (int i = 0; i < e; i++) sb.append(i == 0 ? (n > 0 ? "；失败：" : "清理失败：") : "；").append(er.optJSONObject(i).optString("error"));
+                            toast(sb.toString());
+                        });
+                    } catch (Exception ignored) { }
+                });
     }
 
     // ---------------- 回收站估算 ----------------

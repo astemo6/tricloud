@@ -386,3 +386,12 @@ def oci_a1_free(acc_id):
     if plan and plan != "FREE_TIER":
         return OCI_A1_PAID[0], OCI_A1_PAID[1], "paid"
     return OCI_A1_FREE_TIER[0], OCI_A1_FREE_TIER[1], "free" if plan == "FREE_TIER" else "unknown"
+
+
+class AwsCreditError(ValueError):
+    """build 20 AWS 新号 Credit：给用户看的友好错误（不含异常栈）。kind：denied / not_applicable / unsupported / error。
+    放在 core 里，路由不必提前导入 boto3；ValueError 子类，common.call() 会转成 400。"""
+
+    def __init__(self, msg, kind="error"):
+        super().__init__(msg)
+        self.kind = kind

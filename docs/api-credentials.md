@@ -65,6 +65,8 @@ allow group <你的组> to read usage-reports in tenancy
 | 配额查询 | `servicequotas:ListServiceQuotas` |
 | 切换 CloudFront 套餐 | `pricing-plan-manager:*`（按量切包月用） |
 | 创建实例时列区域/密钥对 | `ec2:DescribeRegions`、`ec2:DescribeKeyPairs` |
+| 新号 Credit 查询（build 20） | `freetier:GetAccountPlanState`、`freetier:ListAccountActivities`、`freetier:GetAccountActivity`（只读） |
+| 新号 Credit 一键完成活动（可选） | EC2：`ec2:RunInstances / DescribeInstances / TerminateInstances / CreateTags / DescribeInstanceTypeOfferings`、`ssm:GetParameter`；Budgets：`budgets:ModifyBudget / ViewBudget`；Lambda：`iam:CreateRole / GetRole / PassRole / TagRole / DeleteRole`、`lambda:CreateFunction / GetFunction / CreateFunctionUrlConfig / AddPermission / DeleteFunction`；RDS：`rds:CreateDBInstance / DescribeDBInstances / DeleteDBInstance / AddTagsToResource / DescribeOrderableDBInstanceOptions`；Bedrock：`bedrock:InvokeModel` |
 | 账单页 IAM 相关开关 | root 账号去 Billing → Account 开 "IAM user and role access to Billing information" |
 
 > 面板对缺权限做了降级处理（如 DescribeRegions 失败会用内置区域列表），但缺关键权限对应功能会报错，届时按报错提示补权限即可。

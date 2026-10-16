@@ -261,6 +261,70 @@
     return secIps[k];
   }
   function rnd(n) { return Math.floor(Math.random() * n); }
+  // ---------- build 20：AWS 新号 Credit ----------
+  var CR_LABEL = { ec2: "EC2 启动实例", budgets: "Budgets 成本预算", lambda: "Lambda 网页应用", rds: "RDS 数据库", bedrock: "Bedrock 基础模型" };
+  var CR_PLAN = { ec2: "在账号默认区域启动 1 台最小免费级实例（t3.micro / t2.micro，Amazon Linux 2023），运行约 5 分钟后终止。约 $0.001，从 credit 扣。",
+    budgets: "创建月度成本预算 tricloud-credit-budget（$1，不加通知）。预算本身免费，默认保留。",
+    lambda: "创建最小执行角色 + Python 函数 + 函数 URL（公开访问），访问一次 URL 验证；保留 10 分钟后自动删除。几乎为 $0。",
+    rds: "创建最小 MySQL 实例（db.t4g.micro，20 GB gp2，单可用区，不开公网），可用后约 1 分钟删除。约 15–30 分钟，约 $0.01。",
+    bedrock: "在 us-east-1 用 Converse 调用 Amazon Nova Micro 发一句话（不到 $0.0001）。" };
+  var crAws = { ec2: { id: "act-ec2", title: "使用 Amazon EC2 启动实例", status: "COMPLETED", completed_at: "2026-10-12T09:21:00+00:00" },
+    budgets: { id: "act-budgets", title: "使用 AWS Budgets 设置成本预算", status: "NOT_STARTED" }, lambda: { id: "act-lambda", title: "使用 AWS Lambda 创建 Web 应用", status: "IN_PROGRESS", started_at: "2026-10-15T03:00:00+00:00" },
+    rds: { id: "act-rds", title: "创建 Amazon RDS 数据库", status: "NOT_STARTED" }, bedrock: { id: "act-bedrock", title: "在 Amazon Bedrock 演练场中使用基础模型", status: "NOT_STARTED" } };
+  var crRuns = {}, crTaskId = null, crTs = Date.now();
+  function crView(id, fresh) {
+    var keys = ["ec2", "budgets", "lambda", "rds", "bedrock"], rt = crTaskId && tasks.find(function (t) { return t.id === crTaskId && t.status === "running"; });
+    var acts = keys.map(function (k) {
+      var a = crAws[k], lr = crRuns[k];
+      return { key: k, label: CR_LABEL[k], activity_id: a.id, title: a.title, status: a.status, status_text: { COMPLETED: "已完成", IN_PROGRESS: "进行中", NOT_STARTED: "未开始", EXPIRING: "即将过期" }[a.status],
+        reward: 20, unit: "USD", completed_at: a.completed_at || null, started_at: a.started_at || null, plan: CR_PLAN[k], runnable: a.status !== "COMPLETED", completed: a.status === "COMPLETED",
+        note: k === "bedrock" ? "官方要求的是「在 Amazon Bedrock playground 里使用基础模型」，用 API 调用不一定会被计入；如长时间不更新，请到控制台 playground 手动发一句。" : null,
+        last_run: lr ? { task_id: lr.task_id, status: rt && rt.id === lr.task_id && lr.status === "pending" ? "running" : lr.status, message: lr.message } : null };
+    });
+    if (fresh) crTs = Date.now();
+    return { state: id === 3 ? "ok" : "denied", message: id === 3 ? undefined : "没有 freetier 读权限：请给该 IAM 用户添加只读权限 freetier:GetAccountPlanState / freetier:ListAccountActivities / freetier:GetAccountActivity",
+      permissions: id === 3 ? undefined : ["freetier:GetAccountPlanState", "freetier:ListAccountActivities", "freetier:GetAccountActivity"],
+      plan: id === 3 ? { account_id: "123456789012", type: "FREE", status: "ACTIVE", remaining: 118.42, unit: "USD", expires: "2027-04-12T00:00:00+00:00" } : undefined,
+      activities: acts, extra_activities: [], pending: acts.filter(function (a) { return a.runnable; }).map(function (a) { return a.key; }),
+      running_task: rt ? { id: rt.id, status: "running", message: rt.message, activities: rt.params.activities, steps: {} } : null,
+      updated_at: new Date(crTs).toISOString().slice(0, 19).replace("T", " "), cached: !fresh, age: Math.round((Date.now() - crTs) / 1000),
+      notes: ["AWS 没有公开说明用 API 完成的操作是否计入活动；面板执行后只表示「已执行，等待 AWS 识别」，不代表已获得奖励，以下方 AWS 返回的状态为准。",
+        "活动状态可能需要几分钟到几小时才更新，可稍后点「刷新」。", "EC2 / RDS / Lambda / Bedrock 会产生极少量费用（RDS、EC2 只运行几分钟），从 Free Tier credit 中扣除；所有资源都打了标签 tricloud-credit=1，用完自动删除。"] };
+  }
+  function crStart(id, keys) {
+    var extra = [];
+    keys.forEach(function (k, i) { extra.push("（" + (i + 1) + "/" + keys.length + "）" + CR_LABEL[k] + "…", CR_LABEL[k] + "：已执行，等待 AWS 识别（活动状态可能需要几分钟到几小时才更新）"); });
+    var tid = addTask("aws_credit", id, "新号 Credit · " + keys.map(function (k) { return CR_LABEL[k]; }).join("、"), { params: { name: "新号 Credit", activities: keys }, extra: extra.concat(["刷新 AWS Free Tier 活动状态…"]),
+      done: "已执行 " + keys.map(function (k) { return CR_LABEL[k]; }).join("、") + "，等待 AWS 识别（以 AWS 返回的活动状态为准）",
+      onDone: function () { keys.forEach(function (k) { crRuns[k] = { task_id: tid, status: "executed", message: "已执行，等待 AWS 识别" }; }); } });
+    keys.forEach(function (k) { crRuns[k] = { task_id: tid, status: "pending" }; });
+    crTaskId = tid; audit1("POST /aws/credits", "任务 #" + tid + "：" + keys.join("、"));
+    return tid;
+  }
+  function route20(method, p, q, body) {
+    var m, a = accOf(p), id = a && a.id;
+    if (/\/aws\/credits$/.test(p) && method === "GET") return crView(id, q.get("refresh") === "true");
+    var running = crTaskId && tasks.some(function (t) { return t.id === crTaskId && t.status === "running"; });
+    if ((m = p.match(/\/aws\/credits\/activities\/([\w-]+)\/run$/))) {
+      if (!body.confirm) return { __status: 400, detail: "会在账号里创建资源并从 credit 扣极少量费用，需确认" };
+      if (running) return { __status: 409, detail: "已有新号 Credit 任务在运行，请等它结束" };
+      var k = m[1]; if (!CR_LABEL[k]) return { __status: 400, detail: "未知活动：" + k };
+      if (crAws[k].status === "COMPLETED") return { __status: 400, detail: CR_LABEL[k] + " 已完成，无需再执行" };
+      return { ok: true, task_id: crStart(id, [k]), activity: k, message: "已开始执行 " + CR_LABEL[k] + "；完成后显示「已执行，等待 AWS 识别」，活动状态以 AWS 返回为准" };
+    }
+    if (/\/aws\/credits\/run-all$/.test(p)) {
+      if (!body.confirm) return { __status: 400, detail: "需确认" };
+      if (running) return { __status: 409, detail: "已有新号 Credit 任务在运行，请等它结束" };
+      var ks = ["ec2", "budgets", "lambda", "rds", "bedrock"].filter(function (x) { return crAws[x].status !== "COMPLETED"; });
+      return { ok: true, task_id: crStart(id, ks), activities: ks, skipped: [], message: "已开始依次执行 " + ks.length + " 个活动" };
+    }
+    if (/\/aws\/credits\/cleanup$/.test(p)) {
+      if (!body.confirm) return { __status: 400, detail: "需确认" };
+      if (running) return { __status: 409, detail: "新号 Credit 任务仍在运行，请先在任务里停止（停止后会自动清理）" };
+      audit1("POST /aws/credits/cleanup", "清理残留");
+      return { ok: true, deleted: body.include_budget ? [{ type: "budget", id: "tricloud-credit-budget" }] : [], errors: [], regions: ["ap-northeast-1"] };
+    }
+  }
   function route16(method, p, q, body) {
     var a = accOf(p), m, id = a && a.id;
     if (p.match(/\/azure\/foundry/) && method === "GET") {
@@ -693,6 +757,7 @@
   function route(method, path, body) {
     var u = new URL(path, "http://x"); var p = u.pathname.replace(/^\/api/, ""); var q = u.searchParams; var m;
     if (p === "/meta") return { providers: ["oci", "aws", "azure"] };
+    var r20 = route20(method, p, q, body); if (r20 !== undefined) return r20;
     var r16 = route16(method, p, q, body); if (r16 !== undefined) return r16;
     var r15 = route15(method, p, q, body); if (r15 !== undefined) return r15;
     var r14 = route14(method, p, q, body); if (r14 !== undefined) return r14;
@@ -1518,7 +1583,7 @@ const loading = () => (view.innerHTML = `<div class="empty"><span class="spin"><
 // ---------------- 路由 ----------------
 const TABS = {
   oci: [["instances", "实例"], ["create", "创建实例"], ["snatch", "自动抢机"], ["secgroup", "安全组"], ["storage", "存储"], ["objects", "对象存储"], ["traffic", "流量"], ["limits", "配额/网络"], ["billing", "账单"]],   // 区域订阅收在「配额/网络」页底部的折叠区（防误点）
-  aws: [["ec2", "EC2"], ["lightsail", "Lightsail"], ["regions", "区域"], ["cloudfront", "CloudFront"], ["quota", "配额"], ["recycle", "闲置资源"], ["billing", "账单"]],
+  aws: [["ec2", "EC2"], ["lightsail", "Lightsail"], ["regions", "区域"], ["cloudfront", "CloudFront"], ["quota", "配额"], ["recycle", "闲置资源"], ["billing", "账单"], ["credit", "新号 Credit"]],
   azure: [["vms", "虚拟机"], ["azcreate", "创建 VM"], ["rgs", "资源组"], ["azquota", "配额"], ["foundry", "Foundry"], ["subscription", "订阅"], ["billing", "账单"]],
 };
 // 已移除的标签：旧链接跳到新位置（#/oci/1/regionsub → 配额/网络）
@@ -2947,6 +3012,92 @@ async function tabLightsailV16(acc, box) {
   card.querySelectorAll("[data-lsrel]").forEach((b) => (b.onclick = async () => { if (await confirmBox("释放静态 IP", "释放后这个 IP 无法找回。确定？", true)) op(b, { op: "release", name: b.dataset.lsrel }, "已释放"); }));
 }
 
+// ---------------- build 20：新号 Credit（AWS 新免费计划 Free Tier credit + 5 个活动一键完成） ----------------
+const CR_BADGE = { COMPLETED: "done", IN_PROGRESS: "pending", EXPIRING: "interrupted", NOT_STARTED: "" };
+const CR_STEP = { executed: "已执行，等待 AWS 识别", failed: "执行失败", stopped: "已停止", skipped: "未执行", running: "执行中…", pending: "排队中" };
+const crMoney = (v, u) => (v == null || v === "" ? "-" : `${u && u !== "USD" ? u + " " : "$"}${(+v).toFixed(2).replace(/\.00$/, "")}`);
+const crDate = (s) => (s ? String(s).replace("T", " ").slice(0, 16) : "-");
+function crLastRun(a) {
+  const l = a.last_run;
+  if (!l) return "";
+  const cls = l.status === "executed" ? "ok" : l.status === "failed" ? "bad" : "";
+  return `<div class="muted cr-last ${cls}">任务 #${l.task_id}：${esc(CR_STEP[l.status] || l.status)}${l.status === "failed" && l.message ? "：" + esc(l.message) : ""}</div>`;
+}
+async function tabAwsCredit(acc, box, refresh = false) {
+  const reload = (rf) => tabAwsCredit(acc, box, rf);
+  box.innerHTML = `<div class="card"><span class="spin"></span> 正在读取 Free Tier 计划与活动（freetier，免费接口）…</div>`;
+  let d;
+  try { d = await api(`/accounts/${acc.id}/aws/credits${refresh ? "?refresh=true" : ""}`); } catch (e) { box.innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
+  if (!box.isConnected) return;
+  const p = d.plan || {}, rt = d.running_task;
+  const head = d.state === "ok" ? `<div class="grid" id="crPlan">
+      <div class="card"><h3>剩余 Credit</h3><div class="big">${crMoney(p.remaining, p.unit)}</div><div class="muted">计划 ${esc(p.type || "-")} · ${esc(p.status || "-")}</div></div>
+      <div class="card"><h3>到期时间</h3><div class="big" style="font-size:20px">${esc(crDate(p.expires))}</div><div class="muted">到期后未用完的 credit 失效（以 AWS 为准）</div></div></div>`
+    : `<div class="card al warn" id="crState">⚠️ ${esc(d.message || "无法读取 Free Tier 状态")}${d.permissions ? `<div class="muted">需要的 IAM 只读权限：<span class="mono">${d.permissions.map(esc).join(" / ")}</span></div>` : ""}
+      ${d.state === "not_applicable" ? `<div class="muted">只有使用新免费计划（2025-07-15 之后注册）的账号才有这些活动；下面仍可手动执行，但不会有奖励。</div>` : ""}</div>`;
+  const rows = d.activities.map((a) => `<tr data-k="${a.key}"><td><b>${esc(a.label)}</b>${a.title ? `<div class="muted">${esc(a.title)}</div>` : ""}
+      <div class="muted cr-plan">${esc(a.plan)}</div>${a.note ? `<div class="al warn cr-note">ℹ️ ${esc(a.note)}</div>` : ""}${crLastRun(a)}</td>
+      <td><span class="badge ${CR_BADGE[a.status] || ""}">${esc(a.status_text)}</span></td><td>${crMoney(a.reward, a.unit)}</td>
+      <td>${a.completed_at ? esc(crDate(a.completed_at)) : a.started_at ? `开始于 ${esc(crDate(a.started_at))}` : "-"}</td>
+      <td>${a.runnable ? `<button class="btn sm primary" data-run="${a.key}" ${rt ? "disabled" : ""}>一键完成</button>` : `<span class="muted">✅</span>`}</td></tr>`).join("");
+  const extra = (d.extra_activities || []).length ? `<p class="muted">AWS 另外返回的活动（面板暂不支持一键完成）：${d.extra_activities.map((a) => `${esc(a.title)}（${esc(a.status_text)}）`).join("、")}</p>` : "";
+  box.innerHTML = `${head}
+    <div class="card"><div class="bar"><h3 class="grow" style="margin:0">新号 Credit 活动</h3>
+      <span class="muted">${esc(d.updated_at || "")}${d.cached ? `（缓存，${Math.round(d.age / 60)} 分钟前）` : ""}</span>
+      <button class="btn sm" id="crRf">刷新</button><button class="btn sm" id="crAll" ${rt || !d.pending.length ? "disabled" : ""}>一键全部完成</button>
+      <button class="btn sm danger" id="crClean" ${rt ? "disabled" : ""}>清理残留</button></div>
+      <div id="crRun"></div>
+      <table id="crTable"><tr><th>活动</th><th>状态</th><th>奖励</th><th>完成时间</th><th></th></tr>${rows}</table>${extra}
+      <ul class="muted" id="crNotes">${(d.notes || []).map((n) => `<li>${esc(n)}</li>`).join("")}</ul></div>`;
+  $("#crRf", box).onclick = () => reload(true);
+  if (rt) crProgress(acc, box, rt);
+  box.querySelectorAll("[data-run]").forEach((b) => (b.onclick = async () => {
+    const a = d.activities.find((x) => x.key === b.dataset.run);
+    const ok = await confirmBox(`一键完成：${a.label}`, `${esc(a.plan)}<br><br>${a.note ? esc(a.note) + "<br><br>" : ""}资源打标签 <span class="mono">tricloud-credit=1</span>，用完自动清理。
+      完成后显示「已执行，等待 AWS 识别」——AWS 未公开说明 API 操作是否计入活动，最终以 AWS 返回的活动状态为准（可能要几分钟到几小时）。确认执行？`);
+    if (!ok) return;
+    const r = await act(b, () => post(`/accounts/${acc.id}/aws/credits/activities/${a.key}/run`, { confirm: true }));
+    if (r) { toast(r.message); reload(false); }
+  }));
+  $("#crAll", box).onclick = async () => {
+    const names = d.activities.filter((a) => d.pending.includes(a.key)).map((a) => a.label).join("、");
+    if (!(await confirmBox("一键全部完成", `将按顺序执行未完成的活动：<b>${esc(names)}</b>。<br>每个活动用完自动清理；全部跑完约 20–40 分钟（RDS 最久）。`))) return;
+    if (!(await confirmBox("再次确认：会产生少量费用", `EC2、RDS 会各运行几分钟，Lambda / Bedrock 调用极少，费用金额极小，<b>从 credit 中扣</b>。<br>执行后只表示「已执行，等待 AWS 识别」，不代表已拿到奖励。确认开始？`, true))) return;
+    const r = await act($("#crAll", box), () => post(`/accounts/${acc.id}/aws/credits/run-all`, { confirm: true }));
+    if (r) { toast(r.message + (r.skipped?.length ? "：" + r.skipped.map((s) => s.reason).join("；") : "")); reload(false); }
+  };
+  $("#crClean", box).onclick = async () => {
+    const r0 = await modal("清理残留资源", `<p>删除带 <span class="mono">tricloud-credit=1</span> 标签的 EC2 实例、名称以 tricloud-credit-db 开头的 RDS 实例、Lambda 函数 tricloud-credit-web 和角色 tricloud-credit-lambda-role（不会动其他资源）。</p>
+      <label><input type="checkbox" name="include_budget" style="width:auto"> 同时删除预算 tricloud-credit-budget（预算免费，一般不用删）</label>`,
+      (bg) => post(`/accounts/${acc.id}/aws/credits/cleanup`, { confirm: true, ...form(bg) }), "清理", true);
+    if (!r0) return;
+    const n = r0.deleted.length, e = r0.errors.length;
+    toast(n ? `已清理 ${n} 项：${r0.deleted.map((x) => x.id).join("、")}` + (e ? `；${e} 项失败：${r0.errors.map((x) => x.error).join("；")}` : "") : e ? `清理失败：${r0.errors.map((x) => x.error).join("；")}` : "没有残留资源", e > 0);
+  };
+}
+async function crProgress(acc, box, rt) {
+  const el = $("#crRun", box);
+  let after = 0, lines = [];
+  const tick = async () => {
+    if (!el.isConnected) return;
+    let t;
+    try { t = await api(`/tasks/${rt.id}?after=${after}`); } catch (_) { setTimeout(tick, 5000); return; }
+    after = t.last_log_id || after;
+    lines = lines.concat((t.logs || []).map((l) => l.msg)).slice(-8);
+    const steps = (t.result && t.result.steps) || {};
+    const keys = rt.activities || [];
+    const done = keys.filter((k) => steps[k] && !["running", "pending"].includes(steps[k].status)).length;
+    el.innerHTML = `<div class="al" id="crProg"><b>任务 #${rt.id} 执行中</b>（${done}/${keys.length}）：${esc(t.message || "")}
+      <progress max="${keys.length || 1}" value="${done}" style="width:100%"></progress>
+      <pre class="mono" style="white-space:pre-wrap;margin:4px 0 0;font-size:12px">${lines.map(esc).join("\n")}</pre>
+      <a href="javascript:void 0" id="crTask">查看完整日志</a></div>`;
+    $("#crTask", el).onclick = () => window.TaskDrawer && window.TaskDrawer.open(rt.id);
+    if (t.status === "running") setTimeout(tick, 3000);
+    else { toast(t.message || "任务结束", t.status === "failed"); tabAwsCredit(acc, box, false); }
+  };
+  tick();
+}
+
 // TriCloud 前端 v1.6.0 · Azure：创建 VM、资源组、配额、订阅、Foundry
 
 // Azure 创建 / 资源组 / 配额
@@ -3231,7 +3382,7 @@ async function pageAccount(acc, tab) {
     storage: tabOciStorage, objects: (a, b) => tabOciObjects(a, b), traffic: tabOciTraffic,
     create: tabOciCreate, snatch: tabOciSnatch, cloudfront: tabCloudFront, quota: tabQuota, recycle: tabRecycle, billing: tabBilling,
     limits: tabOciLimits, regions: tabAwsRegions, azcreate: tabAzCreate, rgs: tabAzRgs, azquota: tabAzQuota,
-    subscription: tabAzSubscription, secgroup: tabOciSecGroup, foundry: tabAzFoundry,
+    subscription: tabAzSubscription, secgroup: tabOciSecGroup, foundry: tabAzFoundry, credit: tabAwsCredit,
   }[tab] || TAB_FNS_EXTRA[tab];
   await fn(acc, box);
 }

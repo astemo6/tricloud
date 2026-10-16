@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from . import core, security, tasks, telegram
-from .routers import (accounts, auth, aws, azure, billing, cloudflare, guard_health, instances, oci, pages, settings,
+from .routers import (accounts, auth, aws, aws_credit, azure, billing, cloudflare, guard_health, instances, oci, pages, settings,
                       tasks_monitors)
 from .routers import security as security_routes
 from .routers.common import VERSION, _token, client_ip
@@ -89,7 +89,7 @@ async def err(req, exc):
 
 
 # 注册顺序 = 匹配顺序。各模块内部的路径互不冲突；静态页与 /static 挂载放最后。
-ROUTERS = (auth, accounts, instances, oci, aws, azure, billing, tasks_monitors, settings, security_routes, cloudflare,
+ROUTERS = (auth, accounts, instances, oci, aws, aws_credit, azure, billing, tasks_monitors, settings, security_routes, cloudflare,
            guard_health, pages)
 for _m in ROUTERS:
     app.include_router(_m.router)

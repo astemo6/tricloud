@@ -27,7 +27,7 @@ final class AccountPage: Page {
         case "oci": return [("instances", "实例"), ("create", "创建实例"), ("snatch", "自动抢机"), ("secgroup", "安全组"), ("storage", "存储"),
                             ("objects", "对象存储"), ("traffic", "流量"), ("limits", "配额/网络"), ("billing", "账单")]   // 区域订阅收在「配额/网络」底部的二级入口（防误点）
         case "aws": return [("ec2", "EC2"), ("lightsail", "Lightsail"), ("regions", "区域"), ("cloudfront", "CloudFront"), ("quota", "配额"),
-                            ("recycle", "闲置资源"), ("billing", "账单")]
+                            ("recycle", "闲置资源"), ("billing", "账单"), ("credit", "新号 Credit")]
         default: return [("vms", "虚拟机"), ("azcreate", "创建 VM"), ("rgs", "资源组"), ("azquota", "配额"), ("foundry", "Foundry"),
                          ("subscription", "订阅"), ("billing", "账单")]
         }
@@ -72,7 +72,7 @@ final class AccountPage: Page {
             Prefs.set("tab_\(self.id)", t)
             self.refresh()
         }
-        if prov != "azure" && !["cloudfront", "quota", "billing", "subscription", "regions"].contains(tab) {
+        if prov != "azure" && !["cloudfront", "quota", "billing", "subscription", "regions", "credit"].contains(tab) {
             nav("globe.asia.australia.fill", "区域", Regions.label(region()), tint: .teal) { self.pickRegion() }
         }
     }
@@ -155,6 +155,7 @@ final class AccountPage: Page {
         case "cloudfront": cloudfront()
         case "quota": quota(false)
         case "recycle": recycle()
+        case "credit": awsCredit(false)
         case "billing": billing(false)
         case "subscription": subscription()
         case "foundry": foundry()

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.0（build 20）(2026-10-16)
+- 新功能：AWS「新号 Credit」标签（Web / Android / iOS）：显示新免费计划的计划类型、剩余 credit、到期时间，以及 5 个官方活动（EC2 / Budgets / Lambda / RDS / Bedrock）的状态、奖励、完成时间。数据来自 freetier `GetAccountPlanState` + `ListAccountActivities`（zh-CN）+ `GetAccountActivity`（端点 us-east-1，免费接口），缓存 5 分钟，`?refresh=true` 跳过缓存。缺 freetier 权限时提示需要的只读权限（`freetier:GetAccountPlanState / ListAccountActivities / GetAccountActivity`），不适用新计划的老账号也友好显示。
+- 每个未完成活动可「一键完成」（后台任务 `aws_credit`，有进度和日志，执行前先做权限检查，失败给中文原因）：EC2 启动最小免费级实例（t3.micro / t2.micro，Amazon Linux 2023，约 5 分钟后终止，实例内另设自动关机终止兜底）；Budgets 创建 $1 月度成本预算 `tricloud-credit-budget`（免费，默认保留）；Lambda 创建无策略的最小执行角色 + Python 函数 + 公开函数 URL，访问一次验证，10 分钟后自动删除；RDS 创建 db.t4g.micro / db.t3.micro MySQL（20 GB gp2、单可用区、不公网、不备份、随机密码不保存），可用后删除（跳过最终快照、删除自动备份）；Bedrock 在 us-east-1 用 Converse 调 Amazon Nova Micro 一句话（界面注明官方写的是 playground，API 调用不一定计入）。所有资源打标签 `tricloud-credit=1`，停止任务也会清理；另有「清理残留资源」按钮（可选同时删预算）和「一键全部完成」（两次确认，提示从 credit 扣少量费用）。执行后只显示「已执行，等待 AWS 识别」，状态以 AWS 返回为准，完成后自动刷新一次。新接口：`GET /api/accounts/{id}/aws/credits`、`POST …/aws/credits/activities/{activity}/run`、`POST …/aws/credits/run-all`、`POST …/aws/credits/cleanup`（都写审计）。Telegram `/credits` 附带最近查询过的新号 Credit 摘要（只读缓存）。
+- 版本：Android versionCode 20 / iOS build 20（versionName 仍 1.6.0）。
+
 ## 1.6.0（build 19）(2026-10-16)
 - App 补齐今天只在后端 + Web 上线的功能（Android versionCode 19 / iOS build 19，versionName 仍 1.6.0）：
   - OCI 对象存储页顶部「一键生成保号账单」卡片（仅 PAYG）：先检测已有存储（标准层已用 X GB / 免费 10 GB，已满足 / 还差 X GB，自动分层 / 归档另注，已有 Bucket 列表），大小默认填补足值（0.5–20 GB），显示补足后合计；已满足时按钮变次要「仍要生成」并多一次红色确认；上传进度、续传、删除（含未完成上传）。免费号显示「免费号 20GB 内不收费，无需操作」。Bucket 列表显示大小 / 对象数 / 存储层（自动分层单独标注）。

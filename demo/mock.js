@@ -255,6 +255,70 @@
     return secIps[k];
   }
   function rnd(n) { return Math.floor(Math.random() * n); }
+  // ---------- build 20：AWS 新号 Credit ----------
+  var CR_LABEL = { ec2: "EC2 启动实例", budgets: "Budgets 成本预算", lambda: "Lambda 网页应用", rds: "RDS 数据库", bedrock: "Bedrock 基础模型" };
+  var CR_PLAN = { ec2: "在账号默认区域启动 1 台最小免费级实例（t3.micro / t2.micro，Amazon Linux 2023），运行约 5 分钟后终止。约 $0.001，从 credit 扣。",
+    budgets: "创建月度成本预算 tricloud-credit-budget（$1，不加通知）。预算本身免费，默认保留。",
+    lambda: "创建最小执行角色 + Python 函数 + 函数 URL（公开访问），访问一次 URL 验证；保留 10 分钟后自动删除。几乎为 $0。",
+    rds: "创建最小 MySQL 实例（db.t4g.micro，20 GB gp2，单可用区，不开公网），可用后约 1 分钟删除。约 15–30 分钟，约 $0.01。",
+    bedrock: "在 us-east-1 用 Converse 调用 Amazon Nova Micro 发一句话（不到 $0.0001）。" };
+  var crAws = { ec2: { id: "act-ec2", title: "使用 Amazon EC2 启动实例", status: "COMPLETED", completed_at: "2026-10-12T09:21:00+00:00" },
+    budgets: { id: "act-budgets", title: "使用 AWS Budgets 设置成本预算", status: "NOT_STARTED" }, lambda: { id: "act-lambda", title: "使用 AWS Lambda 创建 Web 应用", status: "IN_PROGRESS", started_at: "2026-10-15T03:00:00+00:00" },
+    rds: { id: "act-rds", title: "创建 Amazon RDS 数据库", status: "NOT_STARTED" }, bedrock: { id: "act-bedrock", title: "在 Amazon Bedrock 演练场中使用基础模型", status: "NOT_STARTED" } };
+  var crRuns = {}, crTaskId = null, crTs = Date.now();
+  function crView(id, fresh) {
+    var keys = ["ec2", "budgets", "lambda", "rds", "bedrock"], rt = crTaskId && tasks.find(function (t) { return t.id === crTaskId && t.status === "running"; });
+    var acts = keys.map(function (k) {
+      var a = crAws[k], lr = crRuns[k];
+      return { key: k, label: CR_LABEL[k], activity_id: a.id, title: a.title, status: a.status, status_text: { COMPLETED: "已完成", IN_PROGRESS: "进行中", NOT_STARTED: "未开始", EXPIRING: "即将过期" }[a.status],
+        reward: 20, unit: "USD", completed_at: a.completed_at || null, started_at: a.started_at || null, plan: CR_PLAN[k], runnable: a.status !== "COMPLETED", completed: a.status === "COMPLETED",
+        note: k === "bedrock" ? "官方要求的是「在 Amazon Bedrock playground 里使用基础模型」，用 API 调用不一定会被计入；如长时间不更新，请到控制台 playground 手动发一句。" : null,
+        last_run: lr ? { task_id: lr.task_id, status: rt && rt.id === lr.task_id && lr.status === "pending" ? "running" : lr.status, message: lr.message } : null };
+    });
+    if (fresh) crTs = Date.now();
+    return { state: id === 3 ? "ok" : "denied", message: id === 3 ? undefined : "没有 freetier 读权限：请给该 IAM 用户添加只读权限 freetier:GetAccountPlanState / freetier:ListAccountActivities / freetier:GetAccountActivity",
+      permissions: id === 3 ? undefined : ["freetier:GetAccountPlanState", "freetier:ListAccountActivities", "freetier:GetAccountActivity"],
+      plan: id === 3 ? { account_id: "123456789012", type: "FREE", status: "ACTIVE", remaining: 118.42, unit: "USD", expires: "2027-04-12T00:00:00+00:00" } : undefined,
+      activities: acts, extra_activities: [], pending: acts.filter(function (a) { return a.runnable; }).map(function (a) { return a.key; }),
+      running_task: rt ? { id: rt.id, status: "running", message: rt.message, activities: rt.params.activities, steps: {} } : null,
+      updated_at: new Date(crTs).toISOString().slice(0, 19).replace("T", " "), cached: !fresh, age: Math.round((Date.now() - crTs) / 1000),
+      notes: ["AWS 没有公开说明用 API 完成的操作是否计入活动；面板执行后只表示「已执行，等待 AWS 识别」，不代表已获得奖励，以下方 AWS 返回的状态为准。",
+        "活动状态可能需要几分钟到几小时才更新，可稍后点「刷新」。", "EC2 / RDS / Lambda / Bedrock 会产生极少量费用（RDS、EC2 只运行几分钟），从 Free Tier credit 中扣除；所有资源都打了标签 tricloud-credit=1，用完自动删除。"] };
+  }
+  function crStart(id, keys) {
+    var extra = [];
+    keys.forEach(function (k, i) { extra.push("（" + (i + 1) + "/" + keys.length + "）" + CR_LABEL[k] + "…", CR_LABEL[k] + "：已执行，等待 AWS 识别（活动状态可能需要几分钟到几小时才更新）"); });
+    var tid = addTask("aws_credit", id, "新号 Credit · " + keys.map(function (k) { return CR_LABEL[k]; }).join("、"), { params: { name: "新号 Credit", activities: keys }, extra: extra.concat(["刷新 AWS Free Tier 活动状态…"]),
+      done: "已执行 " + keys.map(function (k) { return CR_LABEL[k]; }).join("、") + "，等待 AWS 识别（以 AWS 返回的活动状态为准）",
+      onDone: function () { keys.forEach(function (k) { crRuns[k] = { task_id: tid, status: "executed", message: "已执行，等待 AWS 识别" }; }); } });
+    keys.forEach(function (k) { crRuns[k] = { task_id: tid, status: "pending" }; });
+    crTaskId = tid; audit1("POST /aws/credits", "任务 #" + tid + "：" + keys.join("、"));
+    return tid;
+  }
+  function route20(method, p, q, body) {
+    var m, a = accOf(p), id = a && a.id;
+    if (/\/aws\/credits$/.test(p) && method === "GET") return crView(id, q.get("refresh") === "true");
+    var running = crTaskId && tasks.some(function (t) { return t.id === crTaskId && t.status === "running"; });
+    if ((m = p.match(/\/aws\/credits\/activities\/([\w-]+)\/run$/))) {
+      if (!body.confirm) return { __status: 400, detail: "会在账号里创建资源并从 credit 扣极少量费用，需确认" };
+      if (running) return { __status: 409, detail: "已有新号 Credit 任务在运行，请等它结束" };
+      var k = m[1]; if (!CR_LABEL[k]) return { __status: 400, detail: "未知活动：" + k };
+      if (crAws[k].status === "COMPLETED") return { __status: 400, detail: CR_LABEL[k] + " 已完成，无需再执行" };
+      return { ok: true, task_id: crStart(id, [k]), activity: k, message: "已开始执行 " + CR_LABEL[k] + "；完成后显示「已执行，等待 AWS 识别」，活动状态以 AWS 返回为准" };
+    }
+    if (/\/aws\/credits\/run-all$/.test(p)) {
+      if (!body.confirm) return { __status: 400, detail: "需确认" };
+      if (running) return { __status: 409, detail: "已有新号 Credit 任务在运行，请等它结束" };
+      var ks = ["ec2", "budgets", "lambda", "rds", "bedrock"].filter(function (x) { return crAws[x].status !== "COMPLETED"; });
+      return { ok: true, task_id: crStart(id, ks), activities: ks, skipped: [], message: "已开始依次执行 " + ks.length + " 个活动" };
+    }
+    if (/\/aws\/credits\/cleanup$/.test(p)) {
+      if (!body.confirm) return { __status: 400, detail: "需确认" };
+      if (running) return { __status: 409, detail: "新号 Credit 任务仍在运行，请先在任务里停止（停止后会自动清理）" };
+      audit1("POST /aws/credits/cleanup", "清理残留");
+      return { ok: true, deleted: body.include_budget ? [{ type: "budget", id: "tricloud-credit-budget" }] : [], errors: [], regions: ["ap-northeast-1"] };
+    }
+  }
   function route16(method, p, q, body) {
     var a = accOf(p), m, id = a && a.id;
     if (p.match(/\/azure\/foundry/) && method === "GET") {
@@ -687,6 +751,7 @@
   function route(method, path, body) {
     var u = new URL(path, "http://x"); var p = u.pathname.replace(/^\/api/, ""); var q = u.searchParams; var m;
     if (p === "/meta") return { providers: ["oci", "aws", "azure"] };
+    var r20 = route20(method, p, q, body); if (r20 !== undefined) return r20;
     var r16 = route16(method, p, q, body); if (r16 !== undefined) return r16;
     var r15 = route15(method, p, q, body); if (r15 !== undefined) return r15;
     var r14 = route14(method, p, q, body); if (r14 !== undefined) return r14;

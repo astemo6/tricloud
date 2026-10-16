@@ -87,7 +87,7 @@ export const loading = () => (view.innerHTML = `<div class="empty"><span class="
 // ---------------- 路由 ----------------
 export const TABS = {
   oci: [["instances", "实例"], ["create", "创建实例"], ["snatch", "自动抢机"], ["secgroup", "安全组"], ["storage", "存储"], ["objects", "对象存储"], ["traffic", "流量"], ["limits", "配额/网络"], ["billing", "账单"]],   // 区域订阅收在「配额/网络」页底部的折叠区（防误点）
-  aws: [["ec2", "EC2"], ["lightsail", "Lightsail"], ["regions", "区域"], ["cloudfront", "CloudFront"], ["quota", "配额"], ["recycle", "闲置资源"], ["billing", "账单"]],
+  aws: [["ec2", "EC2"], ["lightsail", "Lightsail"], ["regions", "区域"], ["cloudfront", "CloudFront"], ["quota", "配额"], ["recycle", "闲置资源"], ["billing", "账单"], ["credit", "新号 Credit"]],
   azure: [["vms", "虚拟机"], ["azcreate", "创建 VM"], ["rgs", "资源组"], ["azquota", "配额"], ["foundry", "Foundry"], ["subscription", "订阅"], ["billing", "账单"]],
 };
 // 已移除的标签：旧链接跳到新位置（#/oci/1/regionsub → 配额/网络）

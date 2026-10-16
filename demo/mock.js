@@ -150,7 +150,9 @@
   var deleted = [
     { id: 2, provider: "aws", name: "AWS 试用号", region: "us-east-1", lifecycle_days: 47.5, age_basis: "云上创建日期", est_cost: 0.86, currency: "USD", cost_basis: "账单缓存 2026-09", deleted_at: now - 86400 * 9, source: "panel" },
     { id: 1, provider: "oci", name: "旧号（迁移）", lifecycle_days: 33.5, age_basis: "旧版记录", est_cost: 0, currency: "USD", cost_basis: "旧版记录（删除时的本月账单）", deleted_at: now - 86400 * 40, source: "legacy" }];
-  var secRules = { "sl-demo": [
+  var secRules = { "sl-demo-b": [
+    { direction: "ingress", protocol: "TCP", cidr: "10.0.0.0/16", port: "5432", desc: "postgres 内网", port_min: 5432, port_max: 5432 },
+    { direction: "egress", protocol: "全部", cidr: "0.0.0.0/0", port: "全部", desc: "", port_min: null, port_max: null }], "sl-demo": [
     { direction: "ingress", protocol: "TCP", cidr: "0.0.0.0/0", port: "22", desc: "ssh", port_min: 22, port_max: 22 },
     { direction: "ingress", protocol: "TCP", cidr: "203.0.113.0/24", port: "443", desc: "", port_min: 443, port_max: 443 },
     { direction: "ingress", protocol: "ICMP", cidr: "0.0.0.0/0", port: "全部", desc: "", port_min: null, port_max: null },
@@ -455,9 +457,21 @@
         seclists[0].rules.push({ direction: d0, protocol: pr0, cidr: c1, port: pt, idx: seclists[0].rules.length + 10 }); a0++; });
       audit1("POST /security-rules", "添加 " + a0 + " 条"); return { ok: true, sl_id: seclists[0].id, added: a0, skipped: k0 };
     }
+    if ((m = p.match(/^\/accounts\/(\d+)\/oci\/security-subnets$/))) {
+      // 安全组页子网下拉：同子网实例合并，另有一个没有实例的私有子网；arm-main 演示挂了 NSG
+      var si = (inst[m[1]] || []).filter(function (i) { return i.state !== "terminated"; });
+      var nsgOf = function (i) { return i.name === "arm-main" ? [{ id: "ocid1.networksecuritygroup.demo", name: "web-nsg" }] : []; };
+      return { errors: [], subnets: [
+        { id: "ocid1.subnet.demo-a", name: "subnet-public", cidr: "10.0.0.0/24", ipv6_cidrs: ["2603:c020::/64"], vcn_id: "ocid1.vcn.demo", vcn_name: "vcn-demo", security_list_count: 1,
+          instances: si.map(function (i) { return { id: i.id, name: i.name, state: i.state, nsgs: nsgOf(i) }; }) },
+        { id: "ocid1.subnet.demo-b", name: "subnet-private", cidr: "10.0.1.0/24", ipv6_cidrs: [], vcn_id: "ocid1.vcn.demo", vcn_name: "vcn-demo", security_list_count: 1, instances: [] }] };
+    }
     if ((m = p.match(/^\/accounts\/(\d+)\/security-rules$/))) {
-      var rules = secRules["sl-demo"];
-      if (method === "GET") return { lists: [{ id: "sl-demo", name: "Default Security List for vcn-demo" }], rules: rules.map(function (r, i) { return Object.assign({ idx: i, sl_id: "sl-demo", sl_name: "Default Security List for vcn-demo", stateless: false }, r); }) };
+      var subQ = (method === "GET" ? q.get("subnet_id") : (body && body.subnet_id)) || "";
+      if (!subQ && !(method === "GET" ? q.get("instance_id") : (body && body.instance_id))) return { __status: 400, detail: "请选择子网（subnet_id）或实例（instance_id）" };
+      var slk = subQ === "ocid1.subnet.demo-b" ? "sl-demo-b" : "sl-demo", sln = slk === "sl-demo-b" ? "Private Security List" : "Default Security List for vcn-demo";
+      var rules = secRules[slk];
+      if (method === "GET") return { lists: [{ id: slk, name: sln }], rules: rules.map(function (r, i) { return Object.assign({ idx: i, sl_id: slk, sl_name: sln, stateless: false }, r); }) };
       var r = body.rule || body, pr = (r.protocol || "").toLowerCase(), cidr = (r.cidr || r.source || "").trim(), dir = r.direction || "ingress";
       if (method === "DELETE") {
         var ix = rules.findIndex(function (x) { return x.direction === dir && PROTO[pr] === x.protocol && x.cidr === cidr && (x.port_min == (r.port_min == null ? null : +r.port_min)); });
@@ -478,7 +492,7 @@
         if (exists) { skipped++; return; }
         rules.push({ direction: dir, protocol: PROTO[pr], cidr: cidr, port: x ? (x[0] === x[1] ? String(x[0]) : x[0] + "-" + x[1]) : "全部", desc: r.description || "", port_min: x ? x[0] : null, port_max: x ? x[1] : null }); added++;
       });
-      audit1("POST /security-rules", "添加 " + added + " 条"); return { ok: true, sl_id: "sl-demo", added: added, skipped: skipped };
+      audit1("POST /security-rules", "添加 " + added + " 条"); return { ok: true, sl_id: slk, added: added, skipped: skipped };
     }
     if (p.match(/\/oci\/ipv6\/delete$/)) { if (!body.confirm) return { __status: 400, detail: "删除 IPv6 需确认" }; var oi = (inst[(accOf(p) || {}).id] || []).find(function (i) { return i.id === body.instance_id; }); if (!oi || !oi.ipv6.length) return { __status: 404, detail: "该实例没有 IPv6 地址" }; var dl = oi.ipv6; oi.ipv6 = []; return { ok: true, deleted: dl }; }
     // CloudFront
@@ -752,6 +766,10 @@
     if (p === "/tokens" && method === "GET") return tokens;
     if (p === "/tokens") { var tk = "tc_" + rpw() + rpw(); tokens.push({ id: Date.now(), name: body.name || "token", prefix: tk.slice(0, 7), scope: body.scope || "read", last_used: null }); audit1("POST /tokens", body.name); return { token: tk }; }
     if ((m = p.match(/^\/tokens\/(\d+)$/))) { tokens = tokens.filter(function (x) { return x.id != m[1]; }); return { ok: true }; }
+    if (p === "/audit" && method === "DELETE") {
+      if (q.get("confirm") !== "true") return { __status: 400, detail: "清空审计日志不可恢复，需 confirm=true" };
+      var nAu = audit.length; audit = []; audit1("audit-clear", "清空了 " + nAu + " 条"); return { ok: true, deleted: nAu };
+    }
     if (p === "/audit") return audit.slice(0, +(q.get("limit") || 100));
     if (p === "/2fa/setup") return { secret: "JBSWY3DPEHPK3PXP", uri: "otpauth://totp/TriCloud:demo?secret=JBSWY3DPEHPK3PXP&issuer=TriCloud" };
     if (p === "/2fa/enable") { if (!/^\d{6}$/.test((body && body.code) || "")) return { __status: 400, detail: "请输入 6 位数字（演示：任意 6 位）" }; settings.totp_enabled = true; audit1("POST /2fa/enable"); return { ok: true }; }

@@ -142,7 +142,7 @@ export async function pageSecurity() {
     <p class="muted">给脚本、自建 Bot 调用面板 API 用（Header：Authorization: Bearer tc_...）。只读 Token 只能 GET；任何 Token 都不能改密码、2FA、备份。</p>
     <table><tr><th>名称</th><th>前缀</th><th>权限</th><th>最近使用</th><th></th></tr>${toks.map((t) => `<tr><td>${esc(t.name)}</td><td class="mono">${esc(t.prefix)}…</td><td>${t.scope === "read" ? "只读" : "完全"}</td>
     <td>${t.last_used ? new Date(t.last_used * 1000).toLocaleString() : "从未"}</td><td><button class="btn sm danger" data-rv="${t.id}">吊销</button></td></tr>`).join("") || `<tr><td colspan=5 class="muted">暂无</td></tr>`}</table></div></div>
-  <div class="card"><h3>审计日志（最近 100 条写操作，保留 180 天）</h3><table><tr><th>时间</th><th>IP</th><th>来源</th><th>操作</th><th>结果</th></tr>
+  <div class="card"><div class="bar"><h3 class="grow" style="margin:0">审计日志（最近 100 条写操作，保留 180 天）</h3><button class="btn sm danger" id="auClr">一键清空</button></div><table><tr><th>时间</th><th>IP</th><th>来源</th><th>操作</th><th>结果</th></tr>
     ${logs.map((l) => `<tr><td>${new Date(l.ts * 1000).toLocaleString()}</td><td class="mono">${esc(l.ip)}</td><td>${esc(l.actor)}</td><td class="mono">${esc(l.action)}</td><td>${esc(l.detail)}</td></tr>`).join("") || `<tr><td colspan=5 class="muted">暂无</td></tr>`}</table></div>`;
   if ($("#on")) $("#on").onclick = async () => {
     const r = await post("/2fa/setup").catch((e) => toast(e.message, true));
@@ -161,6 +161,11 @@ export async function pageSecurity() {
     const r = await modal("新建 API Token", `<label>名称</label><input name="name" value="bot"><label>权限</label><select name="scope"><option value="read">只读</option><option value="full">完全（可开关机、换 IP）</option></select>`,
       (bg) => post("/tokens", form(bg)), "生成");
     if (r) { await modal("Token 已生成", `<p>只显示这一次，请立即保存：</p><input value="${esc(r.token)}" readonly onclick="this.select()" class="mono">`, null, "我已保存"); pageSecurity(); }
+  };
+  $("#auClr").onclick = async () => {
+    if (!(await confirmBox("清空审计日志", "将删除全部审计记录，<b>不可恢复</b>。<br>清空后会自动留下一条「audit-clear」记录（谁、何时、哪个 IP 清空的）。确定清空？", true))) return;
+    const r = await act($("#auClr"), () => api("/audit?confirm=true", { method: "DELETE" }));
+    if (r) { toast(`已清空 ${r.deleted} 条审计记录`); pageSecurity(); }
   };
   view.querySelectorAll("[data-rv]").forEach((b) => (b.onclick = async () => { if (await confirmBox("吊销 Token", "使用此 Token 的程序将立即失效。确定？", true)) { await del(`/tokens/${b.dataset.rv}`); pageSecurity(); } }));
   $("#bk").onclick = async () => {

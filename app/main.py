@@ -32,6 +32,7 @@ async def lifespan(app):
 app = FastAPI(title="TriCloud", version=VERSION, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 PUBLIC = {"/api/login", "/api/health"}
 AUDIT_SKIP = {"/api/logout"}
+AUDIT_SKIP_OK = {("DELETE", "/api/audit")}   # 清空审计成功时路由自己写了 audit-clear，中间件不再追加一条
 
 
 @app.middleware("http")
@@ -46,12 +47,15 @@ async def auth_mw(req: Request, call_next):
             # v1.5：从旧版迁移来的 Token（不以 tc_ 开头）在审计里只记 id，不记 Token 片段
             actor = "api_token:" + (tok[:10] if tok.startswith("tc_") else f"legacy#{tk['id']}")
             # API Token 不能管理安全设置
-            if path.startswith(("/api/2fa", "/api/tokens", "/api/password", "/api/backup", "/api/restore", "/api/secrets")):
+            if path.startswith(("/api/2fa", "/api/tokens", "/api/password", "/api/backup", "/api/restore", "/api/secrets")) \
+                    or (path == "/api/audit" and req.method == "DELETE"):   # Token 不能抹掉审计痕迹
                 return JSONResponse({"detail": "API Token 无权访问此接口"}, status_code=403)
         else:
             return JSONResponse({"detail": "未登录"}, status_code=401)
+    req.state.actor = actor
     resp = await call_next(req)
-    if path.startswith("/api/") and req.method != "GET" and path not in AUDIT_SKIP:
+    if path.startswith("/api/") and req.method != "GET" and path not in AUDIT_SKIP \
+            and not ((req.method, path) in AUDIT_SKIP_OK and resp.status_code < 400):
         try:
             security.audit(client_ip(req), actor if path != "/api/login" else "-", f"{req.method} {path}",
                            f"HTTP {resp.status_code}")

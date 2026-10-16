@@ -170,10 +170,31 @@ def _sec_rule_args(r):
     return direction, protocol, cidr
 
 
-@router.get("/api/accounts/{acc_id}/security-rules")
-async def sec_rules(acc_id: int, instance_id: str, region: str = None):
+def _sec_target(instance_id, subnet_id):
+    """安全组规则的目标：subnet_id（新，Web 安全组页按子网）优先；instance_id（旧，App 仍在用）兼容。"""
+    subnet_id, instance_id = (subnet_id or "").strip() or None, (instance_id or "").strip() or None
+    if subnet_id and not subnet_id.startswith("ocid1.subnet."):
+        raise HTTPException(400, "subnet_id 不是子网 OCID")
+    if not subnet_id and not instance_id:
+        raise HTTPException(400, "请选择子网（subnet_id）或实例（instance_id）")
+    return instance_id, subnet_id
+
+
+@router.get("/api/accounts/{acc_id}/oci/security-subnets")
+async def oci_sec_subnets(acc_id: int, region: str = None):
+    """安全组页子网下拉：子网（VCN / 名称 / CIDR）+ 子网里的实例名 + 实例 VNIC 上挂的 NSG（只读）。"""
     need_acc(acc_id, "oci")
-    return await run(services.provider(acc_id, region).security_rules_flat, instance_id)
+    return await run(services.provider(acc_id, region).security_subnets)
+
+
+@router.get("/api/accounts/{acc_id}/security-rules")
+async def sec_rules(acc_id: int, instance_id: str = None, region: str = None, subnet_id: str = None):
+    need_acc(acc_id, "oci")
+    iid, sid = _sec_target(instance_id, subnet_id)
+    try:
+        return await run(services.provider(acc_id, region).security_rules_flat, iid, sid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.post("/api/accounts/{acc_id}/security-rules")
@@ -198,9 +219,10 @@ async def sec_rule_add(acc_id: int, body: dict = Body(...)):
             raise HTTPException(400, "不支持对 0.0.0.0/0（或 ::/0）放行全部端口，请填写具体端口")
         if not body.get("confirm_public"):
             raise HTTPException(409, {"msg": "来源为 0.0.0.0/0：将对整个互联网开放", "public_warning": True})
+    iid, sid = _sec_target(body.get("instance_id"), body.get("subnet_id"))
     try:
-        res = await run(services.provider(acc_id, body.get("region")).add_security_rules, body["instance_id"], body.get("sl_id"),
-                        direction, protocol, cidr, ranges, (r.get("description") or r.get("desc") or "").strip() or None)
+        res = await run(services.provider(acc_id, body.get("region")).add_security_rules, iid, body.get("sl_id"),
+                        direction, protocol, cidr, ranges, (r.get("description") or r.get("desc") or "").strip() or None, sid)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"ok": True, **res}
@@ -211,9 +233,10 @@ async def sec_rule_del(acc_id: int, body: dict = Body(...)):
     need_acc(acc_id, "oci")
     r = body.get("rule") if isinstance(body.get("rule"), dict) else body
     direction, protocol, cidr = _sec_rule_args(r)
+    iid, sid = _sec_target(body.get("instance_id"), body.get("subnet_id"))
     try:
-        return await run(services.provider(acc_id, body.get("region")).delete_security_rule_match, body["instance_id"],
-                         body.get("sl_id"), direction, protocol, cidr, r.get("port_min"), r.get("port_max"))
+        return await run(services.provider(acc_id, body.get("region")).delete_security_rule_match, iid,
+                         body.get("sl_id"), direction, protocol, cidr, r.get("port_min"), r.get("port_max"), sid)
     except (LookupError, ValueError) as e:
         raise HTTPException(404 if isinstance(e, LookupError) else 400, str(e))
 

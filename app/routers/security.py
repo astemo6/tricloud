@@ -1,11 +1,11 @@
 """安全设置：二次验证、API Token、审计日志、加密备份 / 恢复、开机密码。"""
 import base64
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import Response
 
 from .. import core, security, services
-from .common import run
+from .common import client_ip, run
 
 router = APIRouter()
 
@@ -60,6 +60,18 @@ def del_token(tid: int):
 @router.get("/api/audit")
 def audit_log(limit: int = 200):
     return core.q("SELECT * FROM audit ORDER BY id DESC LIMIT ?", (min(limit, 1000),))
+
+
+@router.delete("/api/audit")
+def audit_clear(req: Request, confirm: bool = False):
+    """一键清空审计日志（不可恢复）。清空后立刻写一条 audit-clear，保留谁、何时、哪个 IP 清的痕迹。API Token 不能调用。"""
+    if not confirm:
+        raise HTTPException(400, "清空审计日志不可恢复，需 confirm=true")
+    with core.db() as c:
+        n = c.execute("SELECT COUNT(*) FROM audit").fetchone()[0]
+        c.execute("DELETE FROM audit")
+    security.audit(client_ip(req), getattr(req.state, "actor", "session"), "audit-clear", f"清空了 {n} 条")
+    return {"ok": True, "deleted": n}
 
 
 # ---------------- 备份 / 恢复 ----------------

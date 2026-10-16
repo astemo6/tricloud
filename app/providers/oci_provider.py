@@ -342,8 +342,86 @@ class OCIProvider(OCIMore):
         return {"direction": direction, "protocol": proto, "cidr": r.source if direction == "ingress" else r.destination,
                 "port": port, "desc": r.description or "", "port_min": a, "port_max": b, "stateless": bool(r.is_stateless)}
 
-    def security_rules(self, inst_id):
-        sub = self._subnet_of(inst_id)
+    def _sec_subnet(self, inst_id=None, subnet_id=None):
+        """安全列表跟着子网走：优先按子网 OCID，兼容旧的按实例（主 VNIC 所在子网）。"""
+        if subnet_id:
+            return self.vnet.get_subnet(subnet_id).data
+        if not inst_id:
+            raise ValueError("请选择子网或实例")
+        return self._subnet_of(inst_id)
+
+    def security_subnets(self):
+        """安全组页的子网下拉：区间内所有子网（含没有实例的）+ 各子网里的实例名 + 实例 VNIC 上挂的 NSG（只读提示）。
+        请求数：ListInstances + ListVnicAttachments + ListSubnets + ListVcns 各 1 次（分页），每个 VNIC 1 次 GetVnic，
+        每个不同 NSG 1 次 GetNetworkSecurityGroup；不在本区间的子网 / VCN 各补 1 次 Get。"""
+        from concurrent.futures import ThreadPoolExecutor
+        pg = oci.pagination.list_call_get_all_results
+        insts = {i.id: i for i in pg(self.compute.list_instances, compartment_id=self.compartment).data
+                 if i.lifecycle_state not in ("TERMINATED", "TERMINATING")}
+        atts = [a for a in pg(self.compute.list_vnic_attachments, compartment_id=self.compartment).data
+                if a.lifecycle_state == "ATTACHED" and a.instance_id in insts]
+        errors = []
+
+        def vnic(a):
+            try:
+                return a, self.vnet.get_vnic(a.vnic_id).data
+            except Exception as e:   # noqa: BLE001 —— 单个 VNIC 读不到时仍按挂载记录归到子网，只是没有 NSG 信息
+                errors.append(f"VNIC {a.vnic_id[-8:]}: {getattr(e, 'message', None) or e}")
+                return a, None
+        with ThreadPoolExecutor(8) as ex:
+            vnics = list(ex.map(vnic, atts)) if atts else []
+        subs = {s.id: s for s in pg(self.vnet.list_subnets, compartment_id=self.compartment).data
+                if s.lifecycle_state not in ("TERMINATED", "TERMINATING")}
+        for a, v in vnics:
+            sid = (v.subnet_id if v is not None else None) or a.subnet_id
+            if sid and sid not in subs:
+                try:
+                    subs[sid] = self.vnet.get_subnet(sid).data
+                except Exception as e:   # noqa: BLE001
+                    errors.append(f"子网 {sid[-8:]}: {getattr(e, 'message', None) or e}")
+        vcns = {}
+        try:
+            vcns = {x.id: x.display_name for x in pg(self.vnet.list_vcns, compartment_id=self.compartment).data}
+        except Exception as e:   # noqa: BLE001
+            errors.append(f"VCN 列表: {getattr(e, 'message', None) or e}")
+        nsg_names = {}
+
+        def nsg_name(nid):
+            if nid not in nsg_names:
+                try:
+                    nsg_names[nid] = self.vnet.get_network_security_group(nid).data.display_name
+                except Exception:   # noqa: BLE001 —— 读不到名字时显示 OCID 尾部
+                    nsg_names[nid] = "…" + nid[-8:]
+            return nsg_names[nid]
+        out = {}
+        for sid, s in subs.items():
+            if s.vcn_id and s.vcn_id not in vcns:
+                try:
+                    vcns[s.vcn_id] = self.vnet.get_vcn(s.vcn_id).data.display_name
+                except Exception:   # noqa: BLE001
+                    vcns[s.vcn_id] = ""
+            out[sid] = {"id": sid, "name": s.display_name, "cidr": s.cidr_block, "ipv6_cidrs": list(getattr(s, "ipv6_cidr_blocks", None) or []),
+                        "vcn_id": s.vcn_id, "vcn_name": vcns.get(s.vcn_id, ""), "security_list_count": len(s.security_list_ids or []),
+                        "instances": []}
+        for a, v in vnics:
+            sid = (v.subnet_id if v is not None else None) or a.subnet_id
+            if sid not in out:
+                continue
+            i = insts[a.instance_id]
+            row = next((x for x in out[sid]["instances"] if x["id"] == i.id), None)
+            if row is None:
+                row = {"id": i.id, "name": i.display_name, "state": (i.lifecycle_state or "").lower(), "nsgs": []}
+                out[sid]["instances"].append(row)
+            for nid in (getattr(v, "nsg_ids", None) or []) if v is not None else []:
+                if all(n["id"] != nid for n in row["nsgs"]):
+                    row["nsgs"].append({"id": nid, "name": nsg_name(nid)})
+        for x in out.values():
+            x["instances"].sort(key=lambda r: r["name"] or "")
+        rows = sorted(out.values(), key=lambda x: (not x["instances"], x["vcn_name"] or "", x["name"] or ""))
+        return {"subnets": rows, "errors": errors}
+
+    def security_rules(self, inst_id, subnet_id=None):
+        sub = self._sec_subnet(inst_id, subnet_id)
         out = []
         for sl_id in sub.security_list_ids:
             sl = self.vnet.get_security_list(sl_id).data
@@ -416,22 +494,23 @@ class OCIProvider(OCIMore):
         return (r.protocol, r.source if direction == "ingress" else r.destination,
                 pr.min if pr else None, pr.max if pr else None)
 
-    def _pick_list(self, inst_id, sl_id=None):
-        ids = self._subnet_of(inst_id).security_list_ids or []
+    def _pick_list(self, inst_id, sl_id=None, subnet_id=None):
+        ids = self._sec_subnet(inst_id, subnet_id).security_list_ids or []
+        where = "所选子网" if subnet_id else "实例所在子网"
         if not ids:
-            raise ValueError("实例所在子网没有安全列表")
+            raise ValueError(f"{where}没有安全列表")
         if sl_id and sl_id not in ids:
-            raise ValueError("该安全列表不属于此实例所在子网")
+            raise ValueError(f"该安全列表不属于{where}")
         return sl_id or ids[0]
 
-    def security_rules_flat(self, inst_id):
-        lists = self.security_rules(inst_id)
+    def security_rules_flat(self, inst_id=None, subnet_id=None):
+        lists = self.security_rules(inst_id, subnet_id)
         rules = [dict(r, sl_id=sl["id"], sl_name=sl["name"]) for sl in lists for r in sl["rules"]]
         return {"lists": [{"id": sl["id"], "name": sl["name"]} for sl in lists], "rules": rules}
 
-    def add_security_rules(self, inst_id, sl_id, direction, protocol, cidr, ranges, desc=None):
+    def add_security_rules(self, inst_id, sl_id, direction, protocol, cidr, ranges, desc=None, subnet_id=None):
         ipaddress.ip_network(cidr, strict=False)
-        sl_id = self._pick_list(inst_id, sl_id)
+        sl_id = self._pick_list(inst_id, sl_id, subnet_id)
         sl = self.vnet.get_security_list(sl_id).data
         key = "ingress_security_rules" if direction == "ingress" else "egress_security_rules"
         rules = list(getattr(sl, key) or [])
@@ -460,8 +539,8 @@ class OCIProvider(OCIMore):
         return {"ok": True, "added": res["added"], "skipped": res["skipped"],
                 "groups": [{"kind": "安全列表", "id": res["sl_id"], "name": name, "added": res["added"], "skipped": res["skipped"]}]}
 
-    def delete_security_rule_match(self, inst_id, sl_id, direction, protocol, cidr, port_min=None, port_max=None):
-        sl_id = self._pick_list(inst_id, sl_id)
+    def delete_security_rule_match(self, inst_id, sl_id, direction, protocol, cidr, port_min=None, port_max=None, subnet_id=None):
+        sl_id = self._pick_list(inst_id, sl_id, subnet_id)
         sl = self.vnet.get_security_list(sl_id).data
         key = "ingress_security_rules" if direction == "ingress" else "egress_security_rules"
         rules = list(getattr(sl, key) or [])

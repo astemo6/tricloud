@@ -112,27 +112,44 @@ export async function tabOciLimits(acc, box) {
     <p class="muted">「上限」是 OCI 允许开的量，升级按量付费（PAYG）后会很大；「免费剩余」A1 按${r.a1_basis === "paid" ? "付费号 4 OCPU / 24GB" : r.a1_basis === "free" ? "免费号 2 OCPU / 12GB" : "免费号 2 OCPU / 12GB（未识别账号类型，可在「类型」里刷新）"}计算（2026-06 起免费号减半），E2.1.Micro 2 台，超出部分计费。可用量为 0 时抢机必然失败。</p></div>`;
 }
 
-// ---- OCI 安全组（独立标签页）：按规则内容删除、批量端口、对公网放行二次确认 ----
+// ---- OCI 安全组（独立标签页）：按子网选择（安全列表跟着子网走，同子网实例共享）、按规则内容删除、批量端口、对公网放行二次确认 ----
 export const PUBLIC_CIDR = (c) => ["0.0.0.0/0", "::/0"].includes(String(c || "").replace(/\s/g, ""));
+// 子网下拉文字：「VCN / 子网 CIDR · 实例1、实例2」，实例多于 4 台时「… 等 N 台」
+export const subnetLabel = (s) => {
+  const names = (s.instances || []).map((i) => i.name || "?");
+  const tail = names.length ? names.slice(0, 4).join("、") + (names.length > 4 ? ` 等 ${names.length} 台` : "") : "无实例";
+  return `${s.vcn_name ? s.vcn_name + " / " : ""}${s.name || "子网"} ${s.cidr || ""} · ${tail}`;
+};
 export async function tabOciSecGroup(acc, box) {
   const reload = () => tabOciSecGroup(acc, box);
-  box.innerHTML = `<div class="bar">${await regionSelect(acc, reload)}<select id="sgInst"><option value="">加载实例…</option></select>
+  box.innerHTML = `<div class="bar">${await regionSelect(acc, reload)}<select id="sgSub" title="子网"><option value="">加载子网…</option></select>
     <button class="btn" id="sgRf">刷新</button><button class="btn primary" id="sgAdd" disabled>添加规则</button><span class="grow"></span>
-    <span class="muted">规则作用于实例所在子网的安全列表（同子网实例共享）</span></div><div class="card" id="sgBox"><div class="empty">选择实例后显示安全规则</div></div>`;
+    <span class="muted">安全列表跟着子网走：规则对该子网里的所有实例生效</span></div><div class="card" id="sgBox"><div class="empty">选择子网后显示安全规则</div></div><div id="sgNsg"></div>`;
   $("#sgRf", box).onclick = reload;
-  let list = [];
-  try { list = await api(`/accounts/${acc.id}/instances?kind=vm&${rq(acc)}`); } catch (e) { $("#sgBox", box).innerHTML = `❌ ${esc(e.message)}`; return; }
-  const last = localStorage.getItem("tc_sg_" + acc.id);
-  $("#sgInst", box).innerHTML = list.length ? list.map((i) => `<option value="${esc(i.id)}" ${i.id === last ? "selected" : ""}>${esc(i.name)} · ${esc(i.public_ip || i.state)}</option>`).join("")
-    : `<option value="">该区域没有实例</option>`;
+  let subs = [];
+  try { subs = (await api(`/accounts/${acc.id}/oci/security-subnets?${rq(acc)}`)).subnets || []; } catch (e) { $("#sgBox", box).innerHTML = `❌ ${esc(e.message)}`; return; }
+  const key = "tc_sgsub_" + acc.id;
+  let last = localStorage.getItem(key);
+  if (!subs.some((s) => s.id === last)) {   // 旧版记的是实例：换成该实例所在的子网
+    const li = localStorage.getItem("tc_sg_" + acc.id);
+    last = (subs.find((s) => (s.instances || []).some((i) => i.id === li)) || subs[0] || {}).id || "";
+  }
+  $("#sgSub", box).innerHTML = subs.length ? subs.map((s) => `<option value="${esc(s.id)}"${s.id === last ? " selected" : ""}>${esc(subnetLabel(s))}</option>`).join("")
+    : `<option value="">该区域没有子网</option>`;
+  if (subs.length) $("#sgSub", box).value = last;
   const load = async () => {
-    const iid = $("#sgInst", box).value;
-    $("#sgAdd", box).disabled = !iid;
-    if (!iid) return;
-    localStorage.setItem("tc_sg_" + acc.id, iid);
+    const sid = $("#sgSub", box).value;
+    $("#sgAdd", box).disabled = !sid;
+    $("#sgNsg", box).innerHTML = "";
+    if (!sid) return;
+    localStorage.setItem(key, sid);
+    const sub = subs.find((s) => s.id === sid) || {};
+    const nsgRows = (sub.instances || []).filter((i) => (i.nsgs || []).length);
+    $("#sgNsg", box).innerHTML = nsgRows.length ? `<div class="card"><h3>网络安全组（NSG，只读）</h3>${nsgRows.map((i) => `<div><b>${esc(i.name)}</b>：此实例另挂 NSG：${i.nsgs.map((n) => esc(n.name)).join("、")}</div>`).join("")}
+      <p class="muted">NSG 规则与上面的安全列表同时生效（取并集），本页不修改 NSG，请到 OCI 控制台查看。</p></div>` : "";
     $("#sgBox", box).innerHTML = `<span class="spin"></span>`;
     let d;
-    try { d = await api(`/accounts/${acc.id}/security-rules?instance_id=${encodeURIComponent(iid)}&${rq(acc)}`); }
+    try { d = await api(`/accounts/${acc.id}/security-rules?subnet_id=${encodeURIComponent(sid)}&${rq(acc)}`); }
     catch (e) { $("#sgBox", box).innerHTML = `❌ ${esc(e.message)}`; return; }
     const multi = d.lists.length > 1;
     const st = { dir: "all", q: "" };
@@ -153,7 +170,7 @@ export async function tabOciSecGroup(acc, box) {
       const r = d.rules[+b.dataset.sgdel];
       if (!(await confirmBox("删除规则", `删除${r.direction === "ingress" ? "入站" : "出站"} ${esc(r.protocol)} ${esc(r.cidr)} 端口 ${esc(r.port)}？${r.direction === "ingress" && r.port === "22" ? "<br>⚠️ 删除 22 端口规则可能导致无法 SSH 登录。" : ""}`, true))) return;
       const proto = { TCP: "tcp", UDP: "udp", ICMP: "icmp", ICMPv6: "icmpv6", "全部": "all" }[r.protocol] || String(r.protocol).toLowerCase();
-      if (await act(b, () => api(`/accounts/${acc.id}/security-rules`, { method: "DELETE", body: { instance_id: iid, region: regionOf(acc) || undefined, sl_id: r.sl_id,
+      if (await act(b, () => api(`/accounts/${acc.id}/security-rules`, { method: "DELETE", body: { subnet_id: sid, region: regionOf(acc) || undefined, sl_id: r.sl_id,
         direction: r.direction, protocol: proto, cidr: r.cidr, port_min: r.port_min, port_max: r.port_max } }), "已删除")) load();
     }));
     };
@@ -164,9 +181,9 @@ export async function tabOciSecGroup(acc, box) {
     }));
     if (many) $("#sgQ", box).oninput = (e) => { st.q = e.target.value; draw(); };
     draw();
-    $("#sgAdd", box).onclick = () => addRule(iid, d.lists);
+    $("#sgAdd", box).onclick = () => addRule(sid, d.lists);
   };
-  const addRule = async (iid, lists) => {
+  const addRule = async (sid, lists) => {
     const v = await modal("添加安全规则", `<div class="row2"><div><label>方向</label><select name="direction"><option value="ingress">入站</option><option value="egress">出站</option></select></div>
       <div><label>协议</label><select name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="icmp">ICMP</option><option value="icmpv6">ICMPv6</option><option value="all">全部协议</option></select></div></div>
       <label>来源 CIDR（出站规则为目标 CIDR）</label><input name="cidr" placeholder="如 203.0.113.0/24；0.0.0.0/0 表示整个互联网">
@@ -176,7 +193,7 @@ export async function tabOciSecGroup(acc, box) {
       <p class="muted">不支持对 0.0.0.0/0 一键放行全部端口（需要请到 OCI 控制台操作）。</p>`, (bg) => form(bg), "下一步");
     if (!v) return;
     const { port_mode, port_min, port_max, ...rest } = v;   // eslint-disable-line no-unused-vars
-    const body = { instance_id: iid, region: regionOf(acc) || undefined, ...rest, ports: portsOf(v) };
+    const body = { subnet_id: sid, region: regionOf(acc) || undefined, ...rest, ports: portsOf(v) };
     if (!body.ports) delete body.ports;
     if (PUBLIC_CIDR(v.cidr) && v.direction === "ingress") {
       const go = await publicWarn(v.cidr, body.ports ? `端口 <code>${esc(body.ports)}</code>` : "该协议", "我已了解，继续添加");
@@ -186,7 +203,7 @@ export async function tabOciSecGroup(acc, box) {
     const r = await act(null, () => post(`/accounts/${acc.id}/security-rules`, body));
     if (r) { toast(`已添加 ${r.added} 条${r.skipped ? `，跳过已存在 ${r.skipped} 条` : ""}`); load(); }
   };
-  $("#sgInst", box).onchange = load;
+  $("#sgSub", box).onchange = load;
   load();
 }
 

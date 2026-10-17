@@ -128,19 +128,76 @@ def restore_backup(blob: bytes, passphrase):
         if not {"tricloud.db", "fernet.key"} <= names:
             raise ValueError("备份内容不完整")
         db_bytes, key = z.read("tricloud.db"), z.read("fernet.key")
-    Fernet(key.strip())   # 校验 key 格式
+    key = key.strip()
+    Fernet(key)   # 校验 key 格式
+    # 先校验备份 DB 可读且表结构完整，解密失败/损坏在这里就报错，不动现有数据
     tmp = os.path.join(core.DATA_DIR, ".restore.tmp.db")
-    with open(tmp, "wb") as f:
-        f.write(db_bytes)
-    src = sqlite3.connect(tmp)
-    src.execute("SELECT count(*) FROM accounts").fetchone()
-    with core.db() as c:
-        src.backup(c)
-    src.close()
-    os.remove(tmp)
-    with open(core.KEY_PATH, "wb") as f:
-        f.write(key.strip())
-    os.chmod(core.KEY_PATH, 0o600)
-    core._fernet = None
-    core.migrate()
+    try:
+        with open(tmp, "wb") as f:
+            f.write(db_bytes)
+        src = sqlite3.connect(tmp)
+        try:
+            src.execute("SELECT count(*) FROM accounts").fetchone()
+        finally:
+            src.close()
+    except sqlite3.Error as e:
+        raise ValueError(f"备份数据库损坏: {e}")
+    # 先把当前 DB 与 key 备份到临时位置，恢复失败可回滚
+    bak_db = os.path.join(core.DATA_DIR, ".restore.bak.db")
+    bak_key = os.path.join(core.DATA_DIR, ".restore.bak.key")
+    try:
+        with core.db() as c:
+            bak = sqlite3.connect(bak_db)
+            try:
+                c.backup(bak)
+            finally:
+                bak.close()
+        if os.path.exists(core.KEY_PATH):
+            with open(core.KEY_PATH, "rb") as f:
+                old_key = f.read()
+            with open(bak_key, "wb") as f:
+                f.write(old_key)
+        try:
+            # 写入新 DB
+            src = sqlite3.connect(tmp)
+            try:
+                with core.db() as c:
+                    src.backup(c)
+            finally:
+                src.close()
+            # 写新 key：先写临时文件再原子重命名，避免写一半崩溃
+            tmp_key = core.KEY_PATH + ".tmp"
+            with open(tmp_key, "wb") as f:
+                f.write(key)
+            os.chmod(tmp_key, 0o600)
+            os.replace(tmp_key, core.KEY_PATH)
+            core._fernet = None
+            core.migrate()
+            # 验证恢复后的 DB 可读
+            with core.db() as c:
+                c.execute("SELECT count(*) FROM accounts").fetchone()
+        except Exception:
+            # 回滚：恢复旧 DB 与旧 key
+            try:
+                rb = sqlite3.connect(bak_db)
+                try:
+                    with core.db() as c:
+                        rb.backup(c)
+                finally:
+                    rb.close()
+                if os.path.exists(bak_key):
+                    with open(bak_key, "rb") as f:
+                        rk = f.read()
+                    with open(core.KEY_PATH, "wb") as f:
+                        f.write(rk)
+                    os.chmod(core.KEY_PATH, 0o600)
+            finally:
+                core._fernet = None
+            raise
+    finally:
+        for p in (tmp, bak_db, bak_key):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
     return True

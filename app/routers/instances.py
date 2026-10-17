@@ -3,8 +3,8 @@ import re
 
 from fastapi import APIRouter, Body, HTTPException
 
-from .. import core, dns, hostname, net, security, services, tasks
-from .common import _public_guard, _req, _truthy, guarded, need_acc, run
+from .. import core, dns, hostname, net, overview, security, services, tasks
+from .common import _public_guard, _req, _truthy, call, guarded, need_acc, run
 
 router = APIRouter()
 
@@ -14,6 +14,13 @@ router = APIRouter()
 async def instances(acc_id: int, region: str = None, kind: str = "vm"):
     need_acc(acc_id)
     return await run(services.list_instances, acc_id, region, kind)
+
+
+@router.get("/api/accounts/{acc_id}/overview")
+async def account_overview(acc_id: int, refresh: bool = False):
+    """总览卡片：账号在所有有机器的区域里的实例数（AWS EC2+Lightsail 全区域 / OCI 订阅区域 / Azure 订阅级），带缓存。"""
+    need_acc(acc_id)
+    return await call(overview.summary, acc_id, refresh)
 
 
 @router.post("/api/accounts/{acc_id}/instances/action")

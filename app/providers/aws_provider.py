@@ -2,6 +2,7 @@
 凭证: {access_key, secret_key, region}
 注意：Cost Explorer 每次调用 $0.01，只能经 app.billing 的缓存层调用 cost_explorer()。
 """
+import concurrent.futures as cf
 import datetime as dt
 import threading
 import time
@@ -18,6 +19,7 @@ from .aws_more import AWSMore
 from ..cloudinit import cloud_init, gen_password
 
 _cfg = Config(retries={"max_attempts": 4, "mode": "standard"}, connect_timeout=10, read_timeout=30)
+_scan_cfg = Config(retries={"max_attempts": 2, "mode": "standard"}, connect_timeout=5, read_timeout=20)
 
 # ---------------- Lightsail 区域 ----------------
 # Lightsail 只在部分区域提供服务（如台北 ap-east-2 没有），不能复用 EC2 的区域列表：
@@ -341,29 +343,94 @@ class AWSProvider(AWSMore, AWSCredit):
         self.c("account", "us-east-1").enable_region(RegionName=region)
         return {"ok": True, "hint": "激活通常需要几分钟到数小时，状态会从 ENABLING 变为 ENABLED"}
 
-    def scan_all_regions(self):
-        """逐区域统计 EC2 / Lightsail 数量（串行+间隔，免费 API）。"""
-        out = []
-        ls_regions = set(self.ls_get_regions() or ls_static_regions())   # 不支持 Lightsail 的区域（如台北）跳过，显示 -
-        for rg in self.regions():
-            row = {"region": rg, "ec2": 0, "ec2_running": 0, "lightsail": None}
+    # ---------------- 全区域扫描（总览 / 区域扫描页共用，免费 API） ----------------
+    SCAN_WORKERS = 4    # 每账号并发区域数上限（总览刷新不会对一个账号同时打 30+ 个请求）
+    # 区域未启用（opt-in 区域没开）时 EC2 返回这些错误：静态区域表兜底时把它当作「未启用」跳过，不算查询失败
+    OPTIN_ERRORS = ("AuthFailure", "OptInRequired", "UnrecognizedClientException", "InvalidClientTokenId")
+
+    def cs(self, svc, region):
+        """扫描专用客户端：连接超时 5 秒、最多 2 次尝试（某个区域网络不通时不拖住整个总览）。"""
+        if svc == "lightsail" and not ls_supported(region):
+            raise LightsailRegionError(ls_region_msg(region))
+        key = (svc + "#scan", region)
+        cache = self.__dict__.setdefault("_clients", {})
+        cl = cache.get(key)
+        if cl is None:
+            with self._client_lock:
+                cl = cache.get(key)
+                if cl is None:
+                    cl = cache[key] = self.session.client(svc, region_name=region, config=self.cfg.merge(_scan_cfg))
+        return cl
+
+    def scan_region_list(self):
+        """账号已启用的区域 → (regions, source)。
+        DescribeRegions 优先；IAM 不给 ec2:DescribeRegions 时用 account:ListRegions；再不行用 botocore 的静态区域表
+        （未启用的 opt-in 区域查询时会返回 AuthFailure，scan 时跳过）。"""
+        try:
+            return self.regions(), "describe_regions"
+        except Exception:
+            pass
+        try:
+            rs = sorted(x["region"] for x in self.region_status() if x["status"] in ("ENABLED", "ENABLED_BY_DEFAULT"))
+            if rs:
+                return rs, "list_regions"
+        except Exception:
+            pass
+        return sorted(boto3.session.Session().get_available_regions("ec2")), "static"
+
+    @staticmethod
+    def _err_code(e):
+        return ((getattr(e, "response", None) or {}).get("Error") or {}).get("Code") or type(e).__name__
+
+    def scan_region(self, rg, ls_ok=True):
+        """单个区域：EC2（非 terminated）与 Lightsail 台数 / 运行数。Lightsail 不支持的区域 lightsail=None。"""
+        row = {"region": rg, "ec2": 0, "ec2_running": 0, "lightsail": None, "lightsail_running": 0}
+        try:
+            for page in self.cs("ec2", rg).get_paginator("describe_instances").paginate():
+                for res in page["Reservations"]:
+                    for i in res["Instances"]:
+                        st = i["State"]["Name"]
+                        if st != "terminated":
+                            row["ec2"] += 1
+                            row["ec2_running"] += st == "running"
+        except Exception as e:
+            code = self._err_code(e)
+            if code in self.OPTIN_ERRORS:
+                row["not_enabled"] = True
+                return row
+            row["error"] = row["ec2_error"] = code
+        if ls_ok:
             try:
-                for page in self.c("ec2", rg).get_paginator("describe_instances").paginate():
-                    for res in page["Reservations"]:
-                        for i in res["Instances"]:
-                            if i["State"]["Name"] != "terminated":
-                                row["ec2"] += 1
-                                row["ec2_running"] += i["State"]["Name"] == "running"
+                ls, token, n, run = self.cs("lightsail", rg), None, 0, 0
+                while True:
+                    r = ls.get_instances(**({"pageToken": token} if token else {}))
+                    for i in r["instances"]:
+                        n += 1
+                        run += (i.get("state") or {}).get("name") == "running"
+                    token = r.get("nextPageToken")
+                    if not token:
+                        break
+                row["lightsail"], row["lightsail_running"] = n, run
             except Exception as e:
-                row["error"] = type(e).__name__
-            if rg in ls_regions:
-                try:
-                    row["lightsail"] = len(self.c("lightsail", rg).get_instances()["instances"])
-                except Exception as e:
-                    row.setdefault("error", type(e).__name__)
-            out.append(row)
-            time.sleep(0.2)
-        return out
+                row["lightsail_error"] = self._err_code(e)
+                row.setdefault("error", row["lightsail_error"])
+        return row
+
+    def scan_all_regions(self, regions=None):
+        """逐区域统计 EC2 / Lightsail 数量（并发 SCAN_WORKERS 个区域，免费 API）。
+        regions=None 时扫描账号全部已启用区域；静态区域表兜底时，未启用的 opt-in 区域不出现在结果里。"""
+        src = "given"
+        if regions is None:
+            regions, src = self.scan_region_list()
+        ls_regions = set(self.ls_get_regions() or ls_static_regions())   # 不支持 Lightsail 的区域（如台北）跳过，显示 -
+        regions = list(dict.fromkeys(regions))
+        if not regions:
+            return []
+        with cf.ThreadPoolExecutor(max_workers=min(self.SCAN_WORKERS, len(regions))) as ex:
+            rows = list(ex.map(lambda rg: self.scan_region(rg, rg in ls_regions), regions))
+        if src == "static":
+            rows = [r for r in rows if not r.get("not_enabled")]
+        return rows
 
     # ---------------- Lightsail ----------------
     def ls_list(self):

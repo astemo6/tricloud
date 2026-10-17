@@ -77,4 +77,38 @@ final class Regions {
         for (int i = 0; i < codes.length; i++) out[i] = label(codes[i]);
         return out;
     }
+
+    /** 总览卡片（/accounts/{id}/overview 的 regions，已按台数降序）：1 个区域「ap-northeast-1 · 东京」，多个「东京 等 2 个区域」，没有返回 ""。与 core.js regionsBrief 相同。 */
+    static String brief(org.json.JSONArray regions) {
+        if (regions == null || regions.length() == 0) return "";
+        String first = regions.optJSONObject(0).optString("region");
+        if (regions.length() == 1) return label(first);
+        String c = city(first);
+        return (c.isEmpty() ? first : c) + " 等 " + regions.length() + " 个区域";
+    }
+
+    /** 多区域分布「东京 2 · 新加坡 1」（城市名未知时用代码）。与 core.js regionsDist 相同。 */
+    static String dist(org.json.JSONArray regions) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; regions != null && i < regions.length(); i++) {
+            org.json.JSONObject r = regions.optJSONObject(i);
+            String code = r.optString("region"), c = city(code);
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append(c.isEmpty() ? code : c).append(' ').append(r.optInt("count"));
+        }
+        return sb.toString();
+    }
+
+    /** 实例数「3 台（运行 2）· EC2 2 · Lightsail 1」，与 core.js overviewCount 相同。 */
+    static String count(org.json.JSONObject o) {
+        java.util.List<String> parts = new java.util.ArrayList<>();
+        if ("aws".equals(o.optString("provider"))) {
+            int ls = o.optInt("lightsail");
+            parts.add("EC2 " + o.optInt("ec2"));
+            parts.add("Lightsail " + (o.optBoolean("lightsail_failed") ? (ls > 0 ? ls + "（部分区域失败）" : "查询失败") : String.valueOf(ls)));
+        }
+        org.json.JSONArray err = o.optJSONArray("errors");
+        if (err != null && err.length() > 0) parts.add(err.length() + " 个区域查询失败");
+        return o.optInt("total") + " 台（运行 " + o.optInt("running") + "）" + (parts.isEmpty() ? "" : "· " + String.join(" · ", parts));
+    }
 }

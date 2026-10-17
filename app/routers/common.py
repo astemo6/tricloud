@@ -102,10 +102,13 @@ def _public_guard(direction, protocol, cidr, port, confirmed):
         raise HTTPException(409, {"msg": "来源为 0.0.0.0/0：将对整个互联网开放", "public_warning": True})
 
 
-def _created(acc_id, r):
+def _created(acc_id, r, region=None):
     """创建成功后：随机 root 密码加密留存，前端只显示一次。"""
     if r.get("password"):
         cloudinit.save_instance_secret(acc_id, r["id"], r["name"], r["username"], r["password"])
+    from .. import overview   # 总览：新区域的机器下次刷新就能看到（不知道区域时作废全区域扫描缓存）
+    region = region or r.get("region")
+    overview.invalidate(acc_id, region, full=not region)
     return r
 
 

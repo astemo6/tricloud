@@ -1136,6 +1136,23 @@
       return pr === "oci" ? ["ap-tokyo-1", "ap-seoul-1", "ap-osaka-1"] : ["ap-east-2", "ap-northeast-1", "ap-southeast-1", "us-east-1", "us-west-2"]; }
     if (/^\/accounts\/\d+\/(lightsail\/|instances$)/.test(p) && (q.get("kind") === "lightsail" || p.indexOf("/lightsail/") >= 0) && (q.get("region") || (body && body.region)) === "ap-east-2")
       return { __status: 400, detail: "Lightsail 不支持该区域（台北 ap-east-2），请换区域" };
+    // build 24：总览按所有有机器的区域统计（演示：AWS 东京 EC2+Lightsail，另有俄勒冈 1 台已停止；Azure 按 japaneast）
+    if ((m = p.match(/^\/accounts\/(\d+)\/overview$/)) && method === "GET") {
+      var oa = accounts.find(function (x) { return x.id === +m[1]; }) || {}, ol = inst[m[1]] || [], run = function (l) { return l.filter(function (i) { return i.state === "running"; }).length; };
+      var or = [], ov = { account_id: oa.id, provider: oa.provider, default_region: oa.provider === "azure" ? null : oa.region, errors: [], scope: "all", cached: false, updated_at: new Date().toLocaleString() };
+      if (oa.provider === "aws") {
+        var west = [{ state: "stopped" }];
+        or = [{ region: "ap-northeast-1", count: ol.length + lightsail.length, running: run(ol) + run(lightsail), ec2: ol.length, lightsail: lightsail.length },
+          { region: "us-west-2", count: 1, running: 0, ec2: 1, lightsail: 0 }];
+        Object.assign(ov, { ec2: ol.length + west.length, ec2_running: run(ol), lightsail: lightsail.length, lightsail_running: run(lightsail), lightsail_failed: false, scanned: 17 });
+      } else {
+        var rg = oa.provider === "azure" ? "japaneast" : oa.region;
+        or = ol.length ? [{ region: rg, count: ol.length, running: run(ol) }] : [];
+        ov.scanned = 1;
+      }
+      or = or.filter(function (r) { return r.count; }).sort(function (a, b) { return b.count - a.count || (a.region < b.region ? -1 : 1); });
+      return Object.assign(ov, { regions: or, total: or.reduce(function (t, r) { return t + r.count; }, 0), running: or.reduce(function (t, r) { return t + r.running; }, 0) });
+    }
     if ((m = p.match(/^\/accounts\/(\d+)\/instances$/)) && method === "GET") return q.get("kind") === "lightsail" ? lightsail : (inst[m[1]] || []);
     if (p.match(/\/instances\/change-ip$/)) {
       var ca = accOf(p), cidrs = String(body.cidrs || "").split(/[,，\n]/).map(function (x) { return x.trim(); }).filter(Boolean);
@@ -1880,6 +1897,22 @@ function regionCity(code) {
 const regionLabel = (code) => { const c = regionCity(code); return c ? `${code} · ${c}` : String(code ?? ""); };
 // 下拉选项：value 永远是纯代码，显示带城市名
 const regionOpt = (code, selected) => `<option value="${esc(code)}"${selected ? " selected" : ""}>${esc(regionLabel(code))}</option>`;
+// 总览卡片（/accounts/{id}/overview）：有机器的区域 → 「ap-northeast-1 · 东京」或「东京 等 2 个区域」；没有机器返回 ""（调用方显示默认区域）
+const regionsBrief = (regions) => {
+  const l = regions || [];
+  if (!l.length) return "";
+  if (l.length === 1) return regionLabel(l[0].region);
+  return `${regionCity(l[0].region) || l[0].region} 等 ${l.length} 个区域`;
+};
+// 多区域分布：「东京 2 · 新加坡 1」（城市名未知时用代码）
+const regionsDist = (regions) => (regions || []).map((r) => `${regionCity(r.region) || r.region} ${r.count}`).join(" · ");
+// 实例数文字：「3 台（运行 2）· EC2 2 · Lightsail 1」；AWS Lightsail 全部失败显示「查询失败」，部分失败加注
+const overviewCount = (o) => {
+  const parts = [];
+  if (o.provider === "aws") parts.push(`EC2 ${o.ec2}`, `Lightsail ${o.lightsail_failed ? (o.lightsail ? `${o.lightsail}（部分区域失败）` : "查询失败") : o.lightsail}`);
+  if (o.errors && o.errors.length) parts.push(`${o.errors.length} 个区域查询失败`);
+  return `${o.total} 台（运行 ${o.running}）` + (parts.length ? "· " + parts.join(" · ") : "");
+};
 const regionOf = (acc) => localStorage.getItem("tc_region_" + acc.id) || acc.region || "";
 // Lightsail 只在部分区域提供服务（如台北 ap-east-2 没有）：区域下拉用 /regions?service=lightsail；当前区域不支持时自动切换并提示
 const LS_REGIONS = {};
@@ -2219,10 +2252,12 @@ async function pageHome() {
     return;
   }
   view.innerHTML = `<div id="expAlerts"></div><div class="card" id="hh"><div class="bar" style="margin:0"><h3 class="grow" style="margin:0">🩺 账号健康度</h3>
-    <a class="btn sm" href="#/health">详情</a></div><div id="hhl" class="chips"><span class="spin"></span></div></div><div class="grid">${ACCOUNTS.map((a) => `
+    <a class="btn sm" href="#/health">详情</a></div><div id="hhl" class="chips"><span class="spin"></span></div></div><div class="card"><div class="bar" style="margin:0"><span class="grow muted">实例按账号所有区域统计（AWS 含 EC2 + Lightsail），30 分钟内用缓存</span>
+    <button class="btn sm" id="ovRescan">↻ 重新扫描区域</button></div></div><div class="grid">${ACCOUNTS.map((a) => `
     <div class="card"><div class="inst"><div class="hd"><span class="dot ${a.provider}"></span><b>${esc(a.name)}</b>
     <span class="badge">${PNAME[a.provider]}</span></div>
-    <div class="kv"><span>区域</span><span>${esc(regionOf(a) || "-")}</span><span>实例</span><span id="cnt${a.id}"><span class="spin"></span></span>
+    <div class="kv"><span>区域</span><span id="reg${a.id}">${esc(a.provider === "azure" ? "-" : regionLabel(regionOf(a)) || "-")}</span><span>实例</span><span id="cnt${a.id}">${a.disabled ? "账号已停用" : `<span class="spin"></span>`}</span>
+    <span class="ov-dist" id="distk${a.id}" hidden>分布</span><span class="ov-dist" id="dist${a.id}" hidden></span>
     ${a.cloud_created_at ? `<span>存活</span><span>${ageText(a)}</span>` : ""}</div>
     <a class="btn sm" href="#/${a.provider}/${a.id}">进入管理</a></div></div>`).join("")}</div>`;
   loadExpiryAlerts($("#expAlerts"));
@@ -2230,15 +2265,29 @@ async function pageHome() {
     $("#hhl").innerHTML = l.map((h) => `<a class="chip" href="#/health"><span class="dot ${h.provider}"></span>${esc(h.name)}
       ${h.score == null ? `<span class="muted">未检测</span>` : `<span class="hs ${h.level}">${h.score}</span>`}</a>`).join("");
   }).catch(() => ($("#hhl").innerHTML = `<span class="muted">读取失败</span>`));
+  loadOverview(false);
+  $("#ovRescan").onclick = () => loadOverview(true);
+}
+
+// 各账号实例数：后端 /overview 统计所有有机器的区域（AWS EC2+Lightsail 全区域、OCI 订阅区域、Azure 整个订阅），带缓存
+function loadOverview(refresh) {
   for (const a of ACCOUNTS) {
-    // AWS 首页台数 = EC2 + Lightsail（Lightsail 查询失败不影响 EC2 显示）
-    Promise.all([api(`/accounts/${a.id}/instances?${rq(a)}`),
-      a.provider === "aws" ? api(`/accounts/${a.id}/instances?kind=lightsail&${rq(a)}`).catch(() => null) : Promise.resolve([])]).then(([l, ls]) => {
-      const all = l.concat(ls || []);
-      const run = all.filter((i) => i.state === "running").length;
-      const extra = a.provider === "aws" ? ` · EC2 ${l.length} · Lightsail ${ls ? ls.length : "查询失败"}` : "";
-      const el = document.getElementById("cnt" + a.id); if (el) el.textContent = `${all.length} 台（运行 ${run}）${extra}`;
-    }).catch((e) => { const el = document.getElementById("cnt" + a.id); if (el) el.textContent = "查询失败：" + e.message.slice(0, 60); });
+    if (a.disabled) continue;
+    const el = document.getElementById("cnt" + a.id);
+    if (refresh && el) el.innerHTML = `<span class="spin"></span>`;
+    api(`/accounts/${a.id}/overview${refresh ? "?refresh=true" : ""}`).then((o) => {
+      const c = document.getElementById("cnt" + a.id), r = document.getElementById("reg" + a.id);
+      if (!c) return;
+      c.textContent = overviewCount(o);
+      const brief = regionsBrief(o.regions);
+      r.textContent = brief || (a.provider === "azure" ? "-" : regionLabel(o.default_region || regionOf(a)) || "-");
+      r.title = (o.regions || []).map((x) => `${regionLabel(x.region)}：${x.count} 台`).join("\n");
+      const multi = (o.regions || []).length > 1;
+      document.getElementById("distk" + a.id).hidden = !multi;
+      const d = document.getElementById("dist" + a.id);
+      d.hidden = !multi;
+      d.textContent = multi ? regionsDist(o.regions) : "";
+    }).catch((e) => { const c = document.getElementById("cnt" + a.id); if (c) c.textContent = "查询失败：" + e.message.slice(0, 60); });
   }
 }
 

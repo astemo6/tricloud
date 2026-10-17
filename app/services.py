@@ -54,6 +54,8 @@ def provider(acc_id, region=None):
 def drop_provider_cache(acc_id):
     for k in [k for k in _cache if k[0] == acc_id]:
         _cache.pop(k, None)
+    from . import overview   # 凭证 / 区域变了，总览缓存一起作废
+    overview.clear(acc_id)
 
 
 def tz():
@@ -167,6 +169,8 @@ def instance_action(acc_id, inst_id, action, region=None, kind="vm", preserve_bo
     # 面板主动操作时抑制监控告警
     core.ex("UPDATE monitors SET last_state=? WHERE account_id=? AND instance_id=?",
             (f"user:{action}", acc_id, inst_id))
+    from . import overview   # 总览运行数 / 台数下次刷新重查
+    overview.invalidate(acc_id, region)
     if kind == "lightsail":
         return p.ls_action(inst_id, action)
     if action == "terminate" and preserve_boot_volume and isinstance(p, PROVIDERS["oci"]):

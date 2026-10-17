@@ -3,7 +3,7 @@ import time
 
 from fastapi import APIRouter, Body, HTTPException
 
-from .. import cloudinit, services, tasks
+from .. import cloudinit, overview, services, tasks
 from .common import _created, _public_guard, _req, call, guarded, need_acc, P, run
 
 router = APIRouter()
@@ -21,7 +21,7 @@ async def ec2_create(acc_id: int, body: dict = Body(...)):
     need_acc(acc_id, "aws")
     await guarded(acc_id, "create", body, body.get("region"))
     c = dict(body, script=cloudinit.resolve_script(body))
-    return _created(acc_id, await run(services.provider(acc_id, body.get("region")).ec2_create, c))
+    return _created(acc_id, await run(services.provider(acc_id, body.get("region")).ec2_create, c), body.get("region"))
 
 
 @router.get("/api/accounts/{acc_id}/aws/regions-status")
@@ -36,19 +36,11 @@ async def aws_enable_region(acc_id: int, body: dict = Body(...)):
     return await run(services.provider(acc_id).enable_region, body["region"])
 
 
-_scan_cache = {}
-
-
 @router.get("/api/accounts/{acc_id}/aws/scan")
 async def aws_scan(acc_id: int, refresh: bool = False):
+    """全区域扫描：与总览共用 overview 的缓存（30 分钟；refresh 两次全量至少间隔 60 秒）。"""
     need_acc(acc_id, "aws")
-    c = _scan_cache.get(acc_id)
-    if c and not refresh and time.time() - c["ts"] < 1800:
-        return c["data"]
-    data = {"regions": await run(services.provider(acc_id).scan_all_regions),
-            "updated_at": services.now_local().strftime("%Y-%m-%d %H:%M")}
-    _scan_cache[acc_id] = {"ts": time.time(), "data": data}
-    return data
+    return await run(overview.aws_full, acc_id, refresh)
 
 
 # ---------------- AWS: Lightsail / CloudFront / 配额 ----------------
@@ -63,7 +55,7 @@ async def ls_create(acc_id: int, body: dict = Body(...)):
     need_acc(acc_id, "aws")
     await guarded(acc_id, "ls_create", body, body.get("region"))
     c = dict(body, user_data=cloudinit.resolve_script(body))
-    return _created(acc_id, await run(services.provider(acc_id, body.get("region")).ls_create, c))
+    return _created(acc_id, await run(services.provider(acc_id, body.get("region")).ls_create, c), body.get("region"))
 
 
 @router.get("/api/accounts/{acc_id}/cloudfront")

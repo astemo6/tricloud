@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.0（build 24）(2026-10-17)
+- 修复：总览卡片实例数只查账号默认区域（AWS 默认 us-east-1、OCI 配置区域），机器在其他区域的账号显示 0 台。新接口 `GET /api/accounts/{id}/overview[?refresh=true]`（只读，/api 路由 177 → 178）：AWS 扫描账号全部已启用区域的 EC2 + Lightsail（每账号并发 4 个区域，扫描专用客户端连接超时 5 秒、最多 2 次尝试），OCI 扫描所有 READY 订阅区域（账号配置的区间，与实例页一致，不查 VNIC），Azure 订阅级 `list_all(status_only)` 一次拿到全部 VM 与电源状态（以前首页走实例列表要逐台查网卡 / 公网 IP，所以慢）。返回 total / running / 各区域 count·running（AWS 另有 ec2 / lightsail）/ errors / default_region，区域按台数降序。
+- 缓存：AWS 全区域扫描 30 分钟（与「区域扫描」页 `/aws/scan` 共用），期间只重查已知有机器的区域 + 默认区域 + 新建过实例的区域；汇总 2 分钟；`refresh=true` 强制全量，但两次全量至少间隔 60 秒；同一账号并发请求只查一次。创建实例、开关机 / 终止、改凭证后自动作废相应缓存。
+- AWS 区域列表：IAM 没有 `ec2:DescribeRegions` 时依次退回 `account:ListRegions`、botocore 静态区域表（未启用的 opt-in 区域返回 AuthFailure 时跳过，不算失败）。Lightsail 查询失败只标「Lightsail 部分区域失败 / 查询失败」，不影响 EC2 统计；`/aws/scan` 也改为并发 + Lightsail 分页，并带 `ec2_running`、`lightsail_running`。
+- Web / Android / iOS 总览：区域显示实际有机器的区域（1 个「ap-northeast-1 · 东京」，多个「东京 等 2 个区域」+ 分布「东京 2 · 新加坡 1」，Web 悬停列出各区域台数），没有机器时显示默认区域；Azure 卡片显示 VM 所在区域；新增「↻ 重新扫描区域」。区域城市表三端一致（新增三端一致性测试）。
+- 安全修复（合入 fix-160-sec 分支 3 个提交）：备份恢复失败时回滚到原数据库与 fernet.key（先校验备份库、key 原子替换、临时文件清理）；Dockerfile `--forwarded-allow-ips` 由 `*` 改为只信任 `127.0.0.1`，防 X-Forwarded-For 伪造；兜底 500 不再返回异常原文，只返回「服务器内部错误」+ `request_id` 并写日志。
+- 注意：反代（cloudflared / Nginx）在宿主上、容器为 docker 桥接网络时，连进容器的源地址是 docker 网关而不是 127.0.0.1，uvicorn 不再信任它的 X-Forwarded-*；按 README 在 `.env` 设 `TRUST_PROXY=true` 后，登录限流与审计用 `CF-Connecting-IP` / `X-Real-IP` / `X-Forwarded-For` 取真实 IP，不受影响。
+- 版本：Android versionCode 24 / iOS build 24（versionName 仍 1.6.0）。
+
 ## 1.6.0（build 23）(2026-10-16)
 - 新功能：OneDrive 备份频率自定义。在每天 / 每周之外新增：每 N 小时（1–24，第几分钟 + 起始小时对齐）、每天多个时间点、每周多选星期 + 多个时间点、每月指定日期（多选 1–31 和「月末」）+ 时间点、高级 5 段 Cron（分 时 日 月 周，按面板时区；自写解析器，支持 `* , - /`、数字、英文缩写、@daily 等宏，未引入 croniter）。全部按面板时区墙上时间计算，夏令时不重复、不漏跑；两次备份至少间隔 30 分钟，8 年内不会触发的计划拒绝保存。
 - 新接口：`POST /api/onedrive/schedule/preview`（不保存，返回计划描述与接下来 3 次备份时间，非法配置 400 友好提示；不写审计；API Token 403，与其他改设置接口一致）。/api 路由 176 → 177。`GET /api/onedrive` 新增 `desc`、`next_runs`、`next_runs_label`、`modes`、`min_gap_minutes`，`cfg` 新增 `mode / times / weekdays / days / last_day / every_hours / minute / start_hour / cron`。

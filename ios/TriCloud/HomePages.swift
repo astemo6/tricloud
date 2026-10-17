@@ -2,15 +2,24 @@ import SwiftUI
 
 /// 总览（Web pageHome）：到期提醒、账号健康度、各账号实例数，点进入管理。
 final class HomePage: Page {
+    private var forceScan = false   // 「重新扫描区域」：下一次刷新带 refresh=true
+
     override init() {
         super.init()
         title = "总览"
     }
 
+    func rescan() {
+        forceScan = true
+        toast("正在重新扫描所有区域…")
+        refresh()
+    }
+
     override var menu: [(String, () -> Void)] {
         [("添加云账号", { self.openAddAccount() }),
          ("批量添加账号", { self.openBatchAdd() }),
-         ("一键测活", { self.testAll() })]
+         ("一键测活", { self.testAll() }),
+         ("重新扫描区域", { self.rescan() })]
     }
 
     override func refresh() {
@@ -76,6 +85,12 @@ final class HomePage: Page {
         }
         hc.row().button("查看详情") { self.push(HealthPage()) }
 
+        let ov = card("🖥 实例（全部区域）")
+        ov.muted("按账号所有区域统计（AWS 含 EC2 + Lightsail），30 分钟内用缓存")
+        ov.row().button("↻ 重新扫描区域") { self.rescan() }
+        let force = forceScan
+        forceScan = false
+
         for p in MainPage.PROVS {
             let list = (0..<a.count).map { a.obj($0) }.filter { $0.optString("provider") == p }
             if list.isEmpty { continue }
@@ -93,27 +108,18 @@ final class HomePage: Page {
                     n.detail.text = headDetail + "已停用"
                     continue
                 }
-                let q = region.isEmpty ? "" : "&region=" + enc(region)
-                let accId = acc.optInt("id")
-                Api.call("GET", "/accounts/\(accId)/instances?kind=vm" + q, nil) { res in
+                // 后端 /overview 统计所有有机器的区域（AWS EC2+Lightsail 全区域、OCI 订阅区域、Azure 整个订阅），带缓存
+                Api.call("GET", "/accounts/\(acc.optInt("id"))/overview" + (force ? "?refresh=true" : ""), nil) { res in
                     switch res {
                     case .success(let x):
-                        let l = jarr(x)
-                        let run = (0..<l.count).filter { l.obj($0).optString("state").lowercased() == "running" }.count
-                        n.detail.text = headDetail + "\(l.count) 台（运行 \(run)）"
-                        // AWS：首页台数同时统计 Lightsail，失败不影响 EC2
-                        if p == "aws" {
-                            Api.call("GET", "/accounts/\(accId)/instances?kind=lightsail" + q, nil) { r2 in
-                                var lsText = "查询失败", total = l.count, run2 = run
-                                if case .success(let y) = r2 {
-                                    let ls = jarr(y)
-                                    total += ls.count
-                                    run2 += (0..<ls.count).filter { ls.obj($0).optString("state").lowercased() == "running" }.count
-                                    lsText = "\(ls.count)"
-                                }
-                                n.detail.text = headDetail + "\(total) 台（运行 \(run2)）· EC2 \(l.count) · Lightsail " + lsText
-                            }
-                        }
+                        let o = jobj(x)
+                        let rs = o.optJSONArray("regions")
+                        let brief = Regions.brief(rs)
+                        let dr = o.isNull("default_region") ? region : o.optString("default_region")
+                        let where_ = !brief.isEmpty ? brief : (dr.isEmpty ? "" : Regions.label(dr))
+                        let multi = (rs?.count ?? 0) > 1
+                        n.detail.text = (where_.isEmpty ? "" : where_ + " · ") + (age.isEmpty ? "" : age + " · ") + Regions.count(o)
+                            + (multi ? "\n分布：" + Regions.dist(rs) : "")
                     case .failure(let e):
                         n.detail.text = headDetail + "查询失败：" + String(((e as? ApiError)?.msg ?? e.localizedDescription).prefix(60))
                     }

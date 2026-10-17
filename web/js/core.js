@@ -166,6 +166,22 @@ export function regionCity(code) {
 export const regionLabel = (code) => { const c = regionCity(code); return c ? `${code} · ${c}` : String(code ?? ""); };
 // 下拉选项：value 永远是纯代码，显示带城市名
 export const regionOpt = (code, selected) => `<option value="${esc(code)}"${selected ? " selected" : ""}>${esc(regionLabel(code))}</option>`;
+// 总览卡片（/accounts/{id}/overview）：有机器的区域 → 「ap-northeast-1 · 东京」或「东京 等 2 个区域」；没有机器返回 ""（调用方显示默认区域）
+export const regionsBrief = (regions) => {
+  const l = regions || [];
+  if (!l.length) return "";
+  if (l.length === 1) return regionLabel(l[0].region);
+  return `${regionCity(l[0].region) || l[0].region} 等 ${l.length} 个区域`;
+};
+// 多区域分布：「东京 2 · 新加坡 1」（城市名未知时用代码）
+export const regionsDist = (regions) => (regions || []).map((r) => `${regionCity(r.region) || r.region} ${r.count}`).join(" · ");
+// 实例数文字：「3 台（运行 2）· EC2 2 · Lightsail 1」；AWS Lightsail 全部失败显示「查询失败」，部分失败加注
+export const overviewCount = (o) => {
+  const parts = [];
+  if (o.provider === "aws") parts.push(`EC2 ${o.ec2}`, `Lightsail ${o.lightsail_failed ? (o.lightsail ? `${o.lightsail}（部分区域失败）` : "查询失败") : o.lightsail}`);
+  if (o.errors && o.errors.length) parts.push(`${o.errors.length} 个区域查询失败`);
+  return `${o.total} 台（运行 ${o.running}）` + (parts.length ? "· " + parts.join(" · ") : "");
+};
 export const regionOf = (acc) => localStorage.getItem("tc_region_" + acc.id) || acc.region || "";
 // Lightsail 只在部分区域提供服务（如台北 ap-east-2 没有）：区域下拉用 /regions?service=lightsail；当前区域不支持时自动切换并提示
 const LS_REGIONS = {};

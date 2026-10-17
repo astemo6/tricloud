@@ -138,7 +138,7 @@ async def oci_create(acc_id: int, body: dict = Body(...)):
     need_acc(acc_id, "oci")
     await guarded(acc_id, "create", body, body.get("region"))
     c = dict(body["create"], script=cloudinit.resolve_script(body["create"]))
-    return _created(acc_id, await run(services.provider(acc_id, body.get("region")).create_instance, c))
+    return _created(acc_id, await run(services.provider(acc_id, body.get("region")).create_instance, c), body.get("region"))
 
 
 @router.post("/api/accounts/{acc_id}/oci/snatch")

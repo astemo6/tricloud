@@ -3,6 +3,7 @@
 import datetime as dt
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -272,6 +273,9 @@ core.set_setting(onedrive.K_CFG, dict(onedrive.cfg(), every_hours=1))
 ok("1h period: retry gap 15 min", onedrive.retry_info(onedrive.cfg(), "2026-10-16 12:00")[0] == 900)
 core.set_setting(onedrive.K_CFG, dict(onedrive.cfg(), mode="daily", times=["03:30"]))
 ok("daily: retry gap stays 1 hour (build 21 rule)", onedrive.retry_info(onedrive.cfg(), "2026-10-16 03:30")[0] == 3600)
+# 上次尝试固定为该期开始后 1 分钟（以前用当前时间，日期过了下一期就变成「离下一期太近」）
+onedrive.set_state(slot="2026-10-16 03:30", slot_tries=1,
+                   last_try=int(dt.datetime(2026, 10, 16, 3, 31, tzinfo=onedrive.now_local().tzinfo).timestamp()))
 ok("retry_text daily: 1 小时后自动重试", "1 小时后自动重试" in onedrive.retry_text("2026-10-16 03:30"))
 
 # 时区：面板时区换成 UTC，计划按新时区墙上时间
@@ -326,11 +330,12 @@ ok("android: OneDriveActivity opens schedule editor + shows desc", "OneDriveSche
 IS = rd("ios", "TriCloud", "OneDriveSchedule.swift")
 ok("ios: schedule page (SwiftUI Form, preview, save)", "/onedrive/schedule/preview" in IS and "Form" in IS and "/onedrive/config" in IS and "月末" in IS)
 ok("ios: OneDrivePage pushes schedule page + desc", "OneDriveSchedulePage" in rd("ios", "TriCloud", "OneDrivePage.swift"))
-ok("android versionCode 23 / iOS build 23", "versionCode 23" in rd("android", "app", "build.gradle") and 'CURRENT_PROJECT_VERSION: "23"' in rd("ios", "project.yml"))
+_vc = re.search(r"versionCode (\d+)", rd("android", "app", "build.gradle")).group(1)
+ok("android versionCode ≥ 23 == iOS build", int(_vc) >= 23 and f'CURRENT_PROJECT_VERSION: "{_vc}"' in rd("ios", "project.yml"))
 DOC = rd("docs", "api-credentials.md")
 ok("docs: schedule modes + cron + preview", "schedule/preview" in DOC and "Cron" in DOC and "月末" in DOC)
-ok("changelog / features / release notes mention build 23", "build 23" in rd("CHANGELOG.md") and "build 23" in rd("docs", "FEATURES.md")
-   and "build 23" in rd(".github", "release-notes.md"))
+ok("changelog / features mention build 23; release notes current build", "build 23" in rd("CHANGELOG.md") and "build 23" in rd("docs", "FEATURES.md")
+   and f"build {_vc}" in rd(".github", "release-notes.md"))
 ok("demo mock: preview route", "/onedrive/schedule/preview" in rd("demo", "mock.js"))
 ok("no croniter dependency", "croniter" not in rd("requirements.txt"))
 

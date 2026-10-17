@@ -61,4 +61,36 @@ enum Regions {
         let c = cityOf(s)
         return c.isEmpty ? s : s + " · " + c
     }
+
+    /// 总览卡片（/accounts/{id}/overview 的 regions，已按台数降序）：1 个区域「ap-northeast-1 · 东京」，多个「东京 等 2 个区域」，没有返回 ""。与 core.js regionsBrief 相同。
+    static func brief(_ regions: JArr?) -> String {
+        guard let r = regions, !r.isEmpty else { return "" }
+        let first = r.obj(0).optString("region")
+        if r.count == 1 { return label(first) }
+        let c = cityOf(first)
+        return (c.isEmpty ? first : c) + " 等 \(r.count) 个区域"
+    }
+
+    /// 多区域分布「东京 2 · 新加坡 1」（城市名未知时用代码）。与 core.js regionsDist 相同。
+    static func dist(_ regions: JArr?) -> String {
+        guard let r = regions else { return "" }
+        return (0..<r.count).map { i -> String in
+            let code = r.obj(i).optString("region")
+            let c = cityOf(code)
+            return (c.isEmpty ? code : c) + " \(r.obj(i).optInt("count"))"
+        }.joined(separator: " · ")
+    }
+
+    /// 实例数「3 台（运行 2）· EC2 2 · Lightsail 1」，与 core.js overviewCount 相同。
+    static func count(_ o: JObj) -> String {
+        var parts: [String] = []
+        if o.optString("provider") == "aws" {
+            let ls = o.optInt("lightsail")
+            parts.append("EC2 \(o.optInt("ec2"))")
+            parts.append("Lightsail " + (o.optBoolean("lightsail_failed") ? (ls > 0 ? "\(ls)（部分区域失败）" : "查询失败") : "\(ls)"))
+        }
+        let err = o.optJSONArray("errors") ?? []
+        if !err.isEmpty { parts.append("\(err.count) 个区域查询失败") }
+        return "\(o.optInt("total")) 台（运行 \(o.optInt("running"))）" + (parts.isEmpty ? "" : "· " + parts.joined(separator: " · "))
+    }
 }

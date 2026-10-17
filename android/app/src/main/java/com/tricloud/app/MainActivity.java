@@ -18,6 +18,7 @@ public class MainActivity extends BaseActivity {
     /** 没有区域概念的云厂商（Azure 用资源组位置）。 */
     static boolean noRegion(String p) { return "azure".equals(p); }
     private boolean first = true;
+    private boolean rescan = false;   // 「重新扫描区域」：下一次刷新带 refresh=true
 
     @Override
     protected void onCreate(Bundle s) {
@@ -87,34 +88,33 @@ public class MainActivity extends BaseActivity {
                 hT.setText(sb.length() == 0 ? "暂无" : sb.toString().trim());
                 hT.setTextColor(attr(com.google.android.material.R.attr.colorOnSurface));
             });
+            LinearLayout ov = card("🖥 实例（全部区域）");
+            muted(ov, "按账号所有区域统计（AWS 含 EC2 + Lightsail），30 分钟内用缓存");
+            button(row(ov), "↻ 重新扫描区域", v -> { rescan = true; refresh(); });
+            boolean force = rescan;
+            rescan = false;
             for (int i = 0; i < a.length(); i++) {
                 JSONObject acc = a.optJSONObject(i);
                 LinearLayout c = card(acc.optString("name") + (acc.optInt("disabled") == 1 ? "  [已停用]" : ""));
-                String reg = noRegion(acc.optString("provider")) ? "" : regionOf(acc);
-                muted(c, pname(acc.optString("provider")) + (reg.isEmpty() ? "" : " · " + Regions.label(reg)) + ageOf(acc));
+                String prov = acc.optString("provider");
+                String reg = noRegion(prov) ? "" : regionOf(acc);
+                TextView head = muted(c, pname(prov) + (reg.isEmpty() ? "" : " · " + Regions.label(reg)) + ageOf(acc));
                 TextView cnt = text(c, "实例：查询中…", 13, false);
-                String rq = noRegion(acc.optString("provider")) ? "" : "?region=" + Api.enc(reg);
                 if (acc.optInt("disabled") == 1) cnt.setText("实例：账号已停用");
+                // 后端 /overview 统计所有有机器的区域（AWS EC2+Lightsail 全区域、OCI 订阅区域、Azure 整个订阅），带缓存
                 else Api.job(this, () -> {
-                    JSONObject o = new JSONObject();
-                    try { o.put("vm", Api.arr(Api.call("GET", "/accounts/" + acc.optInt("id") + "/instances" + rq, null))); }
+                    try { return Api.call("GET", "/accounts/" + acc.optInt("id") + "/overview" + (force ? "?refresh=true" : ""), null); }
                     catch (Exception e) { return new JSONObject().put("error", e.getMessage()); }
-                    // AWS：首页台数同时统计 Lightsail，失败不影响 EC2
-                    if ("aws".equals(acc.optString("provider"))) {
-                        try { o.put("ls", Api.arr(Api.call("GET", "/accounts/" + acc.optInt("id") + "/instances?kind=lightsail" + (rq.isEmpty() ? "" : "&" + rq.substring(1)), null))); }
-                        catch (Exception e) { o.put("ls_err", true); }
-                    }
-                    return o;
                 }, x -> {
                     JSONObject o = (JSONObject) x;
-                    if (o.has("error")) { String e = o.optString("error"); cnt.setText("实例：查询失败 " + (e.length() > 60 ? e.substring(0, 60) : e)); return; }
-                    JSONArray l = o.optJSONArray("vm"), ls = o.optJSONArray("ls");
-                    int run = 0, total = l.length() + (ls == null ? 0 : ls.length());
-                    for (int j = 0; j < l.length(); j++) if ("running".equalsIgnoreCase(l.optJSONObject(j).optString("state"))) run++;
-                    if (ls != null) for (int j = 0; j < ls.length(); j++) if ("running".equalsIgnoreCase(ls.optJSONObject(j).optString("state"))) run++;
-                    String extra = "aws".equals(acc.optString("provider"))
-                            ? " · EC2 " + l.length() + " · Lightsail " + (ls == null ? "查询失败" : String.valueOf(ls.length())) : "";
-                    cnt.setText("实例：" + total + " 台（运行 " + run + "）" + extra);
+                    if (o.has("error") && !o.has("total")) { String e = o.optString("error"); cnt.setText("实例：查询失败 " + (e.length() > 60 ? e.substring(0, 60) : e)); return; }
+                    JSONArray rs = o.optJSONArray("regions");
+                    String brief = Regions.brief(rs);
+                    String dr = o.optString("default_region", "");
+                    if (o.isNull("default_region")) dr = reg;
+                    String where = !brief.isEmpty() ? brief : (dr.isEmpty() ? "" : Regions.label(dr));
+                    head.setText(pname(prov) + (where.isEmpty() ? "" : " · " + where) + ageOf(acc));
+                    cnt.setText("实例：" + Regions.count(o) + (rs != null && rs.length() > 1 ? "\n分布：" + Regions.dist(rs) : ""));
                 });
                 button(row(c), "进入管理", v -> openPage("acc_" + acc.optInt("id"), acc));
             }

@@ -4,7 +4,9 @@
 - AWS：全区域扫描 EC2 + Lightsail（AWSProvider.scan_all_regions，每账号并发 4 个区域），结果缓存 FULL_TTL（30 分钟，
   与「区域扫描」页共用同一份缓存）；缓存有效期内的刷新只重查「已知有机器的区域 + 默认区域 + 新建过实例的区域」，
   这份结果再缓存 HOT_TTL（2 分钟）。refresh=true 强制全量扫描，但两次全量至少间隔 MIN_FULL_GAP 秒。
-  IAM 没有 ec2:DescribeRegions 时依次退回 account:ListRegions / botocore 静态区域表（未启用的 opt-in 区域跳过）。
+  IAM 没有 ec2:DescribeRegions 时依次退回 account:ListRegions / botocore 静态区域表；静态表只扫默认启用的 17 个区域
+  （需手动开通的 opt-in 区域没开时可能连接超时、被误报为查询失败），但上次扫描有机器的区域、账号默认区域、
+  新建过实例的区域即使是 opt-in 区域也照样扫描。
 - OCI：所有 READY 的订阅区域，各 1 次 ListInstances（账号配置的区间，与实例页一致；不查 VNIC），缓存 HOT_TTL。
 - Azure：订阅级 virtual_machines.list_all(status_only) 一次拿到所有区域的 VM 与电源状态（不逐台查网卡/公网 IP，
   以前首页走实例列表要逐台查 NIC，所以慢），缓存 HOT_TTL。
@@ -61,7 +63,11 @@ def aws_full(acc_id, refresh=False):
         age = time.time() - c["ts"] if c else None
         if c and (age < (MIN_FULL_GAP if refresh else FULL_TTL)):
             return {"regions": c["rows"], "updated_at": c["updated_at"]}
-        rows = services.provider(acc_id).scan_all_regions()
+        keep = {r["region"] for r in (c or {}).get("rows", []) if _has(r)} | _extra.get(acc_id, set())
+        acc = core.get_account(acc_id) or {}
+        if acc.get("region"):
+            keep.add(acc["region"])
+        rows = services.provider(acc_id).scan_all_regions(keep=sorted(keep))
         c = _full[acc_id] = {"ts": time.time(), "rows": rows, "updated_at": services.now_local().strftime("%Y-%m-%d %H:%M")}
         _extra.pop(acc_id, None)
         _sum.pop(acc_id, None)

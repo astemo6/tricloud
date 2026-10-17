@@ -42,6 +42,17 @@ def ls_region_msg(region):
     return f"Lightsail 不支持该区域（{city + ' ' if city else ''}{region}），请换区域"
 
 
+# AWS 默认启用（Opt-in status: Not required）的 17 个商用区域，以
+# https://docs.aws.amazon.com/global-infrastructure/latest/regions/aws-regions.html 为准（2026-10 核对，共 34 个区域）。
+# 2019-03-20 之后上线的区域都要手动开通（af-south-1、ap-east-1/2、ap-south-2、ap-southeast-3/4/5/6/7、ca-west-1、
+# eu-south-1/2、eu-central-2、il-central-1、me-south-1、me-central-1、mx-central-1 …），以后的新区域也一样，所以这里用白名单。
+AWS_DEFAULT_REGIONS = frozenset((
+    "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+    "ap-south-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-southeast-1", "ap-southeast-2",
+    "ca-central-1", "eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "sa-east-1",
+))
+
+
 def ls_static_regions():
     global _ls_static
     if _ls_static is None:
@@ -362,12 +373,15 @@ class AWSProvider(AWSMore, AWSCredit):
                     cl = cache[key] = self.session.client(svc, region_name=region, config=self.cfg.merge(_scan_cfg))
         return cl
 
-    def scan_region_list(self):
+    def scan_region_list(self, keep=()):
         """账号已启用的区域 → (regions, source)。
-        DescribeRegions 优先；IAM 不给 ec2:DescribeRegions 时用 account:ListRegions；再不行用 botocore 的静态区域表
-        （未启用的 opt-in 区域查询时会返回 AuthFailure，scan 时跳过）。"""
+        DescribeRegions 优先（只取 opt-in-not-required / opted-in）；IAM 不给 ec2:DescribeRegions 时用 account:ListRegions；
+        再不行用 botocore 静态区域表 ∩ 默认启用区域（AWS_DEFAULT_REGIONS）——需手动开通的 opt-in 区域（如巴林 me-south-1）
+        没开通时可能连接超时，被误报为「区域查询失败」，所以不扫；keep 里的区域（已知有机器 / 默认区域 / 新建过实例）照样扫描。"""
         try:
-            return self.regions(), "describe_regions"
+            rs = sorted(r["RegionName"] for r in self.c("ec2").describe_regions()["Regions"]
+                        if r.get("OptInStatus") in (None, "opt-in-not-required", "opted-in"))
+            return rs, "describe_regions"
         except Exception:
             pass
         try:
@@ -376,7 +390,8 @@ class AWSProvider(AWSMore, AWSCredit):
                 return rs, "list_regions"
         except Exception:
             pass
-        return sorted(boto3.session.Session().get_available_regions("ec2")), "static"
+        static = set(boto3.session.Session().get_available_regions("ec2"))
+        return sorted((static & AWS_DEFAULT_REGIONS) | {r for r in keep if r}), "static"
 
     @staticmethod
     def _err_code(e):
@@ -416,12 +431,12 @@ class AWSProvider(AWSMore, AWSCredit):
                 row.setdefault("error", row["lightsail_error"])
         return row
 
-    def scan_all_regions(self, regions=None):
+    def scan_all_regions(self, regions=None, keep=()):
         """逐区域统计 EC2 / Lightsail 数量（并发 SCAN_WORKERS 个区域，免费 API）。
-        regions=None 时扫描账号全部已启用区域；静态区域表兜底时，未启用的 opt-in 区域不出现在结果里。"""
+        regions=None 时扫描账号全部已启用区域；静态区域表兜底时只扫默认启用区域 + keep，未启用的区域不出现在结果里。"""
         src = "given"
         if regions is None:
-            regions, src = self.scan_region_list()
+            regions, src = self.scan_region_list(keep)
         ls_regions = set(self.ls_get_regions() or ls_static_regions())   # 不支持 Lightsail 的区域（如台北）跳过，显示 -
         regions = list(dict.fromkeys(regions))
         if not regions:

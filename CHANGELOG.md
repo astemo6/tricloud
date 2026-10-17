@@ -7,6 +7,7 @@
 - Web / Android / iOS 总览：区域显示实际有机器的区域（1 个「ap-northeast-1 · 东京」，多个「东京 等 2 个区域」+ 分布「东京 2 · 新加坡 1」，Web 悬停列出各区域台数），没有机器时显示默认区域；Azure 卡片显示 VM 所在区域；新增「↻ 重新扫描区域」。区域城市表三端一致（新增三端一致性测试）。
 - 安全修复（合入 fix-160-sec 分支 3 个提交）：备份恢复失败时回滚到原数据库与 fernet.key（先校验备份库、key 原子替换、临时文件清理）；Dockerfile `--forwarded-allow-ips` 由 `*` 改为只信任 `127.0.0.1`，防 X-Forwarded-For 伪造；兜底 500 不再返回异常原文，只返回「服务器内部错误」+ `request_id` 并写日志。
 - 注意：反代（cloudflared / Nginx）在宿主上、容器为 docker 桥接网络时，连进容器的源地址是 docker 网关而不是 127.0.0.1，uvicorn 不再信任它的 X-Forwarded-*；按 README 在 `.env` 设 `TRUST_PROXY=true` 后，登录限流与审计用 `CF-Connecting-IP` / `X-Real-IP` / `X-Forwarded-For` 取真实 IP，不受影响。
+- 热修（2026-10-17，仅后端，App 不变仍为 build 24）：IAM 没有 `ec2:DescribeRegions` / `account:ListRegions` 时，静态区域表兜底改为只扫 AWS 默认启用的 17 个区域（白名单 `AWS_DEFAULT_REGIONS`，按 AWS 官方区域表核对）；需手动开通的 opt-in 区域（af-south-1、ap-east-1/2、ap-south-2、ap-southeast-3/4/5/6/7、ca-west-1、eu-south-1/2、eu-central-2、il-central-1、me-south-1、me-central-1、mx-central-1）不再扫描——未开通时可能连接超时（如巴林 me-south-1），总览卡片误显示「1 个区域查询失败」。上次扫描有机器的区域、账号默认区域、新建过实例的区域即使是 opt-in 区域也照样扫描。有 DescribeRegions 权限时照旧，并显式只取 `opt-in-not-required` / `opted-in`。
 - 版本：Android versionCode 24 / iOS build 24（versionName 仍 1.6.0）。
 
 ## 1.6.0（build 23）(2026-10-16)

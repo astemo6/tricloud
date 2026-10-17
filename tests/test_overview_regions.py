@@ -20,7 +20,7 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, ROOT)
 from unittest import mock
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ConnectTimeoutError
 from fastapi.testclient import TestClient
 
 from app import core, main, overview, services, tasks, telegram
@@ -62,7 +62,8 @@ WORLD = {}
 CALLS = []
 CONC = {"now": 0, "max": 0}
 CL = threading.Lock()
-MODE = {"describe_regions": "ok", "list_regions": "ok", "ls_fail": set(), "ec2_fail": set(), "optin": set(), "slow": 0.0}
+MODE = {"describe_regions": "ok", "list_regions": "ok", "ls_fail": set(), "ec2_fail": set(), "optin": set(), "slow": 0.0,
+        "timeout": set(), "dr_status": None}
 ENABLED = ["ap-east-2", "ap-northeast-1", "ap-southeast-1", "eu-west-1", "us-east-1", "us-west-2"]
 
 
@@ -74,6 +75,8 @@ class FakeEc2:
         CALLS.append(("describe_regions", self.rg))
         if MODE["describe_regions"] != "ok":
             raise cerr("UnauthorizedOperation")
+        if MODE["dr_status"]:   # 带 OptInStatus 的返回（含一个 not-opted-in，验证会被过滤）
+            return {"Regions": [dict(RegionName=x, OptInStatus=st) for x, st in MODE["dr_status"].items()]}
         return {"Regions": [{"RegionName": x} for x in ENABLED]}
 
     def get_paginator(self, name):
@@ -91,6 +94,8 @@ class FakeEc2:
                     raise cerr("AuthFailure")
                 if rg in MODE["ec2_fail"]:
                     raise cerr("RequestLimitExceeded")
+                if rg in MODE["timeout"]:   # 未开通的 opt-in 区域（线上巴林 me-south-1）连接超时
+                    raise ConnectTimeoutError(endpoint_url=f"https://ec2.{rg}.amazonaws.com/")
                 sts = WORLD.get(rg, {}).get("ec2", [])
                 # 两页：验证分页都计入
                 return [{"Reservations": [{"Instances": [{"State": {"Name": s}} for s in sts[:1]]}]},
@@ -149,7 +154,8 @@ def reset(world=None, **mode):
     WORLD.update(world or {})
     CALLS.clear()
     CONC.update(now=0, max=0)
-    MODE.update(describe_regions="ok", list_regions="ok", ls_fail=set(), ec2_fail=set(), optin=set(), slow=0.0)
+    MODE.update(describe_regions="ok", list_regions="ok", ls_fail=set(), ec2_fail=set(), optin=set(), slow=0.0,
+                timeout=set(), dr_status=None)
     MODE.update(mode)
     overview.clear()
     aws_provider._LS_GETREGIONS.clear()
@@ -317,15 +323,66 @@ with TestClient(main.app) as c:
         o = c.get(f"/api/accounts/{a2}/overview").json()
         ok("no DescribeRegions: falls back to account:ListRegions", n_calls("list_regions") == 1 and o["total"] == 1
            and o["scanned"] == len(ENABLED) and n_calls("describe_instances", "af-south-1") == 0)
-        reset({"ap-northeast-1": {"ec2": ["running"]}}, describe_regions="deny", list_regions="deny",
-              optin={"af-south-1", "ap-east-1", "me-south-1", "il-central-1"})
-        o = c.get(f"/api/accounts/{a2}/overview").json()
         static = aws_provider.boto3.session.Session().get_available_regions("ec2")
-        ok("no DescribeRegions/ListRegions: botocore static list scanned", n_calls("describe_instances") == len(static) and len(static) >= 30)
-        ok("static: not-enabled opt-in regions (AuthFailure) skipped, not errors", o["errors"] == [] and o["scanned"] == len(static) - 4)
-        ok("static: Tokyo machine still found", o["total"] == 1 and o["regions"][0]["region"] == "ap-northeast-1")
+        DEF = aws_provider.AWS_DEFAULT_REGIONS
+        OPTIN = {"af-south-1", "ap-east-1", "ap-east-2", "ap-south-2", "ap-southeast-3", "ap-southeast-4", "ap-southeast-5",
+                 "ap-southeast-6", "ap-southeast-7", "ca-west-1", "eu-south-1", "eu-south-2", "eu-central-2", "il-central-1",
+                 "me-south-1", "me-central-1", "mx-central-1"}
+        ok("default regions: 17 per AWS docs (2026-10), none of them opt-in", len(DEF) == 17 and not (DEF & OPTIN))
+        ok("default regions: all in botocore static ec2 list", DEF <= set(static))
+        ok("default regions: static list minus opt-in == default set", (set(static) - OPTIN) >= DEF
+           and not ((set(static) & OPTIN) & DEF))
+        # 线上 AWS#2：无 DescribeRegions / ListRegions，巴林连接超时 → 以前「1 个区域查询失败」
+        reset({}, describe_regions="deny", list_regions="deny", timeout=OPTIN)
+        o = c.get(f"/api/accounts/{a2}/overview").json()
+        ok("static: only the 17 default-enabled regions scanned", n_calls("describe_instances") == 17
+           and {x[1] for x in CALLS if x[0] == "describe_instances"} == set(DEF))
+        ok("static: opt-in regions (me-south-1 etc.) not scanned at all", not any(n_calls("describe_instances", g) for g in OPTIN))
+        ok("static: no 'region query failed' (errors empty), 0 machines", o["errors"] == [] and o["total"] == 0 and o["scanned"] == 17)
         s = c.get(f"/api/accounts/{a2}/aws/scan").json()
-        ok("static: aws/scan rows exclude not-enabled regions", not any(x["region"] == "af-south-1" for x in s["regions"]))
+        ok("static: aws/scan rows = default regions only", {x["region"] for x in s["regions"]} == set(DEF))
+        # 机器在默认区域：照样找到
+        reset({"ap-northeast-1": {"ec2": ["running"]}}, describe_regions="deny", list_regions="deny", optin=OPTIN)
+        o = c.get(f"/api/accounts/{a2}/overview").json()
+        ok("static: Tokyo machine still found", o["total"] == 1 and o["regions"][0]["region"] == "ap-northeast-1" and o["errors"] == [])
+        # 已知有机器的 opt-in 区域（以前扫到过）：全量重扫时仍扫描
+        reset({"me-south-1": {"ec2": ["running"]}, "ap-northeast-1": {"ec2": ["stopped"]}}, describe_regions="deny", list_regions="deny")
+        overview._full[a2] = {"ts": time.time() - overview.FULL_TTL - 1, "updated_at": "x",
+                              "rows": [{"region": "me-south-1", "ec2": 1, "ec2_running": 1, "lightsail": None, "lightsail_running": 0},
+                                       {"region": "ap-east-1", "ec2": 0, "ec2_running": 0, "lightsail": None, "lightsail_running": 0}]}
+        o = c.get(f"/api/accounts/{a2}/overview").json()
+        ok("static + known opt-in region with machines: still scanned and counted",
+           n_calls("describe_instances", "me-south-1") == 1 and any(x["region"] == "me-south-1" and x["count"] == 1 for x in o["regions"]))
+        ok("static: known opt-in region WITHOUT machines (ap-east-1) not rescanned", n_calls("describe_instances", "ap-east-1") == 0)
+        ok("static: scanned = 17 + 1 known opt-in, totals 2 / running 1", o["scanned"] == 18 and o["total"] == 2 and o["running"] == 1)
+        # 新建过实例的 opt-in 区域（_extra）与账号默认区域为 opt-in 时也扫描
+        reset({"ap-southeast-3": {"ec2": ["pending"]}}, describe_regions="deny", list_regions="deny")
+        overview.invalidate(a2, "ap-southeast-3")
+        o = c.get(f"/api/accounts/{a2}/overview?refresh=true").json()
+        ok("static + created-in opt-in region (_extra): scanned", n_calls("describe_instances", "ap-southeast-3") == 1 and o["total"] == 1)
+        reset({}, describe_regions="deny", list_regions="deny")
+        p2 = fake_aws(a2)
+        rs, src = p2.scan_region_list(keep=["il-central-1"])
+        ok("scan_region_list(keep): static = default ∪ keep", src == "static" and set(rs) == set(DEF) | {"il-central-1"})
+        with mock.patch.object(core, "get_account", lambda i, with_cred=False: {"id": i, "provider": "aws", "region": "ap-south-2", "name": "x"}):
+            overview.aws_full(a2, refresh=True)
+        ok("static + account default region opt-in (ap-south-2): scanned", n_calls("describe_instances", "ap-south-2") == 1)
+        # 开通状态未知的 opt-in 区域（keep 里但没开通）：AuthFailure → 不算失败
+        reset({}, describe_regions="deny", list_regions="deny", optin={"il-central-1"})
+        ok("static: keep region not enabled (AuthFailure) dropped, not an error",
+           all(r["region"] != "il-central-1" for r in p2.scan_all_regions(keep=["il-central-1"])))
+        # 有 DescribeRegions：照旧，只扫 opt-in-not-required / opted-in
+        reset({}, dr_status={"us-east-1": "opt-in-not-required", "ap-northeast-1": "opt-in-not-required",
+                             "ap-east-2": "opted-in", "me-south-1": "not-opted-in"})
+        rs, src = p2.scan_region_list(keep=["il-central-1"])
+        ok("DescribeRegions: opted-in kept, not-opted-in filtered, keep ignored",
+           src == "describe_regions" and rs == ["ap-east-2", "ap-northeast-1", "us-east-1"])
+        o = c.get(f"/api/accounts/{a1}/overview?refresh=true").json()
+        ok("DescribeRegions path: 3 regions scanned, me-south-1 untouched", o["scanned"] == 3 and n_calls("describe_instances", "me-south-1") == 0)
+        # ListRegions 路径不变：ENABLED / ENABLED_BY_DEFAULT
+        reset({}, describe_regions="deny")
+        rs, src = p2.scan_region_list()
+        ok("ListRegions path unchanged (DISABLED af-south-1 excluded)", src == "list_regions" and rs == sorted(ENABLED))
 
         # --- 部分失败 ---
         reset({"ap-northeast-1": {"ec2": ["running"]}}, ec2_fail={"eu-west-1"}, ls_fail={"us-east-1"})

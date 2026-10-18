@@ -100,6 +100,7 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 
 | 版本 | 内容 |
 |---|---|
+| 1.6.0（build 25） | 账号列表显示实际有机器的区域（AWS / OCI / Azure，无机器时注明默认区域），打开账号默认选中机器最多的区域；复用总览扫描并持久化记录，列表不额外调用云 API，Web + Android + iOS |
 | 1.6.0（build 24） | 修复总览实例数只统计默认区域：按账号所有区域统计（AWS EC2 + Lightsail 全区域、OCI 订阅区域、Azure 整个订阅），显示实际有机器的区域，缓存 + 重新扫描，Web + Android + iOS |
 | 1.6.0（build 23） | OneDrive 备份频率自定义：每 N 小时、每天多个时间点、每周多选星期、每月指定日期（含月末）、Cron 表达式，保存前预览接下来 3 次，旧设置自动迁移，Web + Android + iOS + TG |
 | 1.6.0（build 22） | 流量守护「推送并限速」（实例自装 bash + tc agent，默认 1 Mbps，SSH 不限）+ 按端口 / 服务的流量明细（nftables / iptables 只计数，今日 / 本月 Top，保留 90 天，TG `/ports`）；OneDrive 绑定按钮更醒目、备份密码不再限制长度，Web + Android + iOS |

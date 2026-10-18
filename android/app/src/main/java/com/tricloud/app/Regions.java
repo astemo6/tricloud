@@ -111,4 +111,82 @@ final class Regions {
         if (err != null && err.length() > 0) parts.add(err.length() + " 个区域查询失败");
         return o.optInt("total") + " 台（运行 " + o.optInt("running") + "）" + (parts.isEmpty() ? "" : "· " + String.join(" · ", parts));
     }
+
+    // ---------------- build 25：有机器的区域（GET /accounts 的 machine_regions，台数多的在前；null = 还没扫描过，[] = 没有机器） ----------------
+
+    /** 本次会话里 /overview 查到的结果（比 /accounts 带的记录新）；重新拉 /accounts 时清空。 */
+    static final Map<Integer, org.json.JSONArray> HINTS = new java.util.concurrent.ConcurrentHashMap<>();
+    /** 已经刷新过（或正在刷新）的账号，避免同一会话里重复排队。 */
+    static final java.util.Set<Integer> REFRESHED = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+
+    static org.json.JSONArray machineRegions(org.json.JSONObject acc) {
+        org.json.JSONArray h = HINTS.get(acc.optInt("id"));
+        if (h != null) return h;
+        return acc.isNull("machine_regions") ? null : acc.optJSONArray("machine_regions");
+    }
+
+    /** 机器最多的区域；Azure 按订阅管理不用区域，没有记录 / 没有机器时返回 ""。与 core.js machineRegion 相同。 */
+    static String machineRegion(org.json.JSONObject acc) {
+        if ("azure".equals(acc.optString("provider"))) return "";
+        org.json.JSONArray l = machineRegions(acc);
+        return l == null || l.length() == 0 ? "" : l.optJSONObject(0).optString("region");
+    }
+
+    /** 当前区域：手动选过的 > 机器最多的区域 > 账号默认区域。 */
+    static String current(org.json.JSONObject acc) {
+        String p = Api.pref("region_" + acc.optInt("id"), "");
+        if (!p.isEmpty()) return p;
+        String m = machineRegion(acc);
+        return m.isEmpty() ? BaseActivity.str(acc, "region", "") : m;
+    }
+
+    /** 账号列表的区域文字，与 core.js accountRegionText 相同：有机器「ap-northeast-1 · 东京」/「东京 等 2 个区域」；
+     *  没有机器「无机器 · 默认 us-east-1 · 弗吉尼亚北部」；还没扫描过「us-east-1 · 弗吉尼亚北部（默认区域）」。 */
+    static String accountText(org.json.JSONObject acc) {
+        org.json.JSONArray l = machineRegions(acc);
+        if (l != null && l.length() > 0) return brief(l);
+        if ("azure".equals(acc.optString("provider"))) return l == null ? "" : "无机器";
+        String r = BaseActivity.str(acc, "region", "");
+        String d = r.isEmpty() ? "-" : label(r);
+        return l == null ? d + "（默认区域）" : "无机器 · 默认 " + d;
+    }
+
+    /** /overview 的结果记下来（列表与打开账号时的默认区域马上用上）。 */
+    static void apply(int id, org.json.JSONObject o) {
+        org.json.JSONArray rs = o == null ? null : o.optJSONArray("regions");
+        if (rs == null) return;
+        java.util.List<org.json.JSONObject> l = new java.util.ArrayList<>();
+        for (int i = 0; i < rs.length(); i++) {
+            org.json.JSONObject r = rs.optJSONObject(i);
+            if (r == null || r.optInt("count") <= 0) continue;
+            try { l.add(new org.json.JSONObject().put("region", r.optString("region")).put("count", r.optInt("count")).put("running", r.optInt("running"))); }
+            catch (org.json.JSONException ignored) { }
+        }
+        l.sort((a, b) -> a.optInt("count") != b.optInt("count") ? b.optInt("count") - a.optInt("count")
+                : a.optInt("running") != b.optInt("running") ? b.optInt("running") - a.optInt("running") : a.optString("region").compareTo(b.optString("region")));
+        HINTS.put(id, new org.json.JSONArray(l));
+    }
+
+    /** 账号列表懒加载：没有记录 / 记录过期的账号逐个（一次一个，后台线程）查 /overview，每查完一个在主线程回调一次。 */
+    static void refreshHints(android.app.Activity act, org.json.JSONArray accs, java.util.function.IntConsumer each) {
+        java.util.List<Integer> todo = new java.util.ArrayList<>();
+        for (int i = 0; accs != null && i < accs.length(); i++) {
+            org.json.JSONObject a = accs.optJSONObject(i);
+            int id = a.optInt("id");
+            if (a.optInt("disabled") == 1 || HINTS.containsKey(id) || REFRESHED.contains(id)) continue;
+            if (!a.isNull("machine_regions") && !a.optBoolean("machine_regions_stale")) continue;
+            REFRESHED.add(id);
+            todo.add(id);
+        }
+        if (todo.isEmpty()) return;
+        new Thread(() -> {
+            for (int id : todo) {
+                try {
+                    Object r = Api.call("GET", "/accounts/" + id + "/overview", null);
+                    if (r instanceof org.json.JSONObject) apply(id, (org.json.JSONObject) r);
+                    act.runOnUiThread(() -> { if (!act.isFinishing()) each.accept(id); });
+                } catch (Exception ignored) { }
+            }
+        }, "tc-region-hints").start();
+    }
 }

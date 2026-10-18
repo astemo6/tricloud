@@ -93,4 +93,73 @@ enum Regions {
         if !err.isEmpty { parts.append("\(err.count) 个区域查询失败") }
         return "\(o.optInt("total")) 台（运行 \(o.optInt("running"))）" + (parts.isEmpty ? "" : "· " + parts.joined(separator: " · "))
     }
+
+    // MARK: - build 25：有机器的区域（GET /accounts 的 machine_regions，台数多的在前；null = 还没扫描过，[] = 没有机器）
+
+    /// 本次会话里 /overview 查到的结果（比 /accounts 带的记录新）；重新拉 /accounts 时清空。
+    static var hints: [Int: JArr] = [:]
+    /// 已经刷新过（或正在刷新）的账号，避免同一会话里重复排队。
+    static var refreshed: Set<Int> = []
+
+    static func machineRegions(_ acc: JObj) -> JArr? {
+        if let h = hints[acc.optInt("id")] { return h }
+        return acc.isNull("machine_regions") ? nil : acc.optJSONArray("machine_regions")
+    }
+
+    /// 机器最多的区域；Azure 按订阅管理不用区域，没有记录 / 没有机器时返回 ""。与 core.js machineRegion 相同。
+    static func machineRegion(_ acc: JObj) -> String {
+        if acc.optString("provider") == "azure" { return "" }
+        guard let l = machineRegions(acc), !l.isEmpty else { return "" }
+        return l.obj(0).optString("region")
+    }
+
+    /// 当前区域：手动选过的 > 机器最多的区域 > 账号默认区域。
+    static func current(_ acc: JObj) -> String {
+        let p = Prefs.get("region_\(acc.optInt("id"))", "")
+        if !p.isEmpty { return p }
+        let m = machineRegion(acc)
+        return m.isEmpty ? str(acc, "region", "") : m
+    }
+
+    /// 账号列表的区域文字，与 core.js accountRegionText 相同：
+    /// 有机器「ap-northeast-1 · 东京」/「东京 等 2 个区域」；没有机器「无机器 · 默认 us-east-1 · 弗吉尼亚北部」；还没扫描过「us-east-1 · 弗吉尼亚北部（默认区域）」。
+    static func accountText(_ acc: JObj) -> String {
+        let l = machineRegions(acc)
+        if let l = l, !l.isEmpty { return brief(l) }
+        if acc.optString("provider") == "azure" { return l == nil ? "" : "无机器" }
+        let r = str(acc, "region", "")
+        let d = r.isEmpty ? "-" : label(r)
+        return l == nil ? d + "（默认区域）" : "无机器 · 默认 " + d
+    }
+
+    /// /overview 的结果记下来（列表与打开账号时的默认区域马上用上）。
+    static func apply(_ id: Int, _ o: JObj) {
+        guard let rs = o.optJSONArray("regions") else { return }
+        var l: [JObj] = (0..<rs.count).map { rs.obj($0) }.filter { $0.optInt("count") > 0 }
+        l.sort { a, b in
+            if a.optInt("count") != b.optInt("count") { return a.optInt("count") > b.optInt("count") }
+            if a.optInt("running") != b.optInt("running") { return a.optInt("running") > b.optInt("running") }
+            return a.optString("region") < b.optString("region")
+        }
+        hints[id] = l.map { ["region": $0.optString("region"), "count": $0.optInt("count"), "running": $0.optInt("running")] as JObj }
+    }
+
+    /// 账号列表懒加载：没有记录 / 记录过期的账号逐个（一次一个）查 /overview（后端有缓存与每账号锁），每查完一个回调一次。
+    static func refreshHints(_ accs: [JObj], _ each: @escaping (Int) -> Void) {
+        let todo = accs.filter { a in
+            let id = a.optInt("id")
+            return a.optInt("disabled") != 1 && !refreshed.contains(id) && hints[id] == nil
+                && (a.isNull("machine_regions") || a.optBoolean("machine_regions_stale"))
+        }.map { $0.optInt("id") }
+        todo.forEach { Regions.refreshed.insert($0) }
+        func next(_ i: Int) {
+            if i >= todo.count { return }
+            let id = todo[i]
+            Api.call("GET", "/accounts/\(id)/overview", nil) { res in
+                if case .success(let x) = res { Regions.apply(id, jobj(x)); each(id) }
+                next(i + 1)
+            }
+        }
+        next(0)
+    }
 }

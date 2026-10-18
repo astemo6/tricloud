@@ -44,7 +44,7 @@ final class MainPage: Page {
                 let aid = acc.optInt("id")
                 let c = self.card(acc.optString("name") + (acc.optInt("disabled") == 1 ? "  [已停用]" : ""))
                 let proxy = str(acc, "proxy", "").isEmpty ? "" : "\n代理 " + acc.optString("proxy") + (str(acc, "proxy_user", "").isEmpty ? "" : " · " + acc.optString("proxy_user"))
-                c.muted(MainPage.pname(acc.optString("provider")) + " · " + Regions.label(str(acc, "region", "-")) + MainPage.typeOf(acc) + MainPage.ageOf(acc) + MainPage.testOf(acc) + proxy)
+                c.muted(MainPage.pname(acc.optString("provider")) + MainPage.regionText(acc) + MainPage.typeOf(acc) + MainPage.ageOf(acc) + MainPage.testOf(acc) + proxy)
                 let row = c.row()
                 row.button("管理") { self.push(AccountPage(acc)) }
                 row.button("测活") {
@@ -81,6 +81,14 @@ final class MainPage: Page {
             }
             self.bigButton("＋ 添加云账号") { self.openAddAccount() }
         }
+    }
+
+    /// build 25：「 · 有机器的区域」，与默认区域不同时括号注明默认区域。
+    static func regionText(_ acc: JObj) -> String {
+        let t = Regions.accountText(acc)
+        let m = Regions.machineRegion(acc), def = str(acc, "region", "")
+        let note = !m.isEmpty && !def.isEmpty && m != def ? "（默认 " + Regions.label(def) + "）" : ""
+        return t.isEmpty ? "" : " · " + t + note
     }
 
     /// v1.6：缓存的账号类型（点「类型」查询后显示）。

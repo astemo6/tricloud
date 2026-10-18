@@ -1,5 +1,5 @@
 // TriCloud 前端 v1.6.0 · 云账号管理：添加 / 批量添加 / 编辑 / 粘贴识别、测活、账号类型与停用、已删账号
-import { $, ACCOUNTS, act, ADD_BODY, api, confirmBox, del, esc, fmtDT, form, loadAccounts, loading, modal, PNAME, post, PROV_HINT, provOpts, PROVS, regionLabel, TEXTAREA_FIELDS, toast, view } from "./core.js";
+import { $, accountRegionText, ACCOUNTS, act, ADD_BODY, api, confirmBox, del, esc, fmtDT, form, loadAccounts, loading, modal, PNAME, post, PROV_HINT, provOpts, PROVS, refreshMachineRegions, regionLabel, TEXTAREA_FIELDS, toast, view } from "./core.js";
 import { go, route } from "./router.js";
 
 // ---------------- 云账号管理 ----------------
@@ -12,17 +12,25 @@ export const CRED_FIELDS = {
   azure: [["tenant_id", "Tenant ID"], ["client_id", "Client (App) ID"], ["client_secret", "Client Secret", "", "password"], ["subscription_id", "Subscription ID"],
     ["proxy", "出口代理（可选）", "http://host:port"], ["proxy_user", "代理用户名（可选）"], ["proxy_pass", "代理密码（可选）", "", "password"]],
 };
+// build 25：区域列显示有机器的区域；与默认区域不同时下面小字注明默认区域
+export function accRegionCell(a) {
+  const l = a.machine_regions || [];
+  const sub = l.length > 1 ? l.map((r) => `${regionLabel(r.region)}：${r.count} 台`).join("\n") : "";
+  const def = a.provider !== "azure" && l.length && a.region && a.region !== l[0].region ? `<div class="muted">默认 ${esc(regionLabel(a.region))}</div>` : "";
+  return `<span${sub ? ` title="${esc(sub)}"` : ""}>${esc(accountRegionText(a) || "-")}</span>${def}`;
+}
 export async function pageAccounts() {
   const prov = (p) => ACCOUNTS.filter((a) => a.provider === p).length;
   view.innerHTML = `<div class="bar"><button class="btn primary" id="add">添加云账号</button><button class="btn" id="batch">批量添加</button>
     <select id="tprov" title="测活范围"><option value="">全部账号</option>${PROVS.filter(prov).map((p) => `<option value="${p}">${PNAME[p]}</option>`).join("")}</select>
     <button class="btn" id="testAll">⚡ 一键测活</button><a class="btn" href="#/deleted">🗑 已删账号</a><span class="grow"></span><span class="muted" id="tsum">凭证经 Fernet 加密保存在本机 SQLite，不经过任何第三方</span></div>
-    <div class="card"><table><tr><th>名称</th><th>云</th><th>默认区域</th><th>云上创建 / 存活</th><th>连通</th><th>出口代理</th><th>添加时间</th><th></th></tr>
+    <div class="card"><table><tr><th>名称</th><th>云</th><th>区域</th><th>云上创建 / 存活</th><th>连通</th><th>出口代理</th><th>添加时间</th><th></th></tr>
     ${ACCOUNTS.map((a) => `<tr data-acc="${a.id}" class="${a.disabled ? "acc-off" : ""}"><td><a href="#/${a.provider}/${a.id}">${esc(a.name)}</a>${a.disabled ? ` <span class="badge failed" title="${esc(a.disabled_reason || "")}">已停用</span>` : ""}${acctTypeTag(a)}</td><td><span class="dot ${a.provider}"></span> ${PNAME[a.provider]}</td>
-    <td>${esc(a.region ? regionLabel(a.region) : "-")}</td><td>${ageText(a)}</td><td class="tcell">${testCell(a)}</td><td class="mono">${esc(a.proxy || "直连")}${a.proxy_user ? `<div class="muted">${esc(a.proxy_user)}${a.proxy_pass_set ? " · ●●●" : ""}</div>` : ""}</td><td>${new Date(a.created * 1000).toLocaleString()}</td>
+    <td id="mr${a.id}">${accRegionCell(a)}</td><td>${ageText(a)}</td><td class="tcell">${testCell(a)}</td><td class="mono">${esc(a.proxy || "直连")}${a.proxy_user ? `<div class="muted">${esc(a.proxy_user)}${a.proxy_pass_set ? " · ●●●" : ""}</div>` : ""}</td><td>${new Date(a.created * 1000).toLocaleString()}</td>
     <td><button class="btn sm" data-test="${a.id}">测活</button> <button class="btn sm" data-info="${a.id}">信息</button> <button class="btn sm" data-type="${a.id}">类型</button>${a.disabled ? ` <button class="btn sm" data-off="${a.id}">启用</button>` : ""} <button class="btn sm" data-edit="${a.id}">编辑</button> <button class="btn sm" data-px="${a.id}">代理</button> <button class="btn sm danger" data-del="${a.id}">删除</button></td></tr>`).join("") || `<tr><td colspan=8 class="muted">暂无</td></tr>`}</table></div>`;
   $("#add").onclick = addAccount;
   $("#batch").onclick = batchAddAccounts;
+  refreshMachineRegions(ACCOUNTS, (a) => { const td = document.getElementById("mr" + a.id); if (td) td.innerHTML = accRegionCell(a); });
   $("#testAll").onclick = async (e) => {
     const p = $("#tprov").value;
     view.querySelectorAll("tr[data-acc]").forEach((tr) => { const a = ACCOUNTS.find((x) => x.id == tr.dataset.acc); if (!p || a.provider === p) tr.querySelector(".tcell").innerHTML = `<span class="spin"></span>`; });

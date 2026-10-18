@@ -44,7 +44,10 @@ final class AppState: ObservableObject {
         }
     }
 
-    func setAccounts(_ a: JArr) { accounts = (0..<a.count).map { a.obj($0) } }
+    func setAccounts(_ a: JArr) {
+        accounts = (0..<a.count).map { a.obj($0) }
+        Regions.hints = [:]   // build 25：/accounts 带的 machine_regions 是后端最新记录
+    }
 
     func pollTasks() {
         guard loggedIn else { return }

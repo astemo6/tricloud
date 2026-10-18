@@ -18,6 +18,23 @@
     { id: 3, provider: "aws", name: "AWS 学习号", region: "ap-northeast-1", proxy: "proxy.example.com:3128", proxy_user: "tc-demo", proxy_pass_set: true, created: now - 86400 * 20, cloud_created_at: ymd(-190), last_test_ok: 1, last_test_ms: 311, last_test_at: now - 3600 },
     { id: 4, provider: "azure", name: "Azure 学生", region: null, created: now - 86400 * 8, cloud_created_at: ymd(-342), edu_expires_at: null, last_test_ok: 0, last_test_ms: 2210, last_test_at: now - 3600, last_test_error: "ClientAuthenticationError: AADSTS7000222 client secret expired（演示）" },
   ];
+  // build 24：总览按所有有机器的区域统计（演示：AWS 东京 EC2+Lightsail，另有俄勒冈 1 台已停止；Azure 按 japaneast）
+  function ovOf(id) {
+    var oa = accounts.find(function (x) { return x.id === id; }) || {}, ol = inst[id] || [], run = function (l) { return l.filter(function (i) { return i.state === "running"; }).length; };
+    var or = [], ov = { account_id: oa.id, provider: oa.provider, default_region: oa.provider === "azure" ? null : oa.region, errors: [], scope: "all", cached: false, updated_at: new Date().toLocaleString() };
+    if (oa.provider === "aws") {
+      var west = [{ state: "stopped" }];
+      or = [{ region: "ap-northeast-1", count: ol.length + lightsail.length, running: run(ol) + run(lightsail), ec2: ol.length, lightsail: lightsail.length },
+        { region: "us-west-2", count: 1, running: 0, ec2: 1, lightsail: 0 }];
+      Object.assign(ov, { ec2: ol.length + west.length, ec2_running: run(ol), lightsail: lightsail.length, lightsail_running: run(lightsail), lightsail_failed: false, scanned: 17 });
+    } else {
+      var rg = oa.provider === "azure" ? "japaneast" : oa.region;
+      or = ol.length ? [{ region: rg, count: ol.length, running: run(ol) }] : [];
+      ov.scanned = 1;
+    }
+    or = or.filter(function (r) { return r.count; }).sort(function (a, b) { return b.count - a.count || (a.region < b.region ? -1 : 1); });
+    return Object.assign(ov, { regions: or, total: or.reduce(function (t, r) { return t + r.count; }, 0), running: or.reduce(function (t, r) { return t + r.running; }, 0) });
+  }
   var inst = {
     1: [
       { id: "ocid1.instance.oc1.ap-tokyo-1.demo1", name: "arm-main", state: "running", public_ip: "203.0.113.10", private_ip: "10.0.0.12", ipv6: ["2001:db8::12"], shape: "VM.Standard.A1.Flex", ocpus: 4, memory_gb: 24, zone: "AP-TOKYO-1-AD-1", created: "2025-09-02 08:14" },
@@ -1124,7 +1141,8 @@
     if (p.match(/\/azure\/rgs$/) && method === "GET") return rgs;
     if (p.match(/\/azure\/rgs$/)) { if (body.op === "delete") { if (body.confirm !== body.name) return { __status: 400, detail: "资源组名称不匹配" }; rgs = rgs.filter(function (g) { return g.name !== body.name; }); } else rgs.push({ name: body.name || "rg-new", location: body.location || "eastasia", state: "Succeeded" }); return { ok: true }; }
     if (p.match(/\/azure\/create$/)) { secrets.unshift({ id: Date.now(), name: body.name, account_name: "Azure 学生", username: "azureuser", created: Math.floor(Date.now() / 1000) }); audit1("POST /azure/create", body.name); return { ok: true, task_id: addTask("create", 4, "创建 VM " + body.name) }; }
-    if (p === "/accounts") return accounts;
+    // build 25：账号列表带 machine_regions（有机器的区域，台数多的在前）
+    if (p === "/accounts") return accounts.map(function (a) { var o = ovOf(a.id); return Object.assign({}, a, { machine_regions: o.regions.map(function (r) { return { region: r.region, count: r.count, running: r.running }; }), machine_regions_at: "2026-10-18 09:00", machine_regions_stale: false }); });
     if (p === "/settings" && method === "GET") return settings;
     if (p === "/settings") { Object.assign(settings, body || {}); return { ok: true }; }
     if (p === "/settings/tg-test") return { ok: true };
@@ -1136,23 +1154,7 @@
       return pr === "oci" ? ["ap-tokyo-1", "ap-seoul-1", "ap-osaka-1"] : ["ap-east-2", "ap-northeast-1", "ap-southeast-1", "us-east-1", "us-west-2"]; }
     if (/^\/accounts\/\d+\/(lightsail\/|instances$)/.test(p) && (q.get("kind") === "lightsail" || p.indexOf("/lightsail/") >= 0) && (q.get("region") || (body && body.region)) === "ap-east-2")
       return { __status: 400, detail: "Lightsail 不支持该区域（台北 ap-east-2），请换区域" };
-    // build 24：总览按所有有机器的区域统计（演示：AWS 东京 EC2+Lightsail，另有俄勒冈 1 台已停止；Azure 按 japaneast）
-    if ((m = p.match(/^\/accounts\/(\d+)\/overview$/)) && method === "GET") {
-      var oa = accounts.find(function (x) { return x.id === +m[1]; }) || {}, ol = inst[m[1]] || [], run = function (l) { return l.filter(function (i) { return i.state === "running"; }).length; };
-      var or = [], ov = { account_id: oa.id, provider: oa.provider, default_region: oa.provider === "azure" ? null : oa.region, errors: [], scope: "all", cached: false, updated_at: new Date().toLocaleString() };
-      if (oa.provider === "aws") {
-        var west = [{ state: "stopped" }];
-        or = [{ region: "ap-northeast-1", count: ol.length + lightsail.length, running: run(ol) + run(lightsail), ec2: ol.length, lightsail: lightsail.length },
-          { region: "us-west-2", count: 1, running: 0, ec2: 1, lightsail: 0 }];
-        Object.assign(ov, { ec2: ol.length + west.length, ec2_running: run(ol), lightsail: lightsail.length, lightsail_running: run(lightsail), lightsail_failed: false, scanned: 17 });
-      } else {
-        var rg = oa.provider === "azure" ? "japaneast" : oa.region;
-        or = ol.length ? [{ region: rg, count: ol.length, running: run(ol) }] : [];
-        ov.scanned = 1;
-      }
-      or = or.filter(function (r) { return r.count; }).sort(function (a, b) { return b.count - a.count || (a.region < b.region ? -1 : 1); });
-      return Object.assign(ov, { regions: or, total: or.reduce(function (t, r) { return t + r.count; }, 0), running: or.reduce(function (t, r) { return t + r.running; }, 0) });
-    }
+    if ((m = p.match(/^\/accounts\/(\d+)\/overview$/)) && method === "GET") return ovOf(+m[1]);
     if ((m = p.match(/^\/accounts\/(\d+)\/instances$/)) && method === "GET") return q.get("kind") === "lightsail" ? lightsail : (inst[m[1]] || []);
     if (p.match(/\/instances\/change-ip$/)) {
       var ca = accOf(p), cidrs = String(body.cidrs || "").split(/[,，\n]/).map(function (x) { return x.trim(); }).filter(Boolean);
@@ -1913,7 +1915,45 @@ const overviewCount = (o) => {
   if (o.errors && o.errors.length) parts.push(`${o.errors.length} 个区域查询失败`);
   return `${o.total} 台（运行 ${o.running}）` + (parts.length ? "· " + parts.join(" · ") : "");
 };
-const regionOf = (acc) => localStorage.getItem("tc_region_" + acc.id) || acc.region || "";
+// build 25：GET /accounts 每个账号带 machine_regions（有机器的区域，台数多的在前；null = 还没扫描过，[] = 没有机器）
+// 机器最多的区域（Azure 按订阅管理，不用区域）
+const machineRegion = (acc) => { const l = acc && acc.provider !== "azure" && acc.machine_regions; return l && l.length ? l[0].region : ""; };
+// 账号列表的区域文字：有机器 →「ap-northeast-1 · 东京」/「东京 等 2 个区域」；没有机器 →「无机器 · 默认 us-east-1 · 弗吉尼亚北部」；
+// 还没扫描过 →「us-east-1 · 弗吉尼亚北部（默认区域）」。Azure 没有默认区域：没机器显示「无机器」，没扫描过显示空
+const accountRegionText = (acc) => {
+  const l = acc.machine_regions;
+  if (l && l.length) return regionsBrief(l);
+  if (acc.provider === "azure") return l ? "无机器" : "";
+  const d = acc.region ? regionLabel(acc.region) : "-";
+  return l ? `无机器 · 默认 ${d}` : `${d}（默认区域）`;
+};
+// 当前区域：用户手动选过的 > 机器最多的区域 > 账号默认区域
+const regionOf = (acc) => localStorage.getItem("tc_region_" + acc.id) || machineRegion(acc) || acc.region || "";
+// /overview 的结果写回账号对象（列表 / 默认区域马上用上，不用等下次 /accounts）
+function applyOverview(acc, o) {
+  if (!acc || !o || !Array.isArray(o.regions)) return;
+  acc.machine_regions = o.regions.filter((r) => r.count > 0).map((r) => ({ region: r.region, count: r.count, running: r.running || 0 }))
+    .sort((a, b) => b.count - a.count || b.running - a.running || (a.region < b.region ? -1 : a.region > b.region ? 1 : 0));
+  acc.machine_regions_stale = !!(o.errors && o.errors.length);
+}
+// 账号列表懒加载：还没记录 / 记录过期的账号，一次只查一个 /overview（后端有缓存与每账号锁），查完回调更新那一行
+const MR_INFLIGHT = new Set();
+let mrChain = Promise.resolve();
+function refreshMachineRegions(accs, onEach) {
+  for (const a of accs || []) {
+    if (a.disabled || MR_INFLIGHT.has(a.id) || (a.machine_regions && !a.machine_regions_stale)) continue;
+    MR_INFLIGHT.add(a.id);
+    mrChain = mrChain.then(() => api(`/accounts/${a.id}/overview`).then((o) => { applyOverview(a, o); a.machine_regions_stale = false; if (onEach) onEach(a); })
+      .catch(() => {}).finally(() => MR_INFLIGHT.delete(a.id)));
+  }
+  return mrChain;
+}
+// 打开账号：没有手动选过区域、也还没有区域记录时先查一次 /overview（最多等 timeout 毫秒，失败 / 超时用默认区域）
+async function ensureMachineRegion(acc, timeout = 8000) {
+  if (!acc || NOREG(acc) || acc.disabled || acc.machine_regions || localStorage.getItem("tc_region_" + acc.id)) return regionOf(acc);
+  await Promise.race([api(`/accounts/${acc.id}/overview`).then((o) => applyOverview(acc, o)).catch(() => {}), new Promise((r) => setTimeout(r, timeout))]);
+  return regionOf(acc);
+}
 // Lightsail 只在部分区域提供服务（如台北 ap-east-2 没有）：区域下拉用 /regions?service=lightsail；当前区域不支持时自动切换并提示
 const LS_REGIONS = {};
 async function lsRegions(acc) {
@@ -1986,17 +2026,25 @@ const CRED_FIELDS = {
   azure: [["tenant_id", "Tenant ID"], ["client_id", "Client (App) ID"], ["client_secret", "Client Secret", "", "password"], ["subscription_id", "Subscription ID"],
     ["proxy", "出口代理（可选）", "http://host:port"], ["proxy_user", "代理用户名（可选）"], ["proxy_pass", "代理密码（可选）", "", "password"]],
 };
+// build 25：区域列显示有机器的区域；与默认区域不同时下面小字注明默认区域
+function accRegionCell(a) {
+  const l = a.machine_regions || [];
+  const sub = l.length > 1 ? l.map((r) => `${regionLabel(r.region)}：${r.count} 台`).join("\n") : "";
+  const def = a.provider !== "azure" && l.length && a.region && a.region !== l[0].region ? `<div class="muted">默认 ${esc(regionLabel(a.region))}</div>` : "";
+  return `<span${sub ? ` title="${esc(sub)}"` : ""}>${esc(accountRegionText(a) || "-")}</span>${def}`;
+}
 async function pageAccounts() {
   const prov = (p) => ACCOUNTS.filter((a) => a.provider === p).length;
   view.innerHTML = `<div class="bar"><button class="btn primary" id="add">添加云账号</button><button class="btn" id="batch">批量添加</button>
     <select id="tprov" title="测活范围"><option value="">全部账号</option>${PROVS.filter(prov).map((p) => `<option value="${p}">${PNAME[p]}</option>`).join("")}</select>
     <button class="btn" id="testAll">⚡ 一键测活</button><a class="btn" href="#/deleted">🗑 已删账号</a><span class="grow"></span><span class="muted" id="tsum">凭证经 Fernet 加密保存在本机 SQLite，不经过任何第三方</span></div>
-    <div class="card"><table><tr><th>名称</th><th>云</th><th>默认区域</th><th>云上创建 / 存活</th><th>连通</th><th>出口代理</th><th>添加时间</th><th></th></tr>
+    <div class="card"><table><tr><th>名称</th><th>云</th><th>区域</th><th>云上创建 / 存活</th><th>连通</th><th>出口代理</th><th>添加时间</th><th></th></tr>
     ${ACCOUNTS.map((a) => `<tr data-acc="${a.id}" class="${a.disabled ? "acc-off" : ""}"><td><a href="#/${a.provider}/${a.id}">${esc(a.name)}</a>${a.disabled ? ` <span class="badge failed" title="${esc(a.disabled_reason || "")}">已停用</span>` : ""}${acctTypeTag(a)}</td><td><span class="dot ${a.provider}"></span> ${PNAME[a.provider]}</td>
-    <td>${esc(a.region ? regionLabel(a.region) : "-")}</td><td>${ageText(a)}</td><td class="tcell">${testCell(a)}</td><td class="mono">${esc(a.proxy || "直连")}${a.proxy_user ? `<div class="muted">${esc(a.proxy_user)}${a.proxy_pass_set ? " · ●●●" : ""}</div>` : ""}</td><td>${new Date(a.created * 1000).toLocaleString()}</td>
+    <td id="mr${a.id}">${accRegionCell(a)}</td><td>${ageText(a)}</td><td class="tcell">${testCell(a)}</td><td class="mono">${esc(a.proxy || "直连")}${a.proxy_user ? `<div class="muted">${esc(a.proxy_user)}${a.proxy_pass_set ? " · ●●●" : ""}</div>` : ""}</td><td>${new Date(a.created * 1000).toLocaleString()}</td>
     <td><button class="btn sm" data-test="${a.id}">测活</button> <button class="btn sm" data-info="${a.id}">信息</button> <button class="btn sm" data-type="${a.id}">类型</button>${a.disabled ? ` <button class="btn sm" data-off="${a.id}">启用</button>` : ""} <button class="btn sm" data-edit="${a.id}">编辑</button> <button class="btn sm" data-px="${a.id}">代理</button> <button class="btn sm danger" data-del="${a.id}">删除</button></td></tr>`).join("") || `<tr><td colspan=8 class="muted">暂无</td></tr>`}</table></div>`;
   $("#add").onclick = addAccount;
   $("#batch").onclick = batchAddAccounts;
+  refreshMachineRegions(ACCOUNTS, (a) => { const td = document.getElementById("mr" + a.id); if (td) td.innerHTML = accRegionCell(a); });
   $("#testAll").onclick = async (e) => {
     const p = $("#tprov").value;
     view.querySelectorAll("tr[data-acc]").forEach((tr) => { const a = ACCOUNTS.find((x) => x.id == tr.dataset.acc); if (!p || a.provider === p) tr.querySelector(".tcell").innerHTML = `<span class="spin"></span>`; });
@@ -2276,6 +2324,7 @@ function loadOverview(refresh) {
     const el = document.getElementById("cnt" + a.id);
     if (refresh && el) el.innerHTML = `<span class="spin"></span>`;
     api(`/accounts/${a.id}/overview${refresh ? "?refresh=true" : ""}`).then((o) => {
+      applyOverview(a, o);   // build 25：账号列表 / 打开账号的默认区域同步更新
       const c = document.getElementById("cnt" + a.id), r = document.getElementById("reg" + a.id);
       if (!c) return;
       c.textContent = overviewCount(o);
@@ -3931,6 +3980,8 @@ function keepTabVisible(bar, key, prev) {
   TAB_SCROLL[key] = bar.scrollLeft;
   bar.addEventListener("scroll", () => { TAB_SCROLL[key] = bar.scrollLeft; }, { passive: true });
 }
+// 不按区域显示的标签（与 App 顶部区域按钮的排除列表一致）
+const NO_REGION_TABS = ["cloudfront", "quota", "billing", "subscription", "regions", "credit"];
 async function pageAccount(acc, tab) {
   const tabs = `<div class="tabs">${TABS[acc.provider].map(([k, l]) =>
     `<a href="#/${acc.provider}/${acc.id}/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</div>`;
@@ -3938,6 +3989,12 @@ async function pageAccount(acc, tab) {
   view.innerHTML = tabs + `<div id="tab"></div>`;
   keepTabVisible(view.querySelector(".tabs"), acc.provider, prevScroll);
   const box = $("#tab");
+  // build 25：默认选中有机器的区域 —— 还没有区域记录时先查一次总览（有缓存，最多等 8 秒）
+  if (!NOREG(acc) && !NO_REGION_TABS.includes(tab) && !acc.machine_regions && !localStorage.getItem("tc_region_" + acc.id) && !acc.disabled) {
+    box.innerHTML = `<div class="empty"><span class="spin"></span> 正在定位有机器的区域…</div>`;
+    await ensureMachineRegion(acc);
+    if (!box.isConnected) return;
+  }
   const fn = {
     instances: tabInstances, ec2: tabInstances, vms: tabInstances, lightsail: tabLightsailV16,
     storage: tabOciStorage, objects: (a, b) => tabOciObjects(a, b), traffic: tabOciTraffic,
@@ -4694,10 +4751,10 @@ function openAccMenu() {
     const q = $("#accq").value.trim().toLowerCase();
     let html = "";
     for (const prov of PROVS) {
-      const l = ACCOUNTS.filter((a) => a.provider === prov && (!q || (a.name + " " + (a.region ? regionLabel(a.region) : "") + " " + PNAME[prov]).toLowerCase().includes(q)));
+      const l = ACCOUNTS.filter((a) => a.provider === prov && (!q || (a.name + " " + accountRegionText(a) + " " + (a.region || "") + " " + PNAME[prov]).toLowerCase().includes(q)));
       if (!l.length) continue;
       html += `<div class="accg">${PNAME[prov]}</div>` + l.map((a) => `<button class="acci ${a.id == p[1] && a.provider === p[0] ? "on" : ""}" data-go="#/${prov}/${a.id}/${mapTab(curTab, prov)}">
-        <span class="dot ${prov}"></span><span class="grow">${esc(a.name)}</span><span class="muted">${esc(a.region ? regionLabel(a.region) : "")}</span></button>`).join("");
+        <span class="dot ${prov}"></span><span class="grow">${esc(a.name)}</span><span class="muted">${esc(accountRegionText(a))}</span></button>`).join("");
     }
     $("#accl").innerHTML = html || `<div class="empty">没有匹配的账号</div>`;
     $("#accl").querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => { closeAccMenu(); go(b.dataset.go); }));

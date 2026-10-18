@@ -80,7 +80,9 @@ public class AccountsActivity extends BaseActivity {
             clear();
             JSONArray a = Api.arr(r);
             Api.accounts = a;
+            Regions.HINTS.clear();   // build 25：/accounts 带的 machine_regions 是后端最新记录
             buildNav();
+            heads.clear();
             LinearLayout top = card(null);
             muted(top, "凭证经 Fernet 加密保存在你的面板服务器，不经过任何第三方。");
             LinearLayout tr = row(top);
@@ -91,23 +93,40 @@ public class AccountsActivity extends BaseActivity {
             button(tr, "🗑 已删账号", v -> startActivity(new Intent(this, DeletedActivity.class)));
             if (a.length() == 0) muted(card("还没有云账号"), "点击「添加」，把控制台里复制的内容直接粘贴进去即可自动识别。");
             for (int i = 0; i < a.length(); i++) accCard(a.optJSONObject(i));
+            // build 25：还没有区域记录 / 记录过期的账号，逐个（一次一个）查总览后更新这张卡片
+            Regions.refreshHints(this, a, id -> {
+                TextView tv = heads.get(id);
+                JSONObject acc = null;
+                for (int i = 0; i < a.length(); i++) if (a.optJSONObject(i).optInt("id") == id) acc = a.optJSONObject(i);
+                if (tv != null && acc != null) tv.setText(headText(acc));
+            });
         });
+    }
+
+    private final java.util.Map<Integer, TextView> heads = new java.util.HashMap<>();
+
+    /** 卡片说明：云 · 有机器的区域（与默认区域不同时注明默认区域）· 类型 · 存活 · 连通 · 代理 · 停用原因 · 添加时间。 */
+    private String headText(JSONObject acc) {
+        boolean off = acc.optInt("disabled") == 1;
+        String type = "";
+        try {
+            JSONObject t = str(acc, "acct_type", "").isEmpty() ? null : new JSONObject(acc.optString("acct_type"));
+            if (t != null && !str(t, "label", "").isEmpty()) type = t.optString("label") + (t.has("age_days") && !t.isNull("age_days") ? " · " + t.optInt("age_days") + " 天" : "");
+        } catch (Exception ignored) { }
+        String rt = Regions.accountText(acc), m = Regions.machineRegion(acc), def = str(acc, "region", "");
+        String note = !m.isEmpty() && !def.isEmpty() && !m.equals(def) ? "（默认 " + Regions.label(def) + "）" : "";
+        return MainActivity.pname(acc.optString("provider")) + (rt.isEmpty() ? "" : " · " + rt + note) + (type.isEmpty() ? "" : " · " + type)
+                + MainActivity.ageOf(acc) + MainActivity.testOf(acc)
+                + "\n出口代理：" + str(acc, "proxy", "直连") + (str(acc, "proxy_user", "").isEmpty() ? "" : " · " + acc.optString("proxy_user") + (acc.optBoolean("proxy_pass_set") ? " · ●●●" : ""))
+                + (off && !str(acc, "disabled_reason", "").isEmpty() ? "\n停用原因：" + acc.optString("disabled_reason") : "")
+                + "\n添加于 " + fmtTime(acc.optLong("created"));
     }
 
     private void accCard(JSONObject acc) {
         int aid = acc.optInt("id");
         boolean off = acc.optInt("disabled") == 1;
         LinearLayout c = card(acc.optString("name") + (off ? "  [已停用]" : ""));
-        String type = "";
-        try {
-            JSONObject t = str(acc, "acct_type", "").isEmpty() ? null : new JSONObject(acc.optString("acct_type"));
-            if (t != null && !str(t, "label", "").isEmpty()) type = t.optString("label") + (t.has("age_days") && !t.isNull("age_days") ? " · " + t.optInt("age_days") + " 天" : "");
-        } catch (Exception ignored) { }
-        muted(c, MainActivity.pname(acc.optString("provider")) + " · " + Regions.label(str(acc, "region", "-")) + (type.isEmpty() ? "" : " · " + type)
-                + MainActivity.ageOf(acc) + MainActivity.testOf(acc)
-                + "\n出口代理：" + str(acc, "proxy", "直连") + (str(acc, "proxy_user", "").isEmpty() ? "" : " · " + acc.optString("proxy_user") + (acc.optBoolean("proxy_pass_set") ? " · ●●●" : ""))
-                + (off && !str(acc, "disabled_reason", "").isEmpty() ? "\n停用原因：" + acc.optString("disabled_reason") : "")
-                + "\n添加于 " + fmtTime(acc.optLong("created")));
+        heads.put(aid, muted(c, headText(acc)));
         LinearLayout row = row(c);
         button(row, "管理", v -> openPage("acc_" + aid, acc));
         button(row, "测活", v -> Api.post(this, "/accounts/" + aid + "/test", null, x -> {

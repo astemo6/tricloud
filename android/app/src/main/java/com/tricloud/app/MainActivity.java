@@ -42,7 +42,8 @@ public class MainActivity extends BaseActivity {
         return i >= 0 ? PNAMES[i] : p;
     }
 
-    static String regionOf(JSONObject a) { return Api.pref("region_" + a.optInt("id"), str(a, "region", "")); }
+    /** 手动选过的区域 > 机器最多的区域（build 25）> 账号默认区域。 */
+    static String regionOf(JSONObject a) { return Regions.current(a); }
 
     @Override
     protected void refresh() {
@@ -51,6 +52,7 @@ public class MainActivity extends BaseActivity {
             clear();
             JSONArray a = Api.arr(r);
             Api.accounts = a;
+            Regions.HINTS.clear();   // build 25：/accounts 带的 machine_regions 是后端最新记录
             buildNav();
             if (a.length() == 0) {
                 muted(card("还没有云账号"), "添加 OCI / AWS / Azure 账号后，这里会显示各账号的实例数、健康度和到期提醒。");
@@ -108,6 +110,7 @@ public class MainActivity extends BaseActivity {
                 }, x -> {
                     JSONObject o = (JSONObject) x;
                     if (o.has("error") && !o.has("total")) { String e = o.optString("error"); cnt.setText("实例：查询失败 " + (e.length() > 60 ? e.substring(0, 60) : e)); return; }
+                    Regions.apply(acc.optInt("id"), o);   // build 25：账号列表 / 打开账号的默认区域同步更新
                     JSONArray rs = o.optJSONArray("regions");
                     String brief = Regions.brief(rs);
                     String dr = o.optString("default_region", "");

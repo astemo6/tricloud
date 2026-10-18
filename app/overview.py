@@ -11,6 +11,10 @@
 - Azure：订阅级 virtual_machines.list_all(status_only) 一次拿到所有区域的 VM 与电源状态（不逐台查网卡/公网 IP，
   以前首页走实例列表要逐台查 NIC，所以慢），缓存 HOT_TTL。
 同一账号同一时间只跑一次查询（锁），并发打开 Web 和 App 不会重复扫描。
+
+build 25：每次汇总后把「有机器的区域」（按台数从多到少）存进 settings.machine_regions（只存区域/台数，不存凭证），
+GET /api/accounts 直接带上（machine_regions / machine_regions_at / machine_regions_stale），账号列表显示实际区域、
+打开账号时默认选中机器最多的区域；读这份记录不发任何云 API 请求，面板重启后也还在。
 """
 import concurrent.futures as cf
 import threading
@@ -27,6 +31,10 @@ _sum = {}            # acc_id -> {"ts", "data"}（总览汇总）
 _extra = {}          # acc_id -> set(region)：新建过实例的区域，下次重查时带上
 _locks = {}
 _glock = threading.Lock()
+
+HINT_KEY = "machine_regions"   # settings：{acc_id: {"regions": [...], "ts", "at", "partial"}}
+HINT_MIN_WRITE = 600           # 区域没变时至少隔这么久才重写一次（秒）
+_hint_lock = threading.Lock()
 
 
 def _lock(acc_id):
@@ -49,6 +57,68 @@ def clear(acc_id=None):
             d.clear()
         else:
             d.pop(acc_id, None)
+
+
+# ---------------- 有机器的区域（账号列表 / 默认区域用） ----------------
+def _hint_rows(data):
+    out = []
+    for r in data.get("regions") or []:
+        x = {"region": r["region"], "count": int(r.get("count") or 0), "running": int(r.get("running") or 0)}
+        if data.get("provider") == "aws":
+            x.update(ec2=int(r.get("ec2") or 0), lightsail=int(r.get("lightsail") or 0))
+        if x["count"]:
+            out.append(x)
+    out.sort(key=lambda r: (-r["count"], -r["running"], r["region"]))
+    return out
+
+
+def _hints_all():
+    h = core.get_setting(HINT_KEY, {})
+    return h if isinstance(h, dict) else {}
+
+
+def remember(acc_id, data, now=None):
+    """汇总结果 → 持久化「有机器的区域」。部分区域查询失败时，失败区域沿用上次记录（那里可能有机器）。"""
+    now = int(now if now is not None else time.time())
+    rows = _hint_rows(data)
+    failed = {e.get("region") for e in data.get("errors") or []}
+    with _hint_lock:
+        allh = _hints_all()
+        old = allh.get(str(acc_id)) or {}
+        if failed:
+            have = {r["region"] for r in rows}
+            rows += [r for r in old.get("regions") or [] if r.get("region") in failed and r.get("region") not in have]
+            rows.sort(key=lambda r: (-r["count"], -r["running"], r["region"]))
+        if old.get("regions") == rows and bool(old.get("partial")) == bool(failed) and now - int(old.get("ts") or 0) < HINT_MIN_WRITE:
+            return old
+        at = str(data.get("updated_at") or services.now_local().strftime("%Y-%m-%d %H:%M"))[:16]
+        allh[str(acc_id)] = rec = {"regions": rows, "ts": now, "at": at, "partial": bool(failed)}
+        core.set_setting(HINT_KEY, allh)
+        return rec
+
+
+def forget(acc_id):
+    """账号删除时调用（凭证 / 代理变更不清：机器所在区域不会因此改变，下次汇总自然更新）。"""
+    with _hint_lock:
+        allh = _hints_all()
+        if allh.pop(str(acc_id), None) is not None:
+            core.set_setting(HINT_KEY, allh)
+
+
+def hint_fields(acc_id, allh=None, now=None):
+    """GET /api/accounts 每行附加的字段：machine_regions = None（还没扫描过）/ [] （扫描过、没有机器）/ 区域列表。"""
+    rec = (allh if allh is not None else _hints_all()).get(str(acc_id))
+    if not rec:
+        return {"machine_regions": None, "machine_regions_at": None, "machine_regions_stale": True}
+    age = (now if now is not None else time.time()) - int(rec.get("ts") or 0)
+    return {"machine_regions": rec.get("regions") or [], "machine_regions_at": rec.get("at"),
+            "machine_regions_stale": bool(age >= FULL_TTL or rec.get("partial"))}
+
+
+def machine_region(acc_id):
+    """机器最多的区域；没有记录 / 没有机器时返回 None（调用方用账号默认区域）。"""
+    l = hint_fields(acc_id)["machine_regions"] or []
+    return l[0]["region"] if l else None
 
 
 # ---------------- AWS ----------------
@@ -190,4 +260,8 @@ def summary(acc_id, refresh=False):
         data["regions"].sort(key=lambda r: (-r["count"], r["region"]))
         data.update(account_id=acc_id, provider=pv, updated_at=services.now_local().strftime("%Y-%m-%d %H:%M:%S"))
         _sum[acc_id] = {"ts": time.time(), "data": data}
+        try:
+            remember(acc_id, data)
+        except Exception:   # 记录失败不影响总览
+            pass
     return dict(data, cached=False)

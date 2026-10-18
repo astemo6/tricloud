@@ -1,6 +1,6 @@
 // TriCloud 前端 v1.6.0 · 账号页框架与实例：列表 / 卡片 / 表格、实例操作、开放端口与安全组弹窗、迁移、流量守护弹窗、v1.6 实例弹窗（重装 / 附加 IP / IP 质量 / 500M / 磁盘 / Lightsail 防火墙）
 import { agentLine, guardAgentDialog, guardPortsDialog } from "./guard.js";
-import { $, ACCOUNTS, act, api, confirmBox, ensureLsRegion, esc, form, instView, isDesktop, lastModal, modal, NO_CHANGE_IP, NO_CREATE, NOREG, OP_NAMES, PNAME, post, regionLabel, regionOf, regionSelect, rq, TAB_FNS_EXTRA, TABS, toast, TRAFFIC_DIALOG, view } from "./core.js";
+import { $, ACCOUNTS, act, api, confirmBox, ensureLsRegion, ensureMachineRegion, esc, form, instView, isDesktop, lastModal, modal, NO_CHANGE_IP, NO_CREATE, NOREG, OP_NAMES, PNAME, post, regionLabel, regionOf, regionSelect, rq, TAB_FNS_EXTRA, TABS, toast, TRAFFIC_DIALOG, view } from "./core.js";
 import { ociOsFields, ociShapeOpts, PUBLIC_CIDR, tabOciCreate, tabOciLimits, tabOciObjects, tabOciSecGroup, tabOciSnatch, tabOciStorage, tabOciTraffic, wireOciOs } from "./oci.js";
 import { ec2Create, lightsailCreate, tabAwsCredit, tabAwsRegions, tabCloudFront, tabLightsailV16, tabQuota, tabRecycle } from "./aws.js";
 import { tabAzCreate, tabAzFoundry, tabAzQuota, tabAzRgs, tabAzSubscription } from "./azure.js";
@@ -22,6 +22,8 @@ export function keepTabVisible(bar, key, prev) {
   TAB_SCROLL[key] = bar.scrollLeft;
   bar.addEventListener("scroll", () => { TAB_SCROLL[key] = bar.scrollLeft; }, { passive: true });
 }
+// 不按区域显示的标签（与 App 顶部区域按钮的排除列表一致）
+export const NO_REGION_TABS = ["cloudfront", "quota", "billing", "subscription", "regions", "credit"];
 export async function pageAccount(acc, tab) {
   const tabs = `<div class="tabs">${TABS[acc.provider].map(([k, l]) =>
     `<a href="#/${acc.provider}/${acc.id}/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</div>`;
@@ -29,6 +31,12 @@ export async function pageAccount(acc, tab) {
   view.innerHTML = tabs + `<div id="tab"></div>`;
   keepTabVisible(view.querySelector(".tabs"), acc.provider, prevScroll);
   const box = $("#tab");
+  // build 25：默认选中有机器的区域 —— 还没有区域记录时先查一次总览（有缓存，最多等 8 秒）
+  if (!NOREG(acc) && !NO_REGION_TABS.includes(tab) && !acc.machine_regions && !localStorage.getItem("tc_region_" + acc.id) && !acc.disabled) {
+    box.innerHTML = `<div class="empty"><span class="spin"></span> 正在定位有机器的区域…</div>`;
+    await ensureMachineRegion(acc);
+    if (!box.isConnected) return;
+  }
   const fn = {
     instances: tabInstances, ec2: tabInstances, vms: tabInstances, lightsail: tabLightsailV16,
     storage: tabOciStorage, objects: (a, b) => tabOciObjects(a, b), traffic: tabOciTraffic,

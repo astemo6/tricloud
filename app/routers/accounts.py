@@ -5,7 +5,7 @@ import time
 
 from fastapi import APIRouter, Body, HTTPException
 
-from .. import accounts_import, core, services, tasks
+from .. import accounts_import, core, overview, services, tasks
 from .common import _num_or_none, _valid_date, call, need_acc, P, REQUIRED, run
 
 router = APIRouter()
@@ -15,8 +15,10 @@ router = APIRouter()
 @router.get("/api/accounts")
 def accounts():
     rows = core.list_accounts()
+    hints = overview._hints_all()   # build 25：有机器的区域（只读本地记录，不调用云 API）
     for r in rows:   # 只回显代理主机、用户名、是否设置了密码，不回显代理密码
         r.update(core.proxy_view(core.get_account(r["id"], with_cred=True)["cred"]))
+        r.update(overview.hint_fields(r["id"], hints))
     return rows
 
 
@@ -387,6 +389,7 @@ def del_account(acc_id: int):
     core.ex("UPDATE tasks SET status='stopped' WHERE account_id=? AND status='running'", (acc_id,))
     core.ex("DELETE FROM accounts WHERE id=?", (acc_id,))
     services.drop_provider_cache(acc_id)
+    overview.forget(acc_id)
     return {"ok": True}
 
 

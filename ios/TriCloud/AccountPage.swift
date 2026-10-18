@@ -58,7 +58,8 @@ final class AccountPage: Page {
         }
     }
 
-    func region() -> String { Prefs.get("region_\(id)", str(acc, "region", "")) }
+    /// 手动选过的区域 > 机器最多的区域（build 25）> 账号默认区域。
+    func region() -> String { Regions.current(acc) }
     func rq() -> String { prov == "azure" ? "" : "region=" + enc(region()) }
     func base(_ inst: JObj, _ kind: String) -> JObj {
         ["instance_id": inst.optString("id"), "region": region(), "kind": kind, "name": inst.optString("name")]
@@ -134,6 +135,28 @@ final class AccountPage: Page {
         }
     }
 
+    /// build 25：没手动选过区域、也还没有区域记录时，先查一次总览定位有机器的区域（有缓存；最多等 8 秒，失败用默认区域）。
+    static let noRegionTabs = ["cloudfront", "quota", "billing", "subscription", "regions", "credit"]
+    var located = false
+    func needLocate() -> Bool {
+        !located && prov != "azure" && !AccountPage.noRegionTabs.contains(tab) && acc.optInt("disabled") != 1
+            && Prefs.get("region_\(id)", "").isEmpty && Regions.machineRegions(acc) == nil
+    }
+
+    func locate() {
+        located = true
+        gen += 1
+        clear()
+        card("正在定位有机器的区域…").muted("首次打开会查一次所有区域（之后用缓存）")
+        var done = false
+        let go: () -> Void = { if !done { done = true; self.refresh() } }
+        later(8) { go() }
+        Api.call("GET", "/accounts/\(id)/overview", nil) { res in
+            if case .success(let x) = res { Regions.apply(self.id, jobj(x)) }
+            go()
+        }
+    }
+
     /// 当前回调是否仍属于正在显示的标签（切换标签后丢弃旧结果）。
     func cur(_ g: Int) -> Bool { g == gen }
 
@@ -145,6 +168,7 @@ final class AccountPage: Page {
     }
 
     override func refresh() {
+        if needLocate() { locate(); return }
         gen += 1
         header()
         switch tab {

@@ -96,7 +96,7 @@ final class HomePage: Page {
             if list.isEmpty { continue }
             section(MainPage.pname(p))
             for acc in list {
-                let region = p == "azure" ? "" : Prefs.get("region_\(acc.optInt("id"))", str(acc, "region", ""))
+                let region = p == "azure" ? "" : Regions.current(acc)
                 let age = HomePage.ageDays(acc)
                 let headDetail = (region.isEmpty ? "" : Regions.label(region) + " · ") + (age.isEmpty ? "" : age + " · ")
                 let off = acc.optInt("disabled") == 1
@@ -113,6 +113,7 @@ final class HomePage: Page {
                     switch res {
                     case .success(let x):
                         let o = jobj(x)
+                        Regions.apply(acc.optInt("id"), o)   // build 25：账号列表 / 打开账号的默认区域同步更新
                         let rs = o.optJSONArray("regions")
                         let brief = Regions.brief(rs)
                         let dr = o.isNull("default_region") ? region : o.optString("default_region")
@@ -175,6 +176,7 @@ final class AccountsPage: Page {
             let a = jarr(r)
             AppState.shared.setAccounts(a)
             self.clear()
+            var items: [Int: (NavItem, JObj)] = [:]
             if a.isEmpty {
                 self.card("还没有云账号").muted("点击下方按钮添加 OCI / AWS / Azure 账号，支持粘贴控制台内容自动识别。")
             }
@@ -184,14 +186,10 @@ final class AccountsPage: Page {
                 self.section(MainPage.pname(p) + " · \(list.count)")
                 for acc in list {
                     let off = acc.optInt("disabled") == 1
-                    var d = p == "azure" ? "" : Regions.label(str(acc, "region", "-"))
-                    if off { d += (d.isEmpty ? "" : " · ") + "已停用" }
-                    else if !acc.isNull("last_test_ok") {
-                        d += (d.isEmpty ? "" : " · ") + (acc.optInt("last_test_ok") == 1 ? "连通 \(acc.optInt("last_test_ms")) ms" : "测活失败")
-                    }
-                    self.nav(Brand.icon(p), acc.optString("name"), d, tint: off ? .gray : Brand.color(p)) {
+                    let n = self.nav(Brand.icon(p), acc.optString("name"), AccountsPage.detail(acc), tint: off ? .gray : Brand.color(p)) {
                         self.push(AccountPage(acc))
                     }
+                    items[acc.optInt("id")] = (n, acc)
                 }
             }
             self.section("管理")
@@ -199,6 +197,20 @@ final class AccountsPage: Page {
             self.nav("square.stack.3d.up.fill", "批量添加", "随手复制的内容混贴，自动拆分多个账号", tint: .indigo) { self.openBatchAdd() }
             self.nav("trash.fill", "已删账号", tint: .gray) { self.push(DeletedPage()) }
             self.bigButton("＋ 添加云账号") { self.openAddAccount() }
+            // build 25：还没有区域记录 / 记录过期的账号，逐个（一次一个）查总览后更新这一行
+            Regions.refreshHints((0..<a.count).map { a.obj($0) }) { id in
+                if let it = items[id] { it.0.detail.text = AccountsPage.detail(it.1) }
+            }
         }
+    }
+
+    /// 账号行副标题：有机器的区域（没有机器 / 还没扫描时注明默认区域）· 连通 / 已停用。
+    static func detail(_ acc: JObj) -> String {
+        var d = Regions.accountText(acc)
+        if acc.optInt("disabled") == 1 { d += (d.isEmpty ? "" : " · ") + "已停用" }
+        else if !acc.isNull("last_test_ok") {
+            d += (d.isEmpty ? "" : " · ") + (acc.optInt("last_test_ok") == 1 ? "连通 \(acc.optInt("last_test_ms")) ms" : "测活失败")
+        }
+        return d
     }
 }

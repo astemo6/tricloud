@@ -40,7 +40,7 @@ extension AccountPage {
                     var b: JObj = ["from_account_id": self.id, "from_region": self.region(), "instance_id": inst.optString("id"),
                                    "name": inst.optString("name"), "to_account_id": to.optInt("id"), "create": create,
                                    "switch_dns": v.optBoolean("switch_dns"), "copy_monitor": v.optBoolean("copy_monitor"), "stop_source": v.optBoolean("stop_source")]
-                    if tp != "azure" { b["region"] = Prefs.get("region_\(to.optInt("id"))", str(to, "region", "")) }
+                    if tp != "azure" { b["region"] = Regions.current(to) }
                     self.post("/migrate", b) { x in self.taskOrToast(x, "已提交") }
                 }
             }

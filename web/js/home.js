@@ -1,5 +1,5 @@
 // TriCloud 前端 v1.6.0 · 总览页与到期提醒
-import { $, ACCOUNTS, api, esc, overviewCount, PNAME, regionLabel, regionOf, regionsBrief, regionsDist, view } from "./core.js";
+import { $, ACCOUNTS, api, applyOverview, esc, overviewCount, PNAME, regionLabel, regionOf, regionsBrief, regionsDist, view } from "./core.js";
 import { ageText } from "./accounts.js";
 
 // ---------------- 总览 ----------------
@@ -33,6 +33,7 @@ function loadOverview(refresh) {
     const el = document.getElementById("cnt" + a.id);
     if (refresh && el) el.innerHTML = `<span class="spin"></span>`;
     api(`/accounts/${a.id}/overview${refresh ? "?refresh=true" : ""}`).then((o) => {
+      applyOverview(a, o);   // build 25：账号列表 / 打开账号的默认区域同步更新
       const c = document.getElementById("cnt" + a.id), r = document.getElementById("reg" + a.id);
       if (!c) return;
       c.textContent = overviewCount(o);

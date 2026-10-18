@@ -12,6 +12,23 @@
     { id: 3, provider: "aws", name: "AWS 学习号", region: "ap-northeast-1", proxy: "proxy.example.com:3128", proxy_user: "tc-demo", proxy_pass_set: true, created: now - 86400 * 20, cloud_created_at: ymd(-190), last_test_ok: 1, last_test_ms: 311, last_test_at: now - 3600 },
     { id: 4, provider: "azure", name: "Azure 学生", region: null, created: now - 86400 * 8, cloud_created_at: ymd(-342), edu_expires_at: null, last_test_ok: 0, last_test_ms: 2210, last_test_at: now - 3600, last_test_error: "ClientAuthenticationError: AADSTS7000222 client secret expired（演示）" },
   ];
+  // build 24：总览按所有有机器的区域统计（演示：AWS 东京 EC2+Lightsail，另有俄勒冈 1 台已停止；Azure 按 japaneast）
+  function ovOf(id) {
+    var oa = accounts.find(function (x) { return x.id === id; }) || {}, ol = inst[id] || [], run = function (l) { return l.filter(function (i) { return i.state === "running"; }).length; };
+    var or = [], ov = { account_id: oa.id, provider: oa.provider, default_region: oa.provider === "azure" ? null : oa.region, errors: [], scope: "all", cached: false, updated_at: new Date().toLocaleString() };
+    if (oa.provider === "aws") {
+      var west = [{ state: "stopped" }];
+      or = [{ region: "ap-northeast-1", count: ol.length + lightsail.length, running: run(ol) + run(lightsail), ec2: ol.length, lightsail: lightsail.length },
+        { region: "us-west-2", count: 1, running: 0, ec2: 1, lightsail: 0 }];
+      Object.assign(ov, { ec2: ol.length + west.length, ec2_running: run(ol), lightsail: lightsail.length, lightsail_running: run(lightsail), lightsail_failed: false, scanned: 17 });
+    } else {
+      var rg = oa.provider === "azure" ? "japaneast" : oa.region;
+      or = ol.length ? [{ region: rg, count: ol.length, running: run(ol) }] : [];
+      ov.scanned = 1;
+    }
+    or = or.filter(function (r) { return r.count; }).sort(function (a, b) { return b.count - a.count || (a.region < b.region ? -1 : 1); });
+    return Object.assign(ov, { regions: or, total: or.reduce(function (t, r) { return t + r.count; }, 0), running: or.reduce(function (t, r) { return t + r.running; }, 0) });
+  }
   var inst = {
     1: [
       { id: "ocid1.instance.oc1.ap-tokyo-1.demo1", name: "arm-main", state: "running", public_ip: "203.0.113.10", private_ip: "10.0.0.12", ipv6: ["2001:db8::12"], shape: "VM.Standard.A1.Flex", ocpus: 4, memory_gb: 24, zone: "AP-TOKYO-1-AD-1", created: "2025-09-02 08:14" },
@@ -1118,7 +1135,8 @@
     if (p.match(/\/azure\/rgs$/) && method === "GET") return rgs;
     if (p.match(/\/azure\/rgs$/)) { if (body.op === "delete") { if (body.confirm !== body.name) return { __status: 400, detail: "资源组名称不匹配" }; rgs = rgs.filter(function (g) { return g.name !== body.name; }); } else rgs.push({ name: body.name || "rg-new", location: body.location || "eastasia", state: "Succeeded" }); return { ok: true }; }
     if (p.match(/\/azure\/create$/)) { secrets.unshift({ id: Date.now(), name: body.name, account_name: "Azure 学生", username: "azureuser", created: Math.floor(Date.now() / 1000) }); audit1("POST /azure/create", body.name); return { ok: true, task_id: addTask("create", 4, "创建 VM " + body.name) }; }
-    if (p === "/accounts") return accounts;
+    // build 25：账号列表带 machine_regions（有机器的区域，台数多的在前）
+    if (p === "/accounts") return accounts.map(function (a) { var o = ovOf(a.id); return Object.assign({}, a, { machine_regions: o.regions.map(function (r) { return { region: r.region, count: r.count, running: r.running }; }), machine_regions_at: "2026-10-18 09:00", machine_regions_stale: false }); });
     if (p === "/settings" && method === "GET") return settings;
     if (p === "/settings") { Object.assign(settings, body || {}); return { ok: true }; }
     if (p === "/settings/tg-test") return { ok: true };
@@ -1130,23 +1148,7 @@
       return pr === "oci" ? ["ap-tokyo-1", "ap-seoul-1", "ap-osaka-1"] : ["ap-east-2", "ap-northeast-1", "ap-southeast-1", "us-east-1", "us-west-2"]; }
     if (/^\/accounts\/\d+\/(lightsail\/|instances$)/.test(p) && (q.get("kind") === "lightsail" || p.indexOf("/lightsail/") >= 0) && (q.get("region") || (body && body.region)) === "ap-east-2")
       return { __status: 400, detail: "Lightsail 不支持该区域（台北 ap-east-2），请换区域" };
-    // build 24：总览按所有有机器的区域统计（演示：AWS 东京 EC2+Lightsail，另有俄勒冈 1 台已停止；Azure 按 japaneast）
-    if ((m = p.match(/^\/accounts\/(\d+)\/overview$/)) && method === "GET") {
-      var oa = accounts.find(function (x) { return x.id === +m[1]; }) || {}, ol = inst[m[1]] || [], run = function (l) { return l.filter(function (i) { return i.state === "running"; }).length; };
-      var or = [], ov = { account_id: oa.id, provider: oa.provider, default_region: oa.provider === "azure" ? null : oa.region, errors: [], scope: "all", cached: false, updated_at: new Date().toLocaleString() };
-      if (oa.provider === "aws") {
-        var west = [{ state: "stopped" }];
-        or = [{ region: "ap-northeast-1", count: ol.length + lightsail.length, running: run(ol) + run(lightsail), ec2: ol.length, lightsail: lightsail.length },
-          { region: "us-west-2", count: 1, running: 0, ec2: 1, lightsail: 0 }];
-        Object.assign(ov, { ec2: ol.length + west.length, ec2_running: run(ol), lightsail: lightsail.length, lightsail_running: run(lightsail), lightsail_failed: false, scanned: 17 });
-      } else {
-        var rg = oa.provider === "azure" ? "japaneast" : oa.region;
-        or = ol.length ? [{ region: rg, count: ol.length, running: run(ol) }] : [];
-        ov.scanned = 1;
-      }
-      or = or.filter(function (r) { return r.count; }).sort(function (a, b) { return b.count - a.count || (a.region < b.region ? -1 : 1); });
-      return Object.assign(ov, { regions: or, total: or.reduce(function (t, r) { return t + r.count; }, 0), running: or.reduce(function (t, r) { return t + r.running; }, 0) });
-    }
+    if ((m = p.match(/^\/accounts\/(\d+)\/overview$/)) && method === "GET") return ovOf(+m[1]);
     if ((m = p.match(/^\/accounts\/(\d+)\/instances$/)) && method === "GET") return q.get("kind") === "lightsail" ? lightsail : (inst[m[1]] || []);
     if (p.match(/\/instances\/change-ip$/)) {
       var ca = accOf(p), cidrs = String(body.cidrs || "").split(/[,，\n]/).map(function (x) { return x.trim(); }).filter(Boolean);

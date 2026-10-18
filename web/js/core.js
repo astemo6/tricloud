@@ -182,7 +182,45 @@ export const overviewCount = (o) => {
   if (o.errors && o.errors.length) parts.push(`${o.errors.length} 个区域查询失败`);
   return `${o.total} 台（运行 ${o.running}）` + (parts.length ? "· " + parts.join(" · ") : "");
 };
-export const regionOf = (acc) => localStorage.getItem("tc_region_" + acc.id) || acc.region || "";
+// build 25：GET /accounts 每个账号带 machine_regions（有机器的区域，台数多的在前；null = 还没扫描过，[] = 没有机器）
+// 机器最多的区域（Azure 按订阅管理，不用区域）
+export const machineRegion = (acc) => { const l = acc && acc.provider !== "azure" && acc.machine_regions; return l && l.length ? l[0].region : ""; };
+// 账号列表的区域文字：有机器 →「ap-northeast-1 · 东京」/「东京 等 2 个区域」；没有机器 →「无机器 · 默认 us-east-1 · 弗吉尼亚北部」；
+// 还没扫描过 →「us-east-1 · 弗吉尼亚北部（默认区域）」。Azure 没有默认区域：没机器显示「无机器」，没扫描过显示空
+export const accountRegionText = (acc) => {
+  const l = acc.machine_regions;
+  if (l && l.length) return regionsBrief(l);
+  if (acc.provider === "azure") return l ? "无机器" : "";
+  const d = acc.region ? regionLabel(acc.region) : "-";
+  return l ? `无机器 · 默认 ${d}` : `${d}（默认区域）`;
+};
+// 当前区域：用户手动选过的 > 机器最多的区域 > 账号默认区域
+export const regionOf = (acc) => localStorage.getItem("tc_region_" + acc.id) || machineRegion(acc) || acc.region || "";
+// /overview 的结果写回账号对象（列表 / 默认区域马上用上，不用等下次 /accounts）
+export function applyOverview(acc, o) {
+  if (!acc || !o || !Array.isArray(o.regions)) return;
+  acc.machine_regions = o.regions.filter((r) => r.count > 0).map((r) => ({ region: r.region, count: r.count, running: r.running || 0 }))
+    .sort((a, b) => b.count - a.count || b.running - a.running || (a.region < b.region ? -1 : a.region > b.region ? 1 : 0));
+  acc.machine_regions_stale = !!(o.errors && o.errors.length);
+}
+// 账号列表懒加载：还没记录 / 记录过期的账号，一次只查一个 /overview（后端有缓存与每账号锁），查完回调更新那一行
+const MR_INFLIGHT = new Set();
+let mrChain = Promise.resolve();
+export function refreshMachineRegions(accs, onEach) {
+  for (const a of accs || []) {
+    if (a.disabled || MR_INFLIGHT.has(a.id) || (a.machine_regions && !a.machine_regions_stale)) continue;
+    MR_INFLIGHT.add(a.id);
+    mrChain = mrChain.then(() => api(`/accounts/${a.id}/overview`).then((o) => { applyOverview(a, o); a.machine_regions_stale = false; if (onEach) onEach(a); })
+      .catch(() => {}).finally(() => MR_INFLIGHT.delete(a.id)));
+  }
+  return mrChain;
+}
+// 打开账号：没有手动选过区域、也还没有区域记录时先查一次 /overview（最多等 timeout 毫秒，失败 / 超时用默认区域）
+export async function ensureMachineRegion(acc, timeout = 8000) {
+  if (!acc || NOREG(acc) || acc.disabled || acc.machine_regions || localStorage.getItem("tc_region_" + acc.id)) return regionOf(acc);
+  await Promise.race([api(`/accounts/${acc.id}/overview`).then((o) => applyOverview(acc, o)).catch(() => {}), new Promise((r) => setTimeout(r, timeout))]);
+  return regionOf(acc);
+}
 // Lightsail 只在部分区域提供服务（如台北 ap-east-2 没有）：区域下拉用 /regions?service=lightsail；当前区域不支持时自动切换并提示
 const LS_REGIONS = {};
 export async function lsRegions(acc) {

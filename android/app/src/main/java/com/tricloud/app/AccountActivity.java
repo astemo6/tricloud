@@ -67,6 +67,35 @@ public class AccountActivity extends BaseActivity {
         refresh();
     }
 
+    // ---------------- build 25：默认选中有机器的区域 ----------------
+    static final List<String> NO_REGION_TABS = Arrays.asList("cloudfront", "quota", "billing", "subscription", "regions", "credit");
+
+    /** 没手动选过区域、也还没有区域记录时，先查一次总览（有缓存）定位有机器的区域。 */
+    private boolean located;
+
+    private boolean needLocate() {
+        return !located && !MainActivity.noRegion(prov) && !NO_REGION_TABS.contains(tab) && acc.optInt("disabled") != 1
+                && Api.pref("region_" + id, "").isEmpty() && Regions.machineRegions(acc) == null;
+    }
+
+    /** 最多等 8 秒；失败 / 超时用账号默认区域。 */
+    private void locate() {
+        located = true;
+        clear();
+        muted(card("正在定位有机器的区域…"), "首次打开会查一次所有区域（之后用缓存）");
+        final boolean[] done = {false};
+        Runnable go = () -> { if (done[0] || isFinishing()) return; done[0] = true; refresh(); };
+        body.postDelayed(go, 8000);
+        Api.job(this, () -> {
+            try { return Api.call("GET", "/accounts/" + id + "/overview", null); }
+            catch (Api.ApiError e) { if (e.code == 401) throw e; return new JSONObject(); }
+            catch (Exception e) { return new JSONObject(); }
+        }, x -> {
+            if (x instanceof JSONObject) Regions.apply(id, (JSONObject) x);
+            go.run();
+        });
+    }
+
     @Override
     protected String navKey() { return "acc_" + id; }
 
@@ -84,7 +113,8 @@ public class AccountActivity extends BaseActivity {
     @Override
     protected void onSaveInstanceState(Bundle o) { super.onSaveInstanceState(o); o.putString("tab", tab); }
 
-    String region() { return Api.pref("region_" + id, str(acc, "region", "")); }
+    /** 手动选过的区域 > 机器最多的区域（build 25）> 账号默认区域。 */
+    String region() { return Regions.current(acc); }
     String rq() { return MainActivity.noRegion(prov) ? "" : "region=" + Api.enc(region()); }
     JSONObject base(JSONObject inst, String kind) throws Exception {
         return new JSONObject().put("instance_id", inst.optString("id")).put("region", region()).put("kind", kind).put("name", inst.optString("name"));
@@ -157,6 +187,7 @@ public class AccountActivity extends BaseActivity {
 
     @Override
     protected void refresh() {
+        if (needLocate()) { locate(); return; }
         header();
         switch (tab) {
             case "instances": case "ec2": case "vms": instances("vm"); break;
@@ -1429,7 +1460,7 @@ public class AccountActivity extends BaseActivity {
                         JSONObject b = new JSONObject().put("from_account_id", id).put("from_region", region()).put("instance_id", inst.optString("id"))
                                 .put("name", inst.optString("name")).put("to_account_id", to.optInt("id")).put("create", create)
                                 .put("switch_dns", v.optBoolean("switch_dns")).put("copy_monitor", v.optBoolean("copy_monitor")).put("stop_source", v.optBoolean("stop_source"));
-                        if (!"azure".equals(tp)) b.put("region", Api.pref("region_" + to.optInt("id"), str(to, "region", "")));
+                        if (!"azure".equals(tp)) b.put("region", Regions.current(to));
                         Api.post(this, "/migrate", b, x -> taskOrToast(x, "已提交"));
                     } catch (Exception ignored) { }
                 });

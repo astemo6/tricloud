@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Body, HTTPException
 
 from .. import core, services, tasks
+from ..i18n import msg
 from .. import credits as creditsm
 from .common import _req, call, guarded, need_acc, P, run
 
@@ -21,7 +22,7 @@ async def az_rg_op(acc_id: int, body: dict = Body(...)):
     p = services.provider(acc_id)
     if body.get("op") == "delete":
         if body.get("confirm") != body.get("name"):
-            raise HTTPException(400, "请输入资源组名称确认删除")
+            raise HTTPException(400, msg("err.rg_name_confirm"))
         return await run(p.delete_rg, body["name"])
     return await run(p.create_rg, body["name"], body["location"])
 
@@ -43,7 +44,7 @@ async def az_create(acc_id: int, body: dict = Body(...)):
     need_acc(acc_id, "azure")
     await guarded(acc_id, "create", body)
     if not body.get("location"):
-        raise HTTPException(400, "请选择区域")
+        raise HTTPException(400, msg("err.pick_region"))
     return {"ok": True, "task_id": tasks.create_task("azure_create", acc_id, {"create": body, "instance_id": "-",
                                                                                "name": body.get("name")})}
 
@@ -116,14 +117,14 @@ async def az_foundry_op(acc_id: int, body: dict = Body(...)):
         return {"ok": True, "task_id": tid}
     if op == "keys":
         if not body.get("confirm"):
-            raise HTTPException(400, "查看密钥需确认")
+            raise HTTPException(400, msg("err.view_key_confirm"))
         return await call(prov.foundry_keys, body.get("resource_id"))
     if op == "delete_deployment":
         if not body.get("confirm"):
-            raise HTTPException(400, "需确认")
+            raise HTTPException(400, msg("err.need_confirm"))
         return await call(prov.foundry_delete_deployment, body.get("resource_id"), body.get("deployment"))
     if op == "delete_resource":
         if not body.get("confirm"):
-            raise HTTPException(400, "需确认")
+            raise HTTPException(400, msg("err.need_confirm"))
         return await call(prov.foundry_delete_resource, body.get("resource_id"))
-    raise HTTPException(400, "未知操作")
+    raise HTTPException(400, msg("err.unknown_op"))

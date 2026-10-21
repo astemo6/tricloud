@@ -7,6 +7,7 @@ import time
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from .. import cloudinit, core, dns, security, services, tasks
+from ..i18n import msg
 from .common import _created, _public_guard, _req, call, client_ip, guarded, need_acc, P, PUBLIC_CIDRS, run
 
 router = APIRouter()
@@ -53,13 +54,13 @@ async def oci_sec_op(acc_id: int, body: dict = Body(...)):
     p, op = services.provider(acc_id, body.get("region")), body.get("op")
     if op == "add":
         if body.get("direction") not in ("ingress", "egress") or body.get("protocol", "").lower() not in ("tcp", "udp", "icmp", "icmpv6", "all"):
-            raise HTTPException(400, "参数无效")
+            raise HTTPException(400, msg("err.params_invalid"))
         _public_guard(body["direction"], body["protocol"].lower(), body.get("cidr", ""), body.get("port"), body.get("confirm_public"))
         try:
             return await run(p.add_security_rule, body["sl_id"], body["direction"], body["protocol"], body["cidr"],
                              body.get("port"), body.get("desc"))
         except ValueError as e:
-            raise HTTPException(400, f"CIDR 无效：{e}")
+            raise HTTPException(400, msg("err.cidr_invalid", e=e))
     if op == "remove":
         return await run(p.remove_security_rule, body["sl_id"], body["direction"], int(body["idx"]))
     if op == "add_ports":
@@ -67,9 +68,9 @@ async def oci_sec_op(acc_id: int, body: dict = Body(...)):
         protos = [x for x in (body.get("protocols") or ["tcp"]) if x in ("tcp", "udp")]
         cidr = (body.get("cidr") or "0.0.0.0/0").strip()
         if not protos or not body.get("instance_id"):
-            raise HTTPException(400, "参数无效")
+            raise HTTPException(400, msg("err.params_invalid"))
         if str(body.get("ports") or "").strip() == "":
-            raise HTTPException(400, "请填写端口，如 80, 443, 8000-8100")
+            raise HTTPException(400, msg("err.ports_hint_oci"))
         from ..providers.oci_provider import OCIProvider
         try:
             ranges = OCIProvider.parse_ports(body["ports"])
@@ -85,7 +86,7 @@ async def oci_sec_op(acc_id: int, body: dict = Body(...)):
                 raise HTTPException(400, str(e))
             added += res.get("added", 0); skipped += res.get("skipped", 0)
         return {"ok": True, "added": added, "skipped": skipped}
-    raise HTTPException(400, "无效操作")
+    raise HTTPException(400, msg("err.invalid_op"))
 
 
 @router.get("/api/accounts/{acc_id}/oci/limits")
@@ -162,11 +163,11 @@ def _sec_rule_args(r):
     protocol = (r.get("protocol") or "").strip().lower()
     cidr = (r.get("cidr") or r.get("source") or r.get("destination") or "").strip()
     if direction not in ("ingress", "egress"):
-        raise HTTPException(400, "direction 只能是 ingress / egress")
+        raise HTTPException(400, msg("err.direction_bad"))
     if protocol not in ("tcp", "udp", "icmp", "icmpv6", "all"):
-        raise HTTPException(400, "protocol 只能是 tcp / udp / icmp / icmpv6 / all")
+        raise HTTPException(400, msg("err.protocol_bad"))
     if not cidr:
-        raise HTTPException(400, "请填写来源 / 目标 CIDR")
+        raise HTTPException(400, msg("err.cidr_required"))
     return direction, protocol, cidr
 
 
@@ -174,9 +175,9 @@ def _sec_target(instance_id, subnet_id):
     """安全组规则的目标：subnet_id（新，Web 安全组页按子网）优先；instance_id（旧，App 仍在用）兼容。"""
     subnet_id, instance_id = (subnet_id or "").strip() or None, (instance_id or "").strip() or None
     if subnet_id and not subnet_id.startswith("ocid1.subnet."):
-        raise HTTPException(400, "subnet_id 不是子网 OCID")
+        raise HTTPException(400, msg("err.subnet_ocid"))
     if not subnet_id and not instance_id:
-        raise HTTPException(400, "请选择子网（subnet_id）或实例（instance_id）")
+        raise HTTPException(400, msg("err.pick_subnet_or_instance"))
     return instance_id, subnet_id
 
 
@@ -190,9 +191,9 @@ async def oci_sec_subnets(acc_id: int, region: str = None):
 def _rename_name(body):
     name = str((body or {}).get("display_name") or "").strip()
     if not name:
-        raise HTTPException(400, "名称不能为空")
+        raise HTTPException(400, msg("err.name_required"))
     if len(name) > 255:
-        raise HTTPException(400, "名称最多 255 个字符")
+        raise HTTPException(400, msg("err.name_max_255"))
     return name
 
 
@@ -202,7 +203,7 @@ async def _oci_rename(req, acc_id, kind, ocid, body):
     prefix, label = {"subnet": ("ocid1.subnet.", "子网"), "vcn": ("ocid1.vcn.", "VCN")}[kind]
     ocid = (ocid or "").strip()
     if not ocid.startswith(prefix):
-        raise HTTPException(400, f"{kind}_id 不是{label} OCID")
+        raise HTTPException(400, msg("err.not_ocid", kind=kind, label=label))
     name = _rename_name(body)
     p = services.provider(acc_id, (body or {}).get("region"))
     try:
@@ -258,9 +259,9 @@ async def sec_rule_add(acc_id: int, body: dict = Body(...)):
     public = cidr.replace(" ", "") in PUBLIC_CIDRS
     if public and direction == "ingress":
         if protocol == "all" or (protocol in ("tcp", "udp") and (not ranges or any(a <= 1 and b >= 65535 for a, b in ranges))):
-            raise HTTPException(400, "不支持对 0.0.0.0/0（或 ::/0）放行全部端口，请填写具体端口")
+            raise HTTPException(400, msg("err.all_ports_public"))
         if not body.get("confirm_public"):
-            raise HTTPException(409, {"msg": "来源为 0.0.0.0/0：将对整个互联网开放", "public_warning": True})
+            raise HTTPException(409, {"msg": msg("err.public_warn_msg"), "public_warning": True})
     iid, sid = _sec_target(body.get("instance_id"), body.get("subnet_id"))
     try:
         res = await run(services.provider(acc_id, body.get("region")).add_security_rules, iid, body.get("sl_id"),
@@ -288,7 +289,7 @@ async def sec_rule_del(acc_id: int, body: dict = Body(...)):
 async def oci_ipv6_delete(acc_id: int, body: dict = Body(...)):
     need_acc(acc_id, "oci")
     if not body.get("confirm"):
-        raise HTTPException(400, "删除 IPv6 需确认")
+        raise HTTPException(400, msg("err.del_ipv6_confirm"))
     try:
         r = await run(services.provider(acc_id, body.get("region")).delete_ipv6, body["instance_id"])
     except LookupError as e:
@@ -339,12 +340,12 @@ async def oci_volume_op(acc_id: int, body: dict = Body(...)):
     if op == "delete":
         _req(body, "volume_id")
         if not body.get("confirm"):
-            raise HTTPException(400, "删除块存储卷不可恢复，需确认")
+            raise HTTPException(400, msg("err.del_volume_confirm"))
         return await call(p.delete_volume, body["volume_id"])
     if op == "grow":   # 引导卷 / 数据卷扩容后扩展分区（Run Command 固定脚本）
         _req(body, "instance_id")
         return await call(p.grow_fs, body["instance_id"], body.get("root", True))
-    raise HTTPException(400, "op 无效")
+    raise HTTPException(400, msg("err.op_invalid"))
 
 
 # ================= 7. OCI 区域订阅 =================
@@ -358,7 +359,7 @@ async def oci_region_subs(acc_id: int):
 async def oci_region_subscribe(acc_id: int, body: dict = Body(...)):
     need_acc(acc_id, "oci")
     if not body.get("confirm"):
-        raise HTTPException(400, "订阅区域不可撤销，需确认")
+        raise HTTPException(400, msg("err.sub_region_confirm"))
     r = await call(P(acc_id).subscribe_region, body.get("region_key"))
     services.drop_provider_cache(acc_id)
     return r
@@ -394,7 +395,7 @@ async def oci_ip_op(acc_id: int, body: dict = Body(...)):
     if op == "assign_reserved":
         _req(body, "public_ip_id")
         if not body.get("instance_id") and not body.get("private_ip_id"):
-            raise HTTPException(400, "缺少 instance_id")
+            raise HTTPException(400, msg("err.missing_instance_id2"))
         r = await call(p.assign_reserved_ip, body["public_ip_id"], body.get("instance_id"), body.get("private_ip_id"))
         if body.get("instance_id") and body.get("ip"):
             r["dns"] = await run(dns.dns_sync, acc_id, body["instance_id"], body["ip"])
@@ -405,7 +406,7 @@ async def oci_ip_op(acc_id: int, body: dict = Body(...)):
     if op == "delete_reserved":
         _req(body, "public_ip_id")
         return await call(p.delete_reserved_ip, body["public_ip_id"])
-    raise HTTPException(400, "op 无效")
+    raise HTTPException(400, msg("err.op_invalid"))
 
 
 # ================= 15. 免费 AMD 下行 500Mbps =================
@@ -421,7 +422,7 @@ async def oci_500m(acc_id: int, body: dict = Body(...)):
     _req(body, "instance_id")
     on = body.get("enable", True) not in (False, "false", 0, "0")
     if on and not body.get("confirm"):
-        raise HTTPException(400, "开启后入口 IP 会变成负载均衡器的公网 IP，需确认")
+        raise HTTPException(400, msg("err.lb_ip_confirm"))
     tid = tasks.create_task("net500m", acc_id, {"instance_id": body["instance_id"], "region": body.get("region"),
                                                 "name": body.get("name"), "enable": on, "ssh_port": int(body.get("ssh_port") or 22)})
     return {"ok": True, "task_id": tid}
@@ -443,9 +444,9 @@ async def oci_bucket_op(acc_id: int, body: dict = Body(...)):
         return await call(p.create_bucket, body.get("name"), bool(body.get("public")))
     if body.get("op") == "delete":
         if not body.get("confirm"):
-            raise HTTPException(400, "删除 Bucket 需确认")
+            raise HTTPException(400, msg("err.del_bucket_confirm"))
         return await call(p.delete_bucket, body.get("name"))
-    raise HTTPException(400, "op 无效")
+    raise HTTPException(400, msg("err.op_invalid"))
 
 
 @router.get("/api/accounts/{acc_id}/oci/objects")
@@ -460,7 +461,7 @@ async def oci_object_put(acc_id: int, bucket: str, name: str, request: Request, 
     need_acc(acc_id, "oci")
     size = int(request.headers.get("content-length") or 0)
     if size > OBJ_MAX:
-        raise HTTPException(413, "单个文件最大 100MB，更大的文件请用 OCI 控制台或 CLI 分片上传")
+        raise HTTPException(413, msg("err.file_too_big_100"))
     fd, path = tempfile.mkstemp(prefix="tc-up-")
     total = 0
     try:
@@ -468,7 +469,7 @@ async def oci_object_put(acc_id: int, bucket: str, name: str, request: Request, 
             async for chunk in request.stream():
                 total += len(chunk)
                 if total > OBJ_MAX:
-                    raise HTTPException(413, "单个文件最大 100MB")
+                    raise HTTPException(413, msg("err.file_too_big"))
                 f.write(chunk)
 
         def put():
@@ -492,7 +493,7 @@ async def oci_object_op(acc_id: int, body: dict = Body(...)):
         return await call(p.object_url, body["bucket"], body["name"], body.get("minutes") or 60)
     if body.get("op") == "delete":
         return await call(p.delete_object, body["bucket"], body["name"])
-    raise HTTPException(400, "op 无效")
+    raise HTTPException(400, msg("err.op_invalid"))
 
 
 # ================= 20. 免费额度体检（全部 OCI 账号） =================
@@ -600,16 +601,16 @@ async def oci_billing_keep_start(acc_id: int, body: dict = Body(default={})):
     try:
         size_gb = float(body.get("size_gb") if body.get("size_gb") not in (None, "") else BK_DEFAULT_GB)
     except (TypeError, ValueError):
-        raise HTTPException(400, "size_gb 需为数字")
+        raise HTTPException(400, msg("err.size_number"))
     if not BK_MIN_GB <= size_gb <= BK_MAX_GB:
-        raise HTTPException(400, f"size_gb 范围 {BK_MIN_GB:g}–{BK_MAX_GB:g}")
+        raise HTTPException(400, msg("err.size_range", lo=f"{BK_MIN_GB:g}", hi=f"{BK_MAX_GB:g}"))
     plan = await _bk_plan(acc_id)
     if plan == "free":
-        raise HTTPException(400, f"该账号是免费号：{BK_FREE_HINT}")
+        raise HTTPException(400, msg("err.free_account_hint", hint=BK_FREE_HINT))
     if plan != "paid":
-        raise HTTPException(400, "未能识别账号类型（需 osp-gateway 读权限），无法确认是 PAYG 升级号")
+        raise HTTPException(400, msg("err.type_unknown"))
     if not body.get("confirm"):
-        raise HTTPException(400, "会产生每月约 $0.02–0.03 的账单，需确认")
+        raise HTTPException(400, msg("err.tiny_bill_confirm"))
     t = _bk_last_task(acc_id)
     if t and t["status"] == "running":
         return {"ok": True, "task_id": t["id"], "running": True}
@@ -637,9 +638,9 @@ async def oci_billing_keep_start(acc_id: int, body: dict = Body(default={})):
 async def oci_billing_keep_delete(acc_id: int, confirm: bool = False):
     need_acc(acc_id, "oci")
     if not confirm:
-        raise HTTPException(400, "删除保号对象需确认")
+        raise HTTPException(400, msg("err.del_keepalive_confirm"))
     t = _bk_last_task(acc_id)
     if t and t["status"] == "running":
-        raise HTTPException(409, "上传任务仍在运行，请先在任务里停止")
+        raise HTTPException(409, msg("err.upload_running"))
     bk_scan_invalidate(acc_id)
     return await _bk_oci(P(acc_id).billing_keep_delete)

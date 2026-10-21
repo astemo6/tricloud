@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Body, HTTPException
 
 from .. import core, dns
+from ..i18n import msg
 from .common import need_acc, run
 
 router = APIRouter()
@@ -27,7 +28,7 @@ async def add_dns_binding(body: dict = Body(...)):
     rec = (body.get("record") or "").strip().lower().rstrip(".")
     zone_name = body.get("zone_name") or ""
     if not rec or not rec.endswith(zone_name):
-        raise HTTPException(400, f"记录名需属于域名 {zone_name}")
+        raise HTTPException(400, msg("err.record_zone", zone=zone_name))
     core.ex("INSERT INTO dns_bindings(account_id,instance_id,name,zone_id,zone_name,record,proxied,v4,v6) VALUES(?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(account_id,instance_id,record) DO UPDATE SET proxied=excluded.proxied, v4=excluded.v4, v6=excluded.v6",
             (body["account_id"], body["instance_id"], body.get("name"), body["zone_id"], zone_name, rec,

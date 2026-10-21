@@ -53,7 +53,7 @@ public class OneDriveScheduleActivity extends BaseActivity {
     @Override
     protected void onCreate(Bundle s) {
         super.onCreate(s);
-        setTitle("备份计划");
+        setTitle(getString(R.string.s1058));
         try { cfg = new JSONObject(getIntent().getStringExtra("cfg")); } catch (Exception ignored) { }
         tz = getIntent().getStringExtra("tz") == null ? "" : getIntent().getStringExtra("tz");
         refresh();
@@ -116,10 +116,10 @@ public class OneDriveScheduleActivity extends BaseActivity {
         if (ts != null) for (int i = 0; i < ts.length(); i++) times.add(ts.optString(i));
         if (times.isEmpty()) times.add(cfg.optString("time", "03:30"));
 
-        LinearLayout a = card("频率");
-        muted(a, "时间按面板时区（" + tz + "）。两次备份至少间隔 30 分钟。");
+        LinearLayout a = card(getString(R.string.s1059));
+        muted(a, getString(R.string.s1060, tz));
         enabled = new MaterialSwitch(this);
-        enabled.setText("启用定时备份");
+        enabled.setText(getString(R.string.s1061));
         enabled.setChecked(cfg.optBoolean("enabled", true));
         a.addView(enabled);
         ChipGroup mg = chipGroup(a, true);
@@ -138,24 +138,24 @@ public class OneDriveScheduleActivity extends BaseActivity {
             schedulePreview();
         });
 
-        LinearLayout b = card("设置");
+        LinearLayout b = card(getString(R.string.s1062));
         secHourly = section(b);
-        everyHours = num(secHourly, "每隔几小时（1–24）", String.valueOf(cfg.optInt("every_hours", 6)), null);
-        minute = num(secHourly, "第几分钟（0–59）", String.valueOf(cfg.optInt("minute", 0)), "0 = 整点");
-        startHour = num(secHourly, "起始小时（0–23）", String.valueOf(cfg.optInt("start_hour", 0)), "每天从这个小时起按间隔对齐");
+        everyHours = num(secHourly, getString(R.string.s1063), String.valueOf(cfg.optInt("every_hours", 6)), null);
+        minute = num(secHourly, getString(R.string.s1064), String.valueOf(cfg.optInt("minute", 0)), getString(R.string.s1065));
+        startHour = num(secHourly, getString(R.string.s1066), String.valueOf(cfg.optInt("start_hour", 0)), getString(R.string.s1067));
 
         secTimes = section(b);
-        text(secTimes, "时间点（可多个）", 14, true);
+        text(secTimes, getString(R.string.s1068), 14, true);
         timeGroup = chipGroup(secTimes, false);
         MaterialButton add = new MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle);
-        add.setText("添加时间");
+        add.setText(getString(R.string.s1069));
         add.setAllCaps(false);
         add.setOnClickListener(v -> pickTime());
         secTimes.addView(add, new LinearLayout.LayoutParams(-2, -2));
         renderTimes();
 
         secWeekly = section(b);
-        text(secWeekly, "星期（可多选）", 14, true);
+        text(secWeekly, getString(R.string.s1070), 14, true);
         wdGroup = chipGroup(secWeekly, false);
         JSONArray wds = cfg.optJSONArray("weekdays");
         for (int i = 0; i < 7; i++) {
@@ -167,8 +167,8 @@ public class OneDriveScheduleActivity extends BaseActivity {
         }
 
         secMonthly = section(b);
-        text(secMonthly, "日期（可多选）", 14, true);
-        muted(secMonthly, "没有这一天的月份会跳过（如 31 日），每月最后一天请选「月末」。");
+        text(secMonthly, getString(R.string.s1071), 14, true);
+        muted(secMonthly, getString(R.string.s1072));
         dayGroup = chipGroup(secMonthly, false);
         JSONArray days = cfg.optJSONArray("days");
         for (int d = 1; d <= 31; d++) {
@@ -178,27 +178,27 @@ public class OneDriveScheduleActivity extends BaseActivity {
             c.setOnCheckedChangeListener((v, on) -> schedulePreview());
             dayGroup.addView(c);
         }
-        lastDay = chip("月末", true);
+        lastDay = chip(getString(R.string.s1073), true);
         lastDay.setChecked(cfg.optBoolean("last_day"));
         lastDay.setOnCheckedChangeListener((v, on) -> schedulePreview());
         dayGroup.addView(lastDay);
 
         secCron = section(b);
-        TextInputLayout ct = inputLayout("Cron 表达式（分 时 日 月 周）", "30 3 * * 1-5", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        ct.setHelperText("支持 * , - / 和数字、mon/jan 等缩写、@daily。\n例：30 3 * * 1-5 工作日 03:30；0 */6 * * * 每 6 小时；0 4 1,15 * * 每月 1、15 日。日和周都指定时满足任一即可。");
+        TextInputLayout ct = inputLayout(getString(R.string.s1074), "30 3 * * 1-5", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        ct.setHelperText(getString(R.string.s1075));
         cron = ct.getEditText();
         cron.setText(cfg.optString("cron", "30 3 * * *"));
         cron.setTypeface(android.graphics.Typeface.MONOSPACE);
         cron.addTextChangedListener(watcher());
         secCron.addView(ct);
 
-        LinearLayout k = card("保留");
-        keep = num(k, "保留最近几份（1–365）", String.valueOf(cfg.optInt("keep", 30)), "多余的自动删除");
+        LinearLayout k = card(getString(R.string.s1076));
+        keep = num(k, getString(R.string.s1077), String.valueOf(cfg.optInt("keep", 30)), getString(R.string.s1078));
 
-        LinearLayout p = card("接下来 3 次");
-        preview = text(p, "计算中…", 14, false);
+        LinearLayout p = card(getString(R.string.s1079));
+        preview = text(p, getString(R.string.s1080), 14, false);
 
-        bigButton("保存计划", v -> save());
+        bigButton(getString(R.string.s1081), v -> save());
         showSections();
         schedulePreview();
     }
@@ -224,7 +224,7 @@ public class OneDriveScheduleActivity extends BaseActivity {
             Chip c = chip(t, false);
             c.setCloseIconVisible(true);
             c.setOnCloseIconClickListener(v -> {
-                if (times.size() <= 1) { toast("至少保留一个时间点"); return; }
+                if (times.size() <= 1) { toast(getString(R.string.s1082)); return; }
                 times.remove(t);
                 renderTimes();
                 schedulePreview();
@@ -235,9 +235,9 @@ public class OneDriveScheduleActivity extends BaseActivity {
     }
 
     private void pickTime() {
-        if (times.size() >= 24) { toast("最多 24 个时间点"); return; }
+        if (times.size() >= 24) { toast(getString(R.string.s1083)); return; }
         MaterialTimePicker tp = new MaterialTimePicker.Builder().setTimeFormat(TimeFormat.CLOCK_24H).setHour(12).setMinute(0)
-                .setTitleText("添加时间").setInputMode(MaterialTimePicker.INPUT_MODE_KEYBOARD).build();
+                .setTitleText(getString(R.string.s1069)).setInputMode(MaterialTimePicker.INPUT_MODE_KEYBOARD).build();
         tp.addOnPositiveButtonClickListener(v -> {
             String t = String.format(Locale.US, "%02d:%02d", tp.getHour(), tp.getMinute());
             if (!times.contains(t)) times.add(t);
@@ -308,7 +308,7 @@ public class OneDriveScheduleActivity extends BaseActivity {
         } catch (Exception ignored) { }
         Api.post(this, "/onedrive/config", b, x -> {
             JSONObject o = Api.obj(x);
-            toast("已保存：" + o.optString("desc", "") + (o.isNull("next_run") ? "" : "，下次 " + o.optString("next_run")));
+            toast(getString(R.string.s1085, o.optString("desc", ""), (o.isNull("next_run") ? "" : getString(R.string.s1084, o.optString("next_run")))));
             setResult(RESULT_OK);
             finish();
         });

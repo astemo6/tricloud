@@ -171,7 +171,7 @@ struct HubHost: ViewModifier {
             .overlay(alignment: .bottom) {
                 if let t = hub.toastText {
                     // iOS 风格的浮动横幅：毛玻璃胶囊，自底部弹入
-                    Text(t)
+                    Text(L(t))
                         .font(.subheadline.weight(.medium))
                         .foregroundColor(.primary)
                         .multilineTextAlignment(.center)
@@ -190,13 +190,13 @@ struct HubHost: ViewModifier {
                 case .custom(let v, _): v
                 }
             }
-            .alert(hub.alert?.title ?? "", isPresented: hub.alertBinding(), presenting: hub.alert) { a in
+            .alert(L(hub.alert?.title ?? ""), isPresented: hub.alertBinding(), presenting: hub.alert) { a in
                 if let p = a.primary {
-                    Button(p.0, role: isDanger(a.title + p.0) ? .destructive : nil) { hub.closeAlert(p.1) }
+                    Button(L(p.0), role: isDanger(a.title + p.0) ? .destructive : nil) { hub.closeAlert(p.1) }
                 }
-                Button(a.cancel.0, role: .cancel) { hub.closeAlert(a.cancel.1) }
+                Button(L(a.cancel.0), role: .cancel) { hub.closeAlert(a.cancel.1) }
             } message: { a in
-                Text(a.message)
+                Text(L(a.message))
             }
     }
 }
@@ -221,20 +221,20 @@ struct FormSheet: View {
         NavigationView {
             Form {
                 if let n = spec.note, !n.isEmpty {
-                    Section { Text(n).font(.footnote).foregroundColor(.secondary) }
+                    Section { Text(L(n)).font(.footnote).foregroundColor(.secondary) }
                 }
                 Section {
                     ForEach(spec.fields.indices, id: \.self) { i in fieldView(i) }
                 }
             }
-            .navigationTitle(spec.title)
+            .navigationTitle(L(spec.title))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { UIHub.shared.closeSheet(nil) }
+                    Button(L("取消")) { UIHub.shared.closeSheet(nil) }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(spec.okText) { submit() }
+                    Button(L(spec.okText)) { submit() }
                 }
             }
         }
@@ -246,25 +246,25 @@ struct FormSheet: View {
         let f = spec.fields[i]
         switch f.type {
         case "check":
-            Toggle(f.label, isOn: $model.checks[i])
+            Toggle(L(f.label), isOn: $model.checks[i])
         case "select":
             if f.options.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(f.label).font(.caption).foregroundColor(.secondary)
-                    Text("（无选项）").foregroundColor(.secondary)
+                    Text(L(f.label)).font(.caption).foregroundColor(.secondary)
+                    Text(L("（无选项）")).foregroundColor(.secondary)
                 }
             } else {
                 Picker(selection: $model.sels[i]) {
                     ForEach(f.options.indices, id: \.self) { j in
-                        Text(j < f.labels.count ? f.labels[j] : f.options[j]).tag(j)
+                        Text(L(j < f.labels.count ? f.labels[j] : f.options[j])).tag(j)
                     }
                 } label: {
-                    Text(f.label)
+                    Text(L(f.label))
                 }
             }
         case "multi":
             VStack(alignment: .leading, spacing: 4) {
-                Text(f.label).font(.caption).foregroundColor(.secondary)
+                Text(L(f.label)).font(.caption).foregroundColor(.secondary)
                 TextEditor(text: $model.texts[i])
                     .font(.system(size: 13, design: .monospaced))
                     .frame(minHeight: 90)
@@ -273,14 +273,14 @@ struct FormSheet: View {
             }
         case "password":
             VStack(alignment: .leading, spacing: 4) {
-                Text(f.label).font(.caption).foregroundColor(.secondary)
+                Text(L(f.label)).font(.caption).foregroundColor(.secondary)
                 SecureField("", text: $model.texts[i])
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
             }
         default:
             VStack(alignment: .leading, spacing: 4) {
-                Text(f.label).font(.caption).foregroundColor(.secondary)
+                Text(L(f.label)).font(.caption).foregroundColor(.secondary)
                 TextField("", text: $model.texts[i])
                     .keyboardType(f.type == "number" ? .decimalPad : .default)
                     .autocapitalization(.none)
@@ -318,15 +318,15 @@ struct ChooseSheet: View {
                         let cb = spec.cb
                         UIHub.shared.closeSheet { cb(i) }
                     } label: {
-                        Text(spec.labels[i]).foregroundColor(isDanger(spec.labels[i]) ? .red : .primary)
+                        Text(L(spec.labels[i])).foregroundColor(isDanger(spec.labels[i]) ? .red : .primary)
                     }
                 }
             }
-            .navigationTitle(spec.title)
+            .navigationTitle(L(spec.title))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { UIHub.shared.closeSheet(nil) }
+                    Button(L("取消")) { UIHub.shared.closeSheet(nil) }
                 }
             }
         }

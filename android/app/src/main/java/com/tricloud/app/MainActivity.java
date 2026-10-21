@@ -23,7 +23,7 @@ public class MainActivity extends BaseActivity {
     @Override
     protected void onCreate(Bundle s) {
         super.onCreate(s);
-        setTitle("总览");
+        setTitle(getString(R.string.s0952));
         refresh();
     }
 
@@ -55,12 +55,12 @@ public class MainActivity extends BaseActivity {
             Regions.HINTS.clear();   // build 25：/accounts 带的 machine_regions 是后端最新记录
             buildNav();
             if (a.length() == 0) {
-                muted(card("还没有云账号"), "添加 OCI / AWS / Azure 账号后，这里会显示各账号的实例数、健康度和到期提醒。");
-                bigButton("＋ 添加云账号", v -> startActivity(new Intent(this, AccountsActivity.class).putExtra("add", true)));
+                muted(card(getString(R.string.s0717)), getString(R.string.s0953));
+                bigButton(getString(R.string.s0954), v -> startActivity(new Intent(this, AccountsActivity.class).putExtra("add", true)));
                 return;
             }
-            LinearLayout exp = card("⏰ 30 天内到期");
-            TextView expT = muted(exp, "读取中…");
+            LinearLayout exp = card(getString(R.string.s0955));
+            TextView expT = muted(exp, getString(R.string.s0527));
             Api.quiet("/expiry-alerts", x -> {
                 JSONArray al = Api.arr(x);
                 if (al.length() == 0) { ((android.view.ViewGroup) exp.getParent()).setVisibility(android.view.View.GONE); return; }
@@ -68,15 +68,15 @@ public class MainActivity extends BaseActivity {
                 for (int i = 0; i < al.length(); i++) {
                     JSONObject e = al.optJSONObject(i);
                     sb.append(e.optInt("days_left") <= 7 ? "🔴 " : "🟡 ").append(e.optString("account_name")).append(" · ").append(e.optString("name"))
-                            .append("  ").append(e.optInt("days_left") == 0 ? "今天到期" : "剩 " + e.optInt("days_left") + " 天")
-                            .append("（").append(e.optString("date")).append(e.optBoolean("estimated") ? "，估算" : "").append("）\n");
+                            .append("  ").append(e.optInt("days_left") == 0 ? getString(R.string.s0375) : getString(R.string.s0769, e.optInt("days_left")))
+                            .append("（").append(e.optString("date")).append(e.optBoolean("estimated") ? getString(R.string.s0377) : "").append("）\n");
                 }
                 expT.setText(sb.toString().trim());
                 expT.setTextColor(attr(com.google.android.material.R.attr.colorOnSurface));
             });
-            LinearLayout hh = card("🩺 账号健康度");
-            TextView hT = muted(hh, "读取中…");
-            button(row(hh), "详情", v -> openPage("health", null));
+            LinearLayout hh = card(getString(R.string.s0956));
+            TextView hT = muted(hh, getString(R.string.s0527));
+            button(row(hh), getString(R.string.s0957), v -> openPage("health", null));
             Api.quiet("/account-health", x -> {
                 JSONArray l = Api.arr(x);
                 StringBuilder sb = new StringBuilder();
@@ -85,31 +85,31 @@ public class MainActivity extends BaseActivity {
                     boolean has = h.has("score") && !h.isNull("score");
                     int sc = h.optInt("score");
                     sb.append(!has ? "⚪ " : sc >= 80 ? "🟢 " : sc >= 50 ? "🟡 " : "🔴 ").append(h.optString("name")).append("  ")
-                            .append(has ? sc + " 分 · " + HealthActivity.level(sc) : "未检测").append("\n");
+                            .append(has ? getString(R.string.s0938, sc, (sc >= 80 ? getString(R.string.s0932) : sc >= 50 ? getString(R.string.s0933) : getString(R.string.s0934))) : getString(R.string.s0939)).append("\n");
                 }
-                hT.setText(sb.length() == 0 ? "暂无" : sb.toString().trim());
+                hT.setText(sb.length() == 0 ? getString(R.string.s0584) : sb.toString().trim());
                 hT.setTextColor(attr(com.google.android.material.R.attr.colorOnSurface));
             });
-            LinearLayout ov = card("🖥 实例（全部区域）");
-            muted(ov, "按账号所有区域统计（AWS 含 EC2 + Lightsail），30 分钟内用缓存");
-            button(row(ov), "↻ 重新扫描区域", v -> { rescan = true; refresh(); });
+            LinearLayout ov = card(getString(R.string.s0958));
+            muted(ov, getString(R.string.s0959));
+            button(row(ov), getString(R.string.s0960), v -> { rescan = true; refresh(); });
             boolean force = rescan;
             rescan = false;
             for (int i = 0; i < a.length(); i++) {
                 JSONObject acc = a.optJSONObject(i);
-                LinearLayout c = card(acc.optString("name") + (acc.optInt("disabled") == 1 ? "  [已停用]" : ""));
+                LinearLayout c = card(acc.optString("name") + (acc.optInt("disabled") == 1 ? getString(R.string.s0724) : ""));
                 String prov = acc.optString("provider");
                 String reg = noRegion(prov) ? "" : regionOf(acc);
                 TextView head = muted(c, pname(prov) + (reg.isEmpty() ? "" : " · " + Regions.label(reg)) + ageOf(acc));
-                TextView cnt = text(c, "实例：查询中…", 13, false);
-                if (acc.optInt("disabled") == 1) cnt.setText("实例：账号已停用");
+                TextView cnt = text(c, getString(R.string.s0961), 13, false);
+                if (acc.optInt("disabled") == 1) cnt.setText(getString(R.string.s0962));
                 // 后端 /overview 统计所有有机器的区域（AWS EC2+Lightsail 全区域、OCI 订阅区域、Azure 整个订阅），带缓存
                 else Api.job(this, () -> {
                     try { return Api.call("GET", "/accounts/" + acc.optInt("id") + "/overview" + (force ? "?refresh=true" : ""), null); }
                     catch (Exception e) { return new JSONObject().put("error", e.getMessage()); }
                 }, x -> {
                     JSONObject o = (JSONObject) x;
-                    if (o.has("error") && !o.has("total")) { String e = o.optString("error"); cnt.setText("实例：查询失败 " + (e.length() > 60 ? e.substring(0, 60) : e)); return; }
+                    if (o.has("error") && !o.has("total")) { String e = o.optString("error"); cnt.setText(getString(R.string.s0963, (e.length() > 60 ? e.substring(0, 60) : e))); return; }
                     Regions.apply(acc.optInt("id"), o);   // build 25：账号列表 / 打开账号的默认区域同步更新
                     JSONArray rs = o.optJSONArray("regions");
                     String brief = Regions.brief(rs);
@@ -117,9 +117,9 @@ public class MainActivity extends BaseActivity {
                     if (o.isNull("default_region")) dr = reg;
                     String where = !brief.isEmpty() ? brief : (dr.isEmpty() ? "" : Regions.label(dr));
                     head.setText(pname(prov) + (where.isEmpty() ? "" : " · " + where) + ageOf(acc));
-                    cnt.setText("实例：" + Regions.count(o) + (rs != null && rs.length() > 1 ? "\n分布：" + Regions.dist(rs) : ""));
+                    cnt.setText(getString(R.string.s0965, Regions.count(o), (rs != null && rs.length() > 1 ? getString(R.string.s0964, Regions.dist(rs)) : "")));
                 });
-                button(row(c), "进入管理", v -> openPage("acc_" + acc.optInt("id"), acc));
+                button(row(c), getString(R.string.s0966), v -> openPage("acc_" + acc.optInt("id"), acc));
             }
         });
     }
@@ -129,12 +129,12 @@ public class MainActivity extends BaseActivity {
         if (d.isEmpty()) return "";
         try {
             long days = (System.currentTimeMillis() - new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(d).getTime()) / 86400000L;
-            return "\n云上创建 " + d + " · 已存活 " + days + " 天";
+            return getString(R.string.s0967, d, days);
         } catch (Exception e) { return ""; }
     }
 
     static String testOf(JSONObject acc) {
         if (!acc.has("last_test_ok") || acc.isNull("last_test_ok")) return "";
-        return acc.optInt("last_test_ok") == 1 ? "\n连通 · " + acc.optInt("last_test_ms") + " ms" : "\n测活失败：" + str(acc, "last_test_error", "");
+        return acc.optInt("last_test_ok") == 1 ? getString(R.string.s0968, acc.optInt("last_test_ms")) : getString(R.string.s0969, str(acc, "last_test_error", ""));
     }
 }

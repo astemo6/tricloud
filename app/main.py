@@ -11,7 +11,8 @@ from fastapi.responses import JSONResponse
 
 log = logging.getLogger("tricloud")
 
-from . import core, security, tasks, telegram
+from . import core, i18n, security, tasks, telegram
+from .i18n import msg as _imsg
 from .routers import (accounts, auth, aws, aws_credit, azure, billing, cloudflare, guard_agent, guard_health, instances, oci, onedrive, pages,
                       settings, tasks_monitors)
 from .routers import security as security_routes
@@ -45,6 +46,7 @@ AUDIT_SKIP_OK = {("DELETE", "/api/audit")}   # 清空审计成功时路由自己
 
 @app.middleware("http")
 async def auth_mw(req: Request, call_next):
+    i18n.set_lang(req.headers.get("x-lang"))
     path = req.url.path
     actor = "session"
     if path.startswith("/api/") and path not in PUBLIC:
@@ -61,9 +63,9 @@ async def auth_mw(req: Request, call_next):
                     or (req.method != "GET" and AGENT_RESET_RE.match(path)):
                 # Token 不能抹掉审计痕迹；OneDrive 只能看状态 / 列表和「立即备份」，不能绑定（防止绑到别人的网盘）、改密码、恢复、解绑；
                 # build 22：Token 不能重置流量守护 agent token（GET /agent 也不返回带 token 的安装命令）
-                return JSONResponse({"detail": "API Token 无权访问此接口"}, status_code=403)
+                return JSONResponse({"detail": _imsg("err.token_forbidden")}, status_code=403)
         else:
-            return JSONResponse({"detail": "未登录"}, status_code=401)
+            return JSONResponse({"detail": _imsg("err.not_logged_in")}, status_code=401)
     req.state.actor = actor
     resp = await call_next(req)
     if path.startswith("/api/") and req.method != "GET" and path not in AUDIT_SKIP \
@@ -95,8 +97,8 @@ async def err(req, exc):
         re.search(r"'code': '(NotAuthorizedOrNotFound|NotAuthenticated)'", msg)
     if m:   # 云账号权限不足：不是面板故障，给出缺哪个权限
         act = re.search(r"perform:? ([\w:.\-/]+)", msg) or re.search(r"action '([\w:.\-/]+)'", msg)
-        tip = f"缺少 {act.group(1)} 权限" if act else "请检查该账号的 IAM / 角色授权"
-        return JSONResponse({"detail": f"云账号权限不足（{m.group(1)}）：{tip}"}, status_code=403)
+        tip = _imsg("err.cloud_perm_tip_act", act=act.group(1)) if act else _imsg("err.cloud_perm_tip_check")
+        return JSONResponse({"detail": _imsg("err.cloud_perm", code=m.group(1), tip=tip)}, status_code=403)
     # 兜底 500：不把异常原文（含路径/SQL/账号信息）返回给浏览器，只记日志
     rid = uuid.uuid4().hex[:8]
     try:
@@ -104,7 +106,7 @@ async def err(req, exc):
     except Exception:
         where = "-"
     log.exception("unhandled 500 rid=%s %s: %s", rid, where, exc)
-    return JSONResponse({"detail": "服务器内部错误", "request_id": rid}, status_code=500)
+    return JSONResponse({"detail": _imsg("err.server"), "request_id": rid}, status_code=500)
 
 
 # 注册顺序 = 匹配顺序。各模块内部的路径互不冲突；静态页与 /static 挂载放最后。

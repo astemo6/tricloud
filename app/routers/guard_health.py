@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Body, HTTPException
 
 from .. import core, guard, tasks, telegram
+from ..i18n import msg
 from .. import health as healthm
 from .common import guarded, need_acc, run
 
@@ -43,10 +44,10 @@ async def migrate(body: dict = Body(...)):
     """跨云迁移：在目标账号用同一开机脚本重建，可切 DNS、复制监控、停掉源实例。不复制磁盘数据。"""
     src, dst = need_acc(int(body["from_account_id"])), need_acc(int(body["to_account_id"]))
     if src["id"] == dst["id"]:
-        raise HTTPException(400, "目标账号不能与源账号相同")
+        raise HTTPException(400, msg("err.same_account"))
     c = dict(body.get("create") or {})
     if dst["provider"] == "azure" and not c.get("location"):
-        raise HTTPException(400, "请选择 Azure 区域")
+        raise HTTPException(400, msg("err.pick_azure_region"))
     await guarded(dst["id"], "create", c if dst["provider"] != "oci" else {"create": c, **c}, body.get("region"))
     tid = tasks.create_task("migrate", dst["id"], {
         "from_account_id": src["id"], "instance_id": body["instance_id"], "from_region": body.get("from_region"),

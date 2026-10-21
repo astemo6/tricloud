@@ -14,6 +14,7 @@ final class AppState: ObservableObject {
     static let shared = AppState()
     @Published var loggedIn: Bool
     @Published var theme: String
+    @Published var lang: String
     /// 云账号列表（侧栏 / 账号分组 / 总览共用）。
     @Published var accounts: [JObj] = []
     /// 运行中的任务数（任务标签角标）。
@@ -24,6 +25,7 @@ final class AppState: ObservableObject {
     init() {
         loggedIn = !Api.token.isEmpty && !Api.server.isEmpty
         theme = Prefs.get("theme", "system")
+        lang = Prefs.get("app_lang", "system")
     }
 
     func loggedOut() {
@@ -64,6 +66,15 @@ final class AppState: ObservableObject {
         theme = t
     }
 
+    func setLang(_ l: String) {
+        Prefs.set("app_lang", l)
+        lang = l
+    }
+
+    var locale: Locale {
+        lang == "zh" ? Locale(identifier: "zh-Hans") : lang == "en" ? Locale(identifier: "en") : Locale.autoupdatingCurrent
+    }
+
     var scheme: ColorScheme? { theme == "dark" ? .dark : theme == "light" ? .light : nil }
 }
 
@@ -80,5 +91,6 @@ struct RootView: View {
         }
         .modifier(HubHost())
         .preferredColorScheme(app.scheme)
+        .environment(\.locale, app.locale)
     }
 }

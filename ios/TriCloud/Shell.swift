@@ -37,7 +37,7 @@ struct SectionHeader: View {
                     .offset(y: p == "aws" ? 4 : 0)  // 「aws」字母只占图上半部，下移与文字齐平
                     .accessibilityHidden(true)
             }
-            Text(title)
+            Text(L(title))
         }
         .textCase(nil)
     }
@@ -132,20 +132,20 @@ struct TabsRoot: View {
         TabView(selection: $app.tab) {
             NavigationView { app.pages.home.makeView() }
                 .navigationViewStyle(.stack)
-                .tabItem { Label("总览", systemImage: "square.grid.2x2") }
+                .tabItem { Label(L("总览"), systemImage: "square.grid.2x2") }
                 .tag(0)
             NavigationView { app.pages.accounts.makeView() }
                 .navigationViewStyle(.stack)
-                .tabItem { Label("账号", systemImage: "cloud") }
+                .tabItem { Label(L("账号"), systemImage: "cloud") }
                 .tag(1)
             NavigationView { app.pages.tasks.makeView() }
                 .navigationViewStyle(.stack)
-                .tabItem { Label("任务", systemImage: "clock.arrow.circlepath") }
+                .tabItem { Label(L("任务"), systemImage: "clock.arrow.circlepath") }
                 .badge(app.runningTasks)
                 .tag(2)
             NavigationView { app.pages.more.makeView() }
                 .navigationViewStyle(.stack)
-                .tabItem { Label("更多", systemImage: "ellipsis.circle") }
+                .tabItem { Label(L("更多"), systemImage: "ellipsis.circle") }
                 .tag(3)
         }
     }
@@ -159,7 +159,7 @@ struct SidebarRoot: View {
         NavigationView {
             List {
                 NavigationLink(destination: app.pages.home.makeView(), tag: "home", selection: $sel) {
-                    Label("总览", systemImage: "square.grid.2x2")
+                    Label(L("总览"), systemImage: "square.grid.2x2")
                 }
                 ForEach(MainPage.PROVS, id: \.self) { p in
                     let list = app.accounts.filter { $0.optString("provider") == p }
@@ -193,7 +193,7 @@ struct SidebarRoot: View {
                     Button {
                         confirmLogout(nil)
                     } label: {
-                        Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right").foregroundColor(.red)
+                        Label(L("退出登录"), systemImage: "rectangle.portrait.and.arrow.right").foregroundColor(.red)
                     }
                 }
             }

@@ -13,6 +13,7 @@ import time
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from .. import core, security, services, tasks
+from ..i18n import msg
 from .common import client_ip, need_acc, run
 
 router = APIRouter()
@@ -143,9 +144,9 @@ def _opts(body):
         try:
             v = int(float(v))
         except (TypeError, ValueError):
-            raise HTTPException(400, f"{k} 需为数字")
+            raise HTTPException(400, msg("err.must_number", k=k))
         if not lo <= v <= hi:
-            raise HTTPException(400, f"{k} 范围 {lo}–{hi} 分钟")
+            raise HTTPException(400, msg("err.range_minutes", k=k, lo=lo, hi=hi))
         o[k] = v
     o["keep_budget"] = body.get("keep_budget", True) not in (False, "false", 0, "0")
     return o
@@ -159,16 +160,16 @@ def _resolve(acc_id, activity):
     for x in ((hit[1].get("activities") if hit else None) or []):
         if x.get("activity_id") == a and x.get("key"):
             return x["key"]
-    raise HTTPException(400, f"未知活动：{a}（可选 {' / '.join(ACT_KEYS)}）")
+    raise HTTPException(400, msg("err.unknown_activity", a=a, opts=" / ".join(ACT_KEYS)))
 
 
 async def _precheck(acc_id, key):
     try:
         return await run(services.provider(acc_id).credit_precheck, key)
     except core.AwsCreditError as e:
-        raise HTTPException(400, f"{ACT_LABEL[key]}：{e}")
+        raise HTTPException(400, msg("err.activity_err", label=ACT_LABEL[key], e=e))
     except Exception as e:
-        raise HTTPException(400, f"{ACT_LABEL[key]}：{_aws_mod().friendly(e, key)}")
+        raise HTTPException(400, msg("err.activity_err", label=ACT_LABEL[key], e=_aws_mod().friendly(e, key)))
 
 
 def _audit(req, action, detail):
@@ -191,13 +192,13 @@ async def aws_credit_run(req: Request, acc_id: int, activity: str, body: dict = 
     key = _resolve(acc_id, activity)
     opts = _opts(body or {})
     if not body.get("confirm"):
-        raise HTTPException(400, "会在账号里创建资源并从 credit 扣极少量费用，需确认")
+        raise HTTPException(400, msg("err.credit_create_confirm"))
     if _running(acc_id):
-        raise HTTPException(409, "已有新号 Credit 任务在运行，请等它结束")
+        raise HTTPException(409, msg("err.credit_task_running"))
     hit = _CREDITS.get(acc_id)
     done = next((a for a in ((hit[1].get("activities") if hit else None) or []) if a.get("key") == key and a.get("status") == "COMPLETED"), None)
     if done and not body.get("force"):
-        raise HTTPException(400, f"{ACT_LABEL[key]} 已完成，无需再执行")
+        raise HTTPException(400, msg("err.activity_done", label=ACT_LABEL[key]))
     check = await _precheck(acc_id, key)
     tid = _start(req, acc, [key], opts, "aws-credit-run")
     return {"ok": True, "task_id": tid, "activity": key, "precheck": check,
@@ -209,9 +210,9 @@ async def aws_credit_run_all(req: Request, acc_id: int, body: dict = Body(defaul
     acc = need_acc(acc_id, "aws")
     opts = _opts(body or {})
     if not body.get("confirm"):
-        raise HTTPException(400, "会依次创建 EC2 / RDS / Lambda 等资源，从 credit 扣少量费用（RDS、EC2 运行数分钟，金额极小），需确认")
+        raise HTTPException(400, msg("err.credit_all_confirm"))
     if _running(acc_id):
-        raise HTTPException(409, "已有新号 Credit 任务在运行，请等它结束")
+        raise HTTPException(409, msg("err.credit_task_running"))
     hit = _CREDITS.get(acc_id)
     data = hit[1] if hit else None
     if data is None:
@@ -227,7 +228,7 @@ async def aws_credit_run_all(req: Request, acc_id: int, body: dict = Body(defaul
         want = {str(x).lower() for x in body["activities"]}
         keys = [k for k in keys if k in want]
     if not keys:
-        raise HTTPException(400, "全部活动都已完成，无需执行")
+        raise HTTPException(400, msg("err.activities_all_done"))
     skipped = []
     ok_keys = []
     for k in keys:
@@ -237,7 +238,7 @@ async def aws_credit_run_all(req: Request, acc_id: int, body: dict = Body(defaul
         except HTTPException as e:
             skipped.append({"activity": k, "reason": e.detail})
     if not ok_keys:
-        raise HTTPException(400, "所有待执行活动都没有通过权限检查：" + "；".join(s["reason"] for s in skipped))
+        raise HTTPException(400, msg("err.perm_check_failed", reasons="；".join(s["reason"] for s in skipped)))
     tid = _start(req, acc, ok_keys, opts, "aws-credit-run-all")
     return {"ok": True, "task_id": tid, "activities": ok_keys, "skipped": skipped,
             "message": f"已开始依次执行 {len(ok_keys)} 个活动" + (f"，{len(skipped)} 个因权限不足跳过" if skipped else "")}
@@ -247,9 +248,9 @@ async def aws_credit_run_all(req: Request, acc_id: int, body: dict = Body(defaul
 async def aws_credit_cleanup(req: Request, acc_id: int, body: dict = Body(default={})):
     acc = need_acc(acc_id, "aws")
     if not body.get("confirm"):
-        raise HTTPException(400, "清理会删除带 tricloud-credit=1 标签的 EC2 / RDS 以及 Lambda 函数与角色，需确认")
+        raise HTTPException(400, msg("err.credit_cleanup_confirm"))
     if _running(acc_id):
-        raise HTTPException(409, "新号 Credit 任务仍在运行，请先在任务里停止（停止后会自动清理）")
+        raise HTTPException(409, msg("err.credit_stop_first"))
     regions = [acc.get("region")] if acc.get("region") else []
     for t in _credit_tasks(acc_id):
         rg = _jl(t.get("params")).get("region")
@@ -263,7 +264,7 @@ async def aws_credit_cleanup(req: Request, acc_id: int, body: dict = Body(defaul
     except core.AwsCreditError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
-        raise HTTPException(400, "清理失败：" + _aws_mod().friendly(e))
+        raise HTTPException(400, msg("err.cleanup_failed", e=_aws_mod().friendly(e)))
     _audit(req, "aws-credit-cleanup", f"账号 {acc_id} 清理 {len(r['deleted'])} 项" + (f"，失败 {len(r['errors'])} 项" if r["errors"] else "")
            + (" · " + "、".join(f"{d['type']}:{d['id']}" for d in r["deleted"])[:300] if r["deleted"] else ""))
     return r

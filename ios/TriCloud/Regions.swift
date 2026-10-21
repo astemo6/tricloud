@@ -26,6 +26,137 @@ enum Regions {
         "uaenorth": "迪拜", "qatarcentral": "多哈", "israelcentral": "以色列", "southafricanorth": "约翰内斯堡", "indonesiacentral": "雅加达", "malaysiawest": "吉隆坡",
         "newzealandnorth": "奥克兰"
     ]
+    static let cityEN: [String: String] = [
+        "us-east-1": "N. Virginia",
+        "us-east-2": "Ohio",
+        "us-west-1": "N. California",
+        "us-west-2": "Oregon",
+        "af-south-1": "Cape Town",
+        "ap-east-1": "Hong Kong",
+        "ap-east-2": "Taipei",
+        "ap-south-1": "Mumbai",
+        "ap-south-2": "Hyderabad",
+        "ap-northeast-1": "Tokyo",
+        "ap-northeast-2": "Seoul",
+        "ap-northeast-3": "Osaka",
+        "ap-southeast-1": "Singapore",
+        "ap-southeast-2": "Sydney",
+        "ap-southeast-3": "Jakarta",
+        "ap-southeast-4": "Melbourne",
+        "ap-southeast-5": "Kuala Lumpur",
+        "ap-southeast-6": "New Zealand",
+        "ap-southeast-7": "Bangkok",
+        "ca-central-1": "Montreal",
+        "ca-west-1": "Calgary",
+        "eu-central-1": "Frankfurt",
+        "eu-central-2": "Zurich",
+        "eu-north-1": "Stockholm",
+        "eu-south-1": "Milan",
+        "eu-south-2": "Spain",
+        "eu-west-1": "Ireland",
+        "eu-west-2": "London",
+        "eu-west-3": "Paris",
+        "il-central-1": "Tel Aviv",
+        "me-central-1": "UAE",
+        "me-south-1": "Bahrain",
+        "mx-central-1": "Mexico",
+        "sa-east-1": "São Paulo",
+        "cn-north-1": "Beijing",
+        "cn-northwest-1": "Ningxia",
+        "us-gov-west-1": "GovCloud West",
+        "us-gov-east-1": "GovCloud East",
+        "ap-sydney-1": "Sydney",
+        "ap-melbourne-1": "Melbourne",
+        "sa-saopaulo-1": "São Paulo",
+        "sa-vinhedo-1": "Vinhedo",
+        "ca-montreal-1": "Montreal",
+        "ca-toronto-1": "Toronto",
+        "sa-santiago-1": "Santiago",
+        "sa-valparaiso-1": "Valparaíso",
+        "sa-bogota-1": "Bogotá",
+        "eu-paris-1": "Paris",
+        "eu-marseille-1": "Marseille",
+        "eu-frankfurt-1": "Frankfurt",
+        "ap-hyderabad-1": "Hyderabad",
+        "ap-mumbai-1": "Mumbai",
+        "ap-batam-1": "Batam",
+        "il-jerusalem-1": "Jerusalem",
+        "eu-milan-1": "Milan",
+        "eu-turin-1": "Turin",
+        "ap-osaka-1": "Osaka",
+        "ap-tokyo-1": "Tokyo",
+        "ap-kulai-2": "Kulai",
+        "mx-queretaro-1": "Querétaro",
+        "mx-monterrey-1": "Monterrey",
+        "af-casablanca-1": "Casablanca",
+        "eu-amsterdam-1": "Amsterdam",
+        "me-riyadh-1": "Riyadh",
+        "me-jeddah-1": "Jeddah",
+        "eu-jovanovac-1": "Jovanovac",
+        "ap-singapore-1": "Singapore",
+        "ap-singapore-2": "West Singapore",
+        "af-johannesburg-1": "Johannesburg",
+        "ap-seoul-1": "Seoul",
+        "ap-chuncheon-1": "Chuncheon",
+        "eu-madrid-1": "Madrid",
+        "eu-madrid-3": "Madrid 3",
+        "eu-stockholm-1": "Stockholm",
+        "eu-zurich-1": "Zurich",
+        "me-abudhabi-1": "Abu Dhabi",
+        "me-dubai-1": "Dubai",
+        "uk-london-1": "London",
+        "uk-cardiff-1": "Newport",
+        "us-ashburn-1": "Ashburn",
+        "us-chicago-1": "Chicago",
+        "us-phoenix-1": "Phoenix",
+        "us-sanjose-1": "San Jose",
+        "eastasia": "Hong Kong",
+        "southeastasia": "Singapore",
+        "japaneast": "East Japan",
+        "japanwest": "West Japan",
+        "koreacentral": "Central Korea",
+        "koreasouth": "South Korea",
+        "australiaeast": "New South Wales",
+        "australiasoutheast": "Victoria",
+        "australiacentral": "Canberra",
+        "centralindia": "Pune",
+        "southindia": "Chennai",
+        "westindia": "Mumbai",
+        "eastus": "Virginia",
+        "eastus2": "Virginia 2",
+        "westus": "California",
+        "westus2": "Washington",
+        "westus3": "Arizona",
+        "centralus": "Iowa",
+        "northcentralus": "Illinois",
+        "southcentralus": "Texas",
+        "westcentralus": "Wyoming",
+        "canadacentral": "Toronto",
+        "canadaeast": "Quebec",
+        "brazilsouth": "São Paulo",
+        "mexicocentral": "Querétaro",
+        "northeurope": "Ireland",
+        "westeurope": "Netherlands",
+        "uksouth": "London",
+        "ukwest": "Cardiff",
+        "francecentral": "Paris",
+        "germanywestcentral": "Frankfurt",
+        "switzerlandnorth": "Zurich",
+        "norwayeast": "Oslo",
+        "swedencentral": "Gävle",
+        "polandcentral": "Warsaw",
+        "italynorth": "Milan",
+        "spaincentral": "Madrid",
+        "uaenorth": "Dubai",
+        "qatarcentral": "Doha",
+        "israelcentral": "Israel",
+        "southafricanorth": "Johannesburg",
+        "indonesiacentral": "Jakarta",
+        "malaysiawest": "Kuala Lumpur",
+        "newzealandnorth": "Auckland"]
+
+    static var table: [String: String] { L10n.isEN ? cityEN : city }
+
     static let ociKey: [String: String] = [
         "SYD": "ap-sydney-1", "MEL": "ap-melbourne-1", "GRU": "sa-saopaulo-1", "VCP": "sa-vinhedo-1", "YUL": "ca-montreal-1", "YYZ": "ca-toronto-1", "SCL": "sa-santiago-1", "VAP": "sa-valparaiso-1",
         "BOG": "sa-bogota-1", "CDG": "eu-paris-1", "MRS": "eu-marseille-1", "FRA": "eu-frankfurt-1", "HYD": "ap-hyderabad-1", "BOM": "ap-mumbai-1", "HSG": "ap-batam-1", "MTZ": "il-jerusalem-1",
@@ -48,7 +179,7 @@ enum Regions {
         let raw = (code ?? "").trimmingCharacters(in: .whitespaces)
         let c = raw.lowercased()
         if c.isEmpty || c == "null" { return "" }
-        if let v = city[c] { return v }
+        if let v = table[c] { return v }
         if let g = firstGroup("^([a-z]{2}(?:-[a-z]+)+-\\d+)[a-z]$", c), let v = city[g] { return v }
         if let g = firstGroup("([a-z]+-[a-z]+-\\d+)-ad-\\d+$", c), let v = city[g] { return v }
         if let g = firstGroup("(?:^|:)([A-Za-z]{3})-AD-\\d+$", raw, true), let r = ociKey[g.uppercased()], let v = city[r] { return v }
@@ -68,7 +199,7 @@ enum Regions {
         let first = r.obj(0).optString("region")
         if r.count == 1 { return label(first) }
         let c = cityOf(first)
-        return (c.isEmpty ? first : c) + " 等 \(r.count) 个区域"
+        return (c.isEmpty ? first : c) + (L10n.isEN ? " and \(r.count) more regions" : " 等 \(r.count) 个区域")
     }
 
     /// 多区域分布「东京 2 · 新加坡 1」（城市名未知时用代码）。与 core.js regionsDist 相同。
@@ -87,11 +218,11 @@ enum Regions {
         if o.optString("provider") == "aws" {
             let ls = o.optInt("lightsail")
             parts.append("EC2 \(o.optInt("ec2"))")
-            parts.append("Lightsail " + (o.optBoolean("lightsail_failed") ? (ls > 0 ? "\(ls)（部分区域失败）" : "查询失败") : "\(ls)"))
+            parts.append("Lightsail " + (o.optBoolean("lightsail_failed") ? (ls > 0 ? (L10n.isEN ? "\(ls) (partial region failure)" : "\(ls)（部分区域失败）") : (L10n.isEN ? "Query failed" : "查询失败")) : "\(ls)"))
         }
         let err = o.optJSONArray("errors") ?? []
-        if !err.isEmpty { parts.append("\(err.count) 个区域查询失败") }
-        return "\(o.optInt("total")) 台（运行 \(o.optInt("running"))）" + (parts.isEmpty ? "" : "· " + parts.joined(separator: " · "))
+        if !err.isEmpty { parts.append(L10n.isEN ? "\(err.count) region queries failed" : "\(err.count) 个区域查询失败") }
+        return L10n.isEN ? "\(o.optInt("total")) instances (\(o.optInt("running")) running)" : "\(o.optInt("total")) 台（运行 \(o.optInt("running"))）" + (parts.isEmpty ? "" : "· " + parts.joined(separator: " · "))
     }
 
     // MARK: - build 25：有机器的区域（GET /accounts 的 machine_regions，台数多的在前；null = 还没扫描过，[] = 没有机器）
@@ -126,10 +257,10 @@ enum Regions {
     static func accountText(_ acc: JObj) -> String {
         let l = machineRegions(acc)
         if let l = l, !l.isEmpty { return brief(l) }
-        if acc.optString("provider") == "azure" { return l == nil ? "" : "无机器" }
+        if acc.optString("provider") == "azure" { return l == nil ? "" : (L10n.isEN ? "No instances" : "无机器") }
         let r = str(acc, "region", "")
         let d = r.isEmpty ? "-" : label(r)
-        return l == nil ? d + "（默认区域）" : "无机器 · 默认 " + d
+        return l == nil ? d + (L10n.isEN ? " (default)" : "（默认区域）") : (L10n.isEN ? "No instances · default " + d : "无机器 · 默认 " + d)
     }
 
     /// /overview 的结果记下来（列表与打开账号时的默认区域马上用上）。

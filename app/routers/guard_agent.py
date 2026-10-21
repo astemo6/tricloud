@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from .. import core, port_traffic, traffic_guard
+from ..i18n import msg
 from .common import client_ip
 
 router = APIRouter()
@@ -31,7 +32,7 @@ def _base(req: Request, given=None):
     host = (req.headers.get("x-forwarded-host") or req.headers.get("host") or req.url.netloc).split(",")[0].strip()
     b = f"{proto}://{host}"
     if not BASE_RE.match(b):
-        raise HTTPException(400, "无法确定面板地址，请传 base 参数")
+        raise HTTPException(400, msg("err.base_required"))
     return b
 
 
@@ -47,7 +48,7 @@ def _state_resp(st, format):
 def agent_state(req: Request, format: str = "json"):
     g = traffic_guard.guard_by_token(_token_of(req))
     if not g:
-        return JSONResponse({"detail": "token 无效"}, status_code=401, headers=NO_STORE)
+        return JSONResponse({"detail": msg("err.token_invalid")}, status_code=401, headers=NO_STORE)
     return _state_resp(traffic_guard.agent_heartbeat(g, dict(req.query_params)), format)
 
 
@@ -56,10 +57,10 @@ async def agent_report(req: Request, format: str = "json"):
     """心跳 + 流量明细增量（正文每行：协议 端口 进程名 入站字节 出站字节）。守护由 token 反查，agent 不能指定写哪条守护。"""
     g = await asyncio.to_thread(traffic_guard.guard_by_token, _token_of(req))
     if not g:
-        return JSONResponse({"detail": "token 无效"}, status_code=401, headers=NO_STORE)
+        return JSONResponse({"detail": msg("err.token_invalid")}, status_code=401, headers=NO_STORE)
     body = await req.body()
     if len(body) > port_traffic.MAX_BODY:
-        return JSONResponse({"detail": "上报内容过大"}, status_code=413, headers=NO_STORE)
+        return JSONResponse({"detail": msg("err.payload_too_big")}, status_code=413, headers=NO_STORE)
     rows, bad = port_traffic.parse_report(body.decode("utf-8", "replace"))
 
     def work():
@@ -97,7 +98,7 @@ def agent_uninstall():
 def _need_guard(gid):
     g = core.q("SELECT * FROM traffic_guards WHERE id=?", (gid,), one=True)
     if not g:
-        raise HTTPException(404, "规则不存在")
+        raise HTTPException(404, msg("err.rule_not_found"))
     return g
 
 

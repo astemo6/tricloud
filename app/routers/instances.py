@@ -4,6 +4,7 @@ import re
 from fastapi import APIRouter, Body, HTTPException
 
 from .. import core, dns, hostname, net, overview, security, services, tasks
+from ..i18n import msg
 from .common import _public_guard, _req, _truthy, call, guarded, need_acc, run
 
 router = APIRouter()
@@ -28,9 +29,9 @@ async def inst_action(acc_id: int, body: dict = Body(...)):
     need_acc(acc_id)
     act = body.get("action")
     if act not in ("start", "stop", "reboot", "terminate", "hard_reboot"):
-        raise HTTPException(400, "无效操作")
+        raise HTTPException(400, msg("err.invalid_op"))
     if act == "terminate" and not body.get("confirm"):
-        raise HTTPException(400, "终止需确认")
+        raise HTTPException(400, msg("err.terminate_confirm"))
     return await run(services.instance_action, acc_id, body["instance_id"], act, body.get("region"), body.get("kind", "vm"),
                      bool(body.get("preserve_boot_volume")))
 
@@ -49,11 +50,11 @@ async def change_ip(acc_id: int, body: dict = Body(...)):
             mr = int(mr)
             assert 0 <= mr <= 100
         except Exception:
-            raise HTTPException(400, "风险分上限需为 0~100 的整数")
+            raise HTTPException(400, msg("err.risk_range"))
         p["quality_max_risk"] = mr
     if qc:
         if not re.fullmatch(r"[A-Za-z]{2}(\s*[,，]\s*[A-Za-z]{2})*", qc):
-            raise HTTPException(400, "国家代码格式如 US 或 US,JP")
+            raise HTTPException(400, msg("err.country_format"))
         p["quality_country"] = qc.upper().replace("，", ",")
     quality = "quality_max_risk" in p or "quality_country" in p
     if acc["provider"] == "oci" and not cidrs and not quality:   # OCI 换临时 IP 很快，同步返回
@@ -67,7 +68,7 @@ async def change_ip(acc_id: int, body: dict = Body(...)):
         try:
             net.split_cidrs(cidrs)
         except ValueError as e:
-            raise HTTPException(400, f"网段格式错误：{e}")
+            raise HTTPException(400, msg("err.cidr_bad", e=e))
         cap = 100 if acc["provider"] == "oci" else 20   # AWS/Azure 每次换 IP 更慢、可能停机，次数上限更低
         p.update(cidrs=cidrs)
     if cidrs or quality:
@@ -106,15 +107,15 @@ async def inst_open_port(acc_id: int, iid: str, body: dict = Body(...)):
     acc = need_acc(acc_id)
     iid = (body.get("instance_id") or "").strip() if iid.strip("/") in ("", "-", "_") else iid
     if not iid:
-        raise HTTPException(400, "缺少实例 ID")
+        raise HTTPException(400, msg("err.missing_instance_id"))
     if acc["provider"] == "aws" and body.get("kind", "vm") != "vm":
-        raise HTTPException(400, "Lightsail 请在 AWS 控制台的“网络”页设置防火墙；此处仅支持 EC2")
+        raise HTTPException(400, msg("err.ls_fw_console"))
     proto = str(body.get("protocol") or "tcp").strip().lower()
     if proto not in ("tcp", "udp"):
-        raise HTTPException(400, "协议只能是 tcp 或 udp")
+        raise HTTPException(400, msg("err.proto_tcp_udp"))
     port = str(body.get("port") if body.get("port") is not None else "").strip()
     if not port:
-        raise HTTPException(400, "请填写端口，如 8443 或 80, 443, 8000-8100")
+        raise HTTPException(400, msg("err.ports_hint"))
     from ..providers.oci_provider import OCIProvider
     try:
         ranges = OCIProvider.parse_ports(port)
@@ -145,17 +146,17 @@ async def do_rename(acc_id, body, provider=None):
     acc = need_acc(acc_id, provider)
     name = (body.get("new_name") or "").strip()
     if not name:
-        raise HTTPException(400, "名称不能为空")
+        raise HTTPException(400, msg("err.name_required"))
     if len(name) > 255:
-        raise HTTPException(400, "名称过长")
+        raise HTTPException(400, msg("err.name_too_long"))
     if not body.get("instance_id"):
-        raise HTTPException(400, "缺少 instance_id")
+        raise HTTPException(400, msg("err.missing_instance_id2"))
     kind = body.get("kind") or "vm"
     if acc["provider"] == "aws" and kind == "lightsail":
-        raise HTTPException(400, "Lightsail 实例不支持改名")
+        raise HTTPException(400, msg("err.ls_no_rename"))
     prov = services.provider(acc_id, body.get("region"))
     if not hasattr(prov, "rename"):
-        raise HTTPException(400, "该云不支持改名")
+        raise HTTPException(400, msg("err.no_rename"))
     res = dict(await run(prov.rename, body["instance_id"], name) or {}, ok=True)
     # v1.5：sync_hostname 默认 true —— 通过云厂商 Run Command 执行固定命令改系统主机名
     res["hostname"] = await run(rename_sync, acc, prov, body["instance_id"], name, kind) \
@@ -187,9 +188,9 @@ async def reinstall(acc_id: int, body: dict = Body(...)):
     acc = need_acc(acc_id)
     _req(body, "instance_id")
     if not body.get("confirm"):
-        raise HTTPException(400, "重装会清空系统盘全部数据，需确认")
+        raise HTTPException(400, msg("err.reinstall_confirm"))
     if acc["provider"] == "aws" and body.get("kind", "vm") != "vm":
-        raise HTTPException(400, "Lightsail 不支持重装系统，可删除后重建")
+        raise HTTPException(400, msg("err.ls_no_reinstall"))
     if acc["provider"] == "oci":
         await guarded(acc_id, "bootvol", {"size_gb": body.get("disk_gb"), **body}, body.get("region"))
     keys = ("instance_id", "region", "name", "os", "os_version", "disk_gb", "password_login", "ssh_key", "kind")
@@ -203,4 +204,4 @@ async def ip_quality(ip: str):
     try:
         return await run(net.ip_quality, ip.strip())
     except ValueError:
-        raise HTTPException(400, "IP 格式错误")
+        raise HTTPException(400, msg("err.ip_format"))

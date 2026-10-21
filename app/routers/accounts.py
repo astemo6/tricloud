@@ -6,6 +6,7 @@ import time
 from fastapi import APIRouter, Body, HTTPException
 
 from .. import accounts_import, core, overview, services, tasks
+from ..i18n import msg
 from .common import _num_or_none, _valid_date, call, need_acc, P, REQUIRED, run
 
 router = APIRouter()
@@ -56,10 +57,10 @@ def _create_account_sync(prov, name, cred, cloud_created_at=None):
 async def add_account(body: dict = Body(...)):
     prov, name, cred = body.get("provider"), (body.get("name") or "").strip(), body.get("cred") or {}
     if prov not in REQUIRED:
-        raise HTTPException(400, "provider 无效")
+        raise HTTPException(400, msg("err.provider_invalid"))
     cred, miss = _clean_cred(prov, cred)
     if miss or not name:
-        raise HTTPException(400, f"缺少字段：{', '.join(miss) or 'name'}")
+        raise HTTPException(400, msg("err.missing_fields", fields=", ".join(miss) or "name"))
     created = _valid_date(body.get("cloud_created_at"), "cloud_created_at")
     try:
         acc_id, info = await run(_create_account_sync, prov, name, cred, created)
@@ -74,7 +75,7 @@ async def parse_accounts_text(body: dict = Body(...)):
     """添加账号弹窗用：把粘贴的一堆内容识别成账号字段，返回给前端自动填表。"""
     text = body.get("text") or ""
     if len(text) > 200_000:
-        raise HTTPException(400, "内容过长")
+        raise HTTPException(400, msg("err.too_long"))
     items = [it for it in accounts_import.parse(text, body.get("provider")) if not it.get("error") or it.get("provider")]
     out = []
     for it in items[:50]:
@@ -91,12 +92,12 @@ async def add_accounts_batch(body: dict = Body(...)):
     """粘贴多段 JSON 或 OCI config，逐条校验（并发测试凭证），返回每条的结果。dry_run=true 只解析不入库。"""
     text = body.get("text") or ""
     if len(text) > 200_000:
-        raise HTTPException(400, "内容过长")
+        raise HTTPException(400, msg("err.too_long"))
     items = accounts_import.parse(text, body.get("provider"))
     if not items:
-        raise HTTPException(400, "没有解析到任何账号")
+        raise HTTPException(400, msg("err.no_accounts_parsed"))
     if len(items) > 50:
-        raise HTTPException(400, "一次最多 50 个账号")
+        raise HTTPException(400, msg("err.too_many_accounts"))
     existing = {(a["provider"], a["name"]) for a in core.list_accounts()}
     seen = set()
 
@@ -179,7 +180,7 @@ async def test_all_accounts(body: dict = Body(default={})):
     """并发测活：provider 为空 = 全部账号，否则只测该云。"""
     prov = body.get("provider") or None
     if prov and prov not in REQUIRED:
-        raise HTTPException(400, "provider 无效")
+        raise HTTPException(400, msg("err.provider_invalid"))
     ids = [a["id"] for a in core.list_accounts() if (not prov or a["provider"] == prov) and not a.get("disabled")]   # v1.6：停用账号跳过
     sem = asyncio.Semaphore(10)
 
@@ -201,13 +202,13 @@ async def test_account(acc_id: int):
 def _detect_created_sync(acc_id):
     acc = core.get_account(acc_id)
     if acc["provider"] != "oci":
-        raise HTTPException(400, "只有 OCI 能自动读取账号创建日期")
+        raise HTTPException(400, msg("err.only_oci_created"))
     try:
         d = services.provider(acc_id).created_at()
     except Exception as e:
-        raise HTTPException(502, f"读取失败：{e}")
+        raise HTTPException(502, msg("err.read_failed", e=e))
     if not d:
-        raise HTTPException(502, "OCI 未返回租户创建时间")
+        raise HTTPException(502, msg("err.oci_no_tenant_time"))
     core.ex("UPDATE accounts SET cloud_created_at=? WHERE id=?", (d, acc_id))
     return {"cloud_created_at": d}
 
@@ -251,7 +252,7 @@ def _apply_proxy_patch(cred, body):
     if "proxy" in body:
         px = (body.get("proxy") or "").strip()
         if px and not px.startswith(core.PROXY_SCHEMES):
-            raise HTTPException(400, "代理需以 http:// https:// socks5:// 开头")
+            raise HTTPException(400, msg("err.proxy_scheme"))
         if px:
             cred["proxy"] = px
         else:
@@ -268,7 +269,7 @@ def _apply_proxy_patch(cred, body):
     if body.get("proxy_pass_clear"):
         cred.pop("proxy_pass", None)
     if (cred.get("proxy_user") or cred.get("proxy_pass")) and not cred.get("proxy"):
-        raise HTTPException(400, "请先填写代理地址（proxy），再填用户名 / 密码")
+        raise HTTPException(400, msg("err.proxy_first"))
     return cred
 
 
@@ -302,7 +303,7 @@ def _apply_cred_patch(acc_id, patch):
         v = v.strip() if isinstance(v, str) and k != "key_content" else v
         if k in NON_SENSITIVE[prov]:
             if k == "region" and not v and prov in REGION_REQUIRED:
-                raise HTTPException(400, "区域不能为空")
+                raise HTTPException(400, msg("err.region_required"))
             if (cred.get(k) or "") != (v or ""):
                 if v:
                     cred[k] = v
@@ -317,7 +318,7 @@ def _apply_cred_patch(acc_id, patch):
     try:
         services.PROVIDERS[prov](core.runtime_cred(cred), cred.get("region")).test()
     except Exception as e:
-        raise HTTPException(400, f"凭证校验失败（未保存）：{e}")
+        raise HTTPException(400, msg("err.cred_check_failed", e=e))
     core.ex("UPDATE accounts SET cred_enc=?, region=? WHERE id=?", (core.encrypt(cred), cred.get("region"), acc_id))
     services.drop_provider_cache(acc_id)
     return True
@@ -400,7 +401,7 @@ async def regions(acc_id: int, service: str = None):
     if service == "lightsail" and acc["provider"] == "aws":
         return await run(services.provider(acc_id).ls_regions)
     if service not in (None, "", "lightsail"):
-        raise HTTPException(400, "service 只支持 lightsail")
+        raise HTTPException(400, msg("err.only_lightsail"))
     return await run(services.provider(acc_id).regions)
 
 
@@ -440,7 +441,7 @@ def recycle_bin_del(rid: int):
 @router.delete("/api/recycle-bin")
 def recycle_bin_clear(confirm: bool = False):
     if not confirm:
-        raise HTTPException(400, "需确认")
+        raise HTTPException(400, msg("err.need_confirm"))
     core.ex("DELETE FROM deleted_accounts")
     return {"ok": True}
 

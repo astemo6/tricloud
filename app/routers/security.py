@@ -5,6 +5,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import Response
 
 from .. import core, security, services
+from ..i18n import msg
 from .common import client_ip, run
 
 router = APIRouter()
@@ -22,7 +23,7 @@ def tfa_setup():
 def tfa_enable(body: dict = Body(...)):
     sec = core.get_secret_setting("totp_pending")
     if not sec or not security.totp_verify(sec, body.get("code")):
-        raise HTTPException(400, "验证码错误")
+        raise HTTPException(400, msg("err.code_wrong"))
     core.set_secret_setting("totp_secret", sec)
     core.set_secret_setting("totp_pending", "")
     return {"ok": True}
@@ -31,9 +32,9 @@ def tfa_enable(body: dict = Body(...)):
 @router.post("/api/2fa/disable")
 async def tfa_disable(body: dict = Body(...)):
     if not await run(core.verify_password, body.get("password", ""), core.get_setting("password_hash", "")):
-        raise HTTPException(400, "密码错误")
+        raise HTTPException(400, msg("err.password_wrong"))
     if not security.totp_verify(core.get_secret_setting("totp_secret"), body.get("code")):
-        raise HTTPException(400, "验证码错误")
+        raise HTTPException(400, msg("err.code_wrong"))
     core.set_secret_setting("totp_secret", "")
     return {"ok": True}
 
@@ -66,7 +67,7 @@ def audit_log(limit: int = 200):
 def audit_clear(req: Request, confirm: bool = False):
     """一键清空审计日志（不可恢复）。清空后立刻写一条 audit-clear，保留谁、何时、哪个 IP 清的痕迹。API Token 不能调用。"""
     if not confirm:
-        raise HTTPException(400, "清空审计日志不可恢复，需 confirm=true")
+        raise HTTPException(400, msg("err.clear_audit_confirm"))
     with core.db() as c:
         n = c.execute("SELECT COUNT(*) FROM audit").fetchone()[0]
         c.execute("DELETE FROM audit")
@@ -78,7 +79,7 @@ def audit_clear(req: Request, confirm: bool = False):
 @router.post("/api/backup")
 async def backup(body: dict = Body(...)):
     if not await run(core.verify_password, body.get("password", ""), core.get_setting("password_hash", "")):
-        raise HTTPException(400, "面板密码错误")
+        raise HTTPException(400, msg("err.panel_pw_wrong"))
     try:
         blob = await run(security.make_backup, body.get("passphrase", ""))
     except ValueError as e:
@@ -91,7 +92,7 @@ async def backup(body: dict = Body(...)):
 @router.post("/api/restore")
 async def restore(body: dict = Body(...)):
     if not await run(core.verify_password, body.get("password", ""), core.get_setting("password_hash", "")):
-        raise HTTPException(400, "面板密码错误")
+        raise HTTPException(400, msg("err.panel_pw_wrong"))
     try:
         blob = base64.b64decode(body.get("file_b64", ""))
         await run(security.restore_backup, blob, body.get("passphrase", ""))
@@ -112,10 +113,10 @@ def secrets_list():
 @router.post("/api/secrets/{sid}/reveal")
 async def secret_reveal(sid: int, body: dict = Body(...)):
     if not await run(core.verify_password, body.get("password", ""), core.get_setting("password_hash", "")):
-        raise HTTPException(400, "面板密码错误")
+        raise HTTPException(400, msg("err.panel_pw_wrong"))
     r = core.q("SELECT * FROM instance_secrets WHERE id=?", (sid,), one=True)
     if not r:
-        raise HTTPException(404, "不存在")
+        raise HTTPException(404, msg("err.not_found"))
     return {"username": r["username"], "password": core.decrypt(r["password_enc"])}
 
 

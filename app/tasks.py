@@ -88,7 +88,7 @@ def stop_task(tid):
     if t and t["status"] == "running":
         _update(tid, status="stopped", message="已手动停止")
         acc = core.get_account(t["account_id"]) or {}
-        coro = telegram.send(f"⏹ 任务 #{tid}（{t['type']} · {telegram.esc(acc.get('name'))}）已停止，共尝试 {t['attempts']} 次")
+        coro = telegram.send(telegram.L("tg.push.taskStopped", tid=tid, type=t["type"], name=telegram.esc(acc.get("name")), n=t["attempts"]))
         try:
             asyncio.get_running_loop().create_task(coro)
         except RuntimeError:     # v1.4 修复：同步路由在线程池里调用时没有事件循环
@@ -107,9 +107,9 @@ async def _run_snatch(t):
             cloudinit.save_instance_secret(t["account_id"], r["id"], r["name"], r["username"], r["password"])
         _update(t["id"], status="done", attempts=attempts, message=f"抢机成功：{r['name']}（{r.get('ad', '')}）",
                 result={k: r.get(k) for k in ("id", "name", "ad", "public_ip", "username") if r.get(k)})
-        await telegram.send(f"🎉 <b>抢机成功</b>\n账号：{telegram.esc(acc['name'])}\n实例：{telegram.esc(r['name'])}\n"
-                            f"规格：{p['create'].get('shape')} {p['create'].get('ocpus')}C/{p['create'].get('memory_gb')}G\n尝试次数：{attempts}"
-                            + ("\nroot 密码已加密保存，可在面板「开机密码」查看" if r.get("password") else ""))
+        await telegram.send(telegram.L("tg.push.snatchOk", acc=telegram.esc(acc["name"]), name=telegram.esc(r["name"]),
+                                       shape=p["create"].get("shape"), ocpus=p["create"].get("ocpus"), mem=p["create"].get("memory_gb"), n=attempts)
+                            + (telegram.L("tg.push.snatchPw") if r.get("password") else ""))
     except Exception as e:
         cap = services.OCIProvider.is_capacity_error(e)
         p["errors"] = 0 if cap else p.get("errors", 0) + 1
@@ -120,7 +120,7 @@ async def _run_snatch(t):
             return
         if p["errors"] >= 5 or (maxa and attempts >= maxa):
             _update(t["id"], status="failed", attempts=attempts, message=msg, params=p)
-            await telegram.send(f"❌ <b>抢机任务 #{t['id']} 失败</b>\n{telegram.esc(acc['name'])}\n{telegram.esc(msg)}")
+            await telegram.send(telegram.L("tg.push.snatchFail", id=t["id"], acc=telegram.esc(acc["name"]), msg=telegram.esc(msg)))
         else:
             _update(t["id"], attempts=attempts, message=msg, params=p)
 
@@ -164,8 +164,8 @@ async def _do_change_ip(c):
             (r.get("new_ip"), t["account_id"], p["instance_id"]))
     _update(t["id"], status="done", message=msg + ("；" + "；".join(dns_out) if dns_out else ""),
             result={"old_ip": r.get("old_ip"), "new_ip": r.get("new_ip"), "tries": r.get("tries", 1), "dns": dns_out})
-    await telegram.send(f"✅ <b>换 IP 完成</b>{'（' + telegram.esc(p['reason']) + '）' if p.get('reason') else ''}\n"
-                        f"{telegram.esc(acc['name'])} / {telegram.esc(name)}\n<code>{msg}</code>"
+    await telegram.send(telegram.L("tg.push.changeIpOk") + (telegram.L("tg.push.parenReason", r=telegram.esc(p["reason"])) if p.get("reason") else "")
+                        + f"\n{telegram.esc(acc['name'])} / {telegram.esc(name)}\n<code>{msg}</code>"
                         + ("\n" + telegram.esc("\n".join(dns_out)) if dns_out else ""))
 
 
@@ -175,7 +175,7 @@ async def _do_ipv6(c):
     r = await asyncio.to_thread(prov.add_ipv6, p["instance_id"], progress)
     dns_out = await asyncio.to_thread(dns.dns_sync, t["account_id"], p["instance_id"], None, r["ipv6"])
     _update(t["id"], status="done", message=f"IPv6：{r['ipv6']}" + ("；" + "；".join(dns_out) if dns_out else ""), result={"ipv6": r["ipv6"]})
-    await telegram.send(f"✅ <b>IPv6 已就绪</b>\n{telegram.esc(name)}\n<code>{r['ipv6']}</code>")
+    await telegram.send(telegram.L("tg.push.ipv6Ok", name=telegram.esc(name), ip=r["ipv6"]))
 
 
 async def _do_azure_create(c):
@@ -187,7 +187,7 @@ async def _do_azure_create(c):
         cloudinit.save_instance_secret(t["account_id"], r["id"], r["name"], r["username"], r["password"])
     _update(t["id"], status="done", message=f"已创建 {r['name']}，IP {r.get('public_ip')}",
             result={k: r.get(k) for k in ("id", "name", "public_ip", "username") if r.get(k)})
-    await telegram.send(f"✅ <b>Azure VM 创建完成</b>\n{telegram.esc(r['name'])}\n<code>{r.get('public_ip')}</code>")
+    await telegram.send(telegram.L("tg.push.azureCreated", name=telegram.esc(r["name"]), ip=r.get("public_ip")))
 
 
 async def _do_ensure_network(c):
@@ -208,7 +208,7 @@ async def _do_cf_delete(c):
     """CloudFront 分发：先停用、等部署完成再删除。"""
     t, p, acc, prov, checkpoint = c.t, c.p, c.acc, c.prov, c.checkpoint
     await _cf_delete(t, p, prov, checkpoint)
-    await telegram.send(f"🗑 <b>CloudFront 分发已删除</b>\n{telegram.esc(acc['name'])} / <code>{telegram.esc(p['distribution_id'])}</code>")
+    await telegram.send(telegram.L("tg.push.cfDeleted", acc=telegram.esc(acc["name"]), did=telegram.esc(p["distribution_id"])))
 
 
 async def _do_resize(c):
@@ -221,7 +221,7 @@ async def _do_resize(c):
         progress(f"提交改配置：{p.get('shape') or '原规格'} {p.get('ocpus') or '-'} OCPU / {p.get('memory_gb') or '-'} GB…")
         await asyncio.to_thread(prov.resize, p["instance_id"], p.get("ocpus"), p.get("memory_gb"), p.get("shape"))
     _update(t["id"], status="done", message="改配置完成")
-    await telegram.send(f"✅ <b>改配置完成</b>\n{telegram.esc(acc['name'])} / {telegram.esc(name)}")
+    await telegram.send(telegram.L("tg.push.resizeOk", acc=telegram.esc(acc["name"]), name=telegram.esc(name)))
 
 
 async def _do_reinstall(c):
@@ -238,7 +238,7 @@ async def _do_net500m(c):
         dns_out = await asyncio.to_thread(dns.dns_sync, t["account_id"], p["instance_id"], r.get("public_ip"))
         _update(t["id"], status="done", message=f"已开启，新入口 IP {r.get('public_ip')}" + ("；" + "；".join(dns_out) if dns_out else ""),
                 result={"public_ip": r.get("public_ip"), "hint": r.get("hint")})
-        await telegram.send(f"✅ <b>下行 500Mbps 已开启</b>\n{telegram.esc(name)}\n新入口 IP <code>{r.get('public_ip')}</code>")
+        await telegram.send(telegram.L("tg.push.net500Ok", name=telegram.esc(name), ip=r.get("public_ip")))
     else:
         r = await asyncio.to_thread(prov.disable_500m, p["instance_id"], progress)
         _update(t["id"], status="done", message="已关闭并还原原公网 IP 入站")
@@ -249,7 +249,7 @@ async def _do_foundry(c):
     t, p, acc, prov, progress = c.t, c.p, c.acc, c.prov, c.progress
     r = await asyncio.to_thread(prov.foundry_deploy, p, progress)
     _update(t["id"], status="done", message=f"已部署 {r['model']} → {r['deployment']}，Endpoint {r['endpoint']}", result=r)
-    await telegram.send(f"✅ <b>AI 模型已部署</b>\n{telegram.esc(acc['name'])} / {telegram.esc(r['model'])}\nEndpoint <code>{telegram.esc(r['endpoint'] or '-')}</code>")
+    await telegram.send(telegram.L("tg.push.foundryOk", acc=telegram.esc(acc["name"]), model=telegram.esc(r["model"]), ep=telegram.esc(r["endpoint"] or "-")))
 
 
 async def _do_billing_keep(c):
@@ -337,8 +337,7 @@ async def _do_aws_credit(c):
         _update(t["id"], status="failed", result={"steps": steps, "current": None},
                 message=f"{len(ok)}/{len(keys)} 已执行；失败：" + "；".join(f"{ACT_INFO[k]['label']}：{steps[k].get('message')}" for k in bad)[:400])
     acc = c.acc or {}
-    await telegram.send(f"🎁 <b>新号 Credit 任务 #{t['id']}</b>\n{telegram.esc(acc.get('name'))}\n已执行 {len(ok)}/{len(keys)}：{telegram.esc(summary or '-')}"
-                        "\n（等待 AWS 识别，以活动状态为准）")
+    await telegram.send(telegram.L("tg.push.creditDone", id=t["id"], acc=telegram.esc(acc.get("name")), done=len(ok), total=len(keys), summary=telegram.esc(summary or "-")))
 
 
 async def _do_onedrive_backup(c):
@@ -363,15 +362,15 @@ async def _do_onedrive_backup(c):
                 retry = "\n" + onedrive.retry_text(s.get("slot"))   # build 23：短周期按周期 1/4 重试，不跨到下一期
             except Exception:   # noqa: BLE001
                 retry = ""
-        await telegram.send(f"❌ <b>OneDrive 备份失败</b>（{ {'schedule': '定时', 'tg': 'Telegram', 'manual': '手动'}.get(trigger, trigger) }）\n"
-                            f"{telegram.esc(msg)}{retry}")
+        await telegram.send(telegram.L("tg.push.odFail", trigger=telegram.L(f"tg.trig.{trigger}") if trigger in ("schedule", "tg", "manual") else trigger,
+                                       msg=telegram.esc(msg), retry=retry))
         return
     kb = r["size"] / 1024
     msg = f"已备份到 OneDrive：{r['name']}（{kb:.1f} KB）" + (f"，清理旧备份 {len(r['pruned'])} 个" if r["pruned"] else "")
     _update(t["id"], status="done", message=msg, result={"name": r["name"], "size": r["size"], "pruned": len(r["pruned"])})
     security.audit("-", {"schedule": "schedule", "tg": "telegram"}.get(trigger, "session"), "onedrive-backup", msg)
     if trigger == "tg":
-        await telegram.send(f"✅ <b>OneDrive 备份完成</b>\n{telegram.esc(r['name'])}（{kb:.1f} KB）")
+        await telegram.send(telegram.L("tg.push.odOk", name=telegram.esc(r["name"]), kb=f"{kb:.1f}"))
 
 
 # 一次性长任务：任务类型 → 处理函数（c 为 _TaskCtx）。新增任务类型在这里登记即可。
@@ -422,8 +421,8 @@ async def _run_once(t):
         log(t["id"], "任务已停止，后续步骤未执行", "warn")
     except Exception as e:
         _update(t["id"], status="failed", message=str(e)[:500])
-        await telegram.send(f"❌ <b>任务 #{t['id']} {t['type']} 失败</b>\n{telegram.esc(name)}\n{telegram.esc(str(e)[:300])}"
-                            + ("\n（自动换 IP，不会自动重试）" if p.get("auto") else ""))
+        await telegram.send(telegram.L("tg.push.taskFailed", id=t["id"], type=t["type"], name=telegram.esc(name), err=telegram.esc(str(e)[:300]))
+                            + (telegram.L("tg.push.autoIpNoRetry") if p.get("auto") else ""))
 
 
 async def _reinstall(t, p, acc, prov, progress, name):
@@ -451,7 +450,7 @@ async def _reinstall(t, p, acc, prov, progress, name):
         cloudinit.save_instance_secret(t["account_id"], r.get("id") or p["instance_id"], r.get("name") or name, r.get("username"), r["password"])
     msg = "重装完成" + ("，新密码已存入「开机密码」" if r.get("password") else "") + (f"；{r['warning']}" if r.get("warning") else "")
     _update(t["id"], status="done", message=msg, result={k: r.get(k) for k in ("image_id", "username", "hint") if r.get(k)})
-    await telegram.send(f"✅ <b>重装系统完成</b>\n{telegram.esc(acc['name'])} / {telegram.esc(name)}")
+    await telegram.send(telegram.L("tg.push.reinstallOk", acc=telegram.esc(acc["name"]), name=telegram.esc(name)))
 
 
 async def _cf_delete(t, p, prov, checkpoint):
@@ -582,8 +581,8 @@ async def _migrate(t, p, progress):
         except Exception as e:
             notes.append(f"源实例停机失败：{str(e)[:120]}")
     _update(t["id"], status="done", message="；".join(notes)[:500])
-    await telegram.send(f"🚚 <b>迁移完成</b>\n{telegram.esc(src_acc['name'])} / {telegram.esc(p.get('name') or '')} → "
-                        f"{telegram.esc(dst_acc['name'])}\n" + telegram.esc("\n".join(notes)))
+    await telegram.send(telegram.L("tg.push.migrateOk", src=telegram.esc(src_acc["name"]), name=telegram.esc(p.get("name") or ""),
+                                     dst=telegram.esc(dst_acc["name"]), notes=telegram.esc("\n".join(notes))))
 
 
 TASK_RUNNERS = {"snatch": "_run_snatch"}
@@ -653,19 +652,19 @@ async def _reachability(m, st):
     core.ex("UPDATE monitors SET fail_count=? WHERE id=?", (n, m["id"]))
     if n != PING_FAIL_THRESHOLD:
         return
-    text = f"📵 <b>IP 不通</b>：{telegram.esc(m['name'])} <code>{m['public_ip']}:{m['check_port']}</code> 连续 {n} 次连接失败"
+    text = telegram.L("tg.push.ipDown", name=telegram.esc(m["name"]), ip=m["public_ip"], port=m["check_port"], n=n)
     running = core.q("SELECT id FROM tasks WHERE type='change_ip' AND status='running' AND account_id=? AND params LIKE ?",
                      (m["account_id"], f'%{m["instance_id"]}%'))
     if m.get("auto_change_ip") and not running:
         u = ip_change_usage(m["account_id"])
         if u["auto_used"] >= u["limit"]:
-            text += f"\n今日自动换 IP 已达上限（{u['limit']} 次/账号/天），本次不再更换"
+            text += telegram.L("tg.push.autoIpLimit", limit=u["limit"])
         else:
             tid = create_task("change_ip", m["account_id"], {"instance_id": m["instance_id"], "region": m["region"],
                                                              "kind": m["kind"], "name": m["name"], "reason": "IP 不通自动更换",
                                                              "auto": True})
             record_ip_change(m["account_id"], m["instance_id"], True, tid)
-            text += f"\n已自动创建换 IP 任务 #{tid}（今日第 {u['auto_used'] + 1}/{u['limit']} 次）"
+            text += telegram.L("tg.push.autoIpCreated", tid=tid, used=u["auto_used"] + 1, limit=u["limit"])
     await telegram.send(text)
 
 
@@ -679,19 +678,19 @@ async def monitor_loop():
             except Exception as e:
                 st = "unknown"
                 if m["last_state"] != "unknown":
-                    await telegram.send(f"⚠️ 监控查询失败：{telegram.esc(m['name'])}\n{telegram.esc(str(e)[:200])}")
+                    await telegram.send(telegram.L("tg.push.monitorFail", name=telegram.esc(m["name"]), err=telegram.esc(str(e)[:200])))
             last = m["last_state"] or ""
             user_op = last.startswith("user:")
             if st in DOWN and not user_op and last not in DOWN:
-                text = f"🚨 <b>实例异常</b>：{telegram.esc(m['name'])} 当前状态 {st}"
+                text = telegram.L("tg.push.instAbnormal", name=telegram.esc(m["name"]), st=st)
                 if m["auto_start"] and st in ("stopped", "deallocated"):
                     try:
                         await asyncio.to_thread(services.instance_action, m["account_id"], m["instance_id"],
                                                 "start", m["region"], m["kind"])
                         st = "user:start"
-                        text += "\n已自动发送启动指令"
+                        text += telegram.L("tg.push.autoStarted")
                     except Exception as e:
-                        text += f"\n自动启动失败：{telegram.esc(str(e)[:200])}"
+                        text += telegram.L("tg.push.autoStartFailed", err=telegram.esc(str(e)[:200]))
                 await telegram.send(text)
             try:
                 await _reachability(m, st)
@@ -756,7 +755,7 @@ async def schedule_loop():
             _last["expiry"] = time.time()
             try:
                 for a in credits.pending_notifications():
-                    await telegram.send("⏰ <b>即将到期</b>\n" + telegram.esc(credits.alert_line(a)))
+                    await telegram.send(telegram.L("tg.push.expiring") + "\n" + telegram.esc(credits.alert_line(a)))
             except Exception as e:
                 print("expiry check failed", e, flush=True)
         # v1.4 有 Credit 的 OCI / Azure 账号每天记录一次账单（免费接口），用于估算 Credit 已用额度

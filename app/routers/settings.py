@@ -4,6 +4,7 @@ import time
 from fastapi import APIRouter, Body, HTTPException
 
 from .. import core, security, tasks, telegram
+from ..i18n import msg
 from .common import VERSION
 
 router = APIRouter()
@@ -34,9 +35,9 @@ def save_settings(body: dict = Body(...)):
         try:
             body["auto_ip_daily_limit"] = int(body["auto_ip_daily_limit"])
         except (TypeError, ValueError):
-            raise HTTPException(400, "自动换 IP 每日上限需为整数")
+            raise HTTPException(400, msg("err.auto_ip_int"))
         if not 0 <= body["auto_ip_daily_limit"] <= 50:
-            raise HTTPException(400, "自动换 IP 每日上限 0~50")
+            raise HTTPException(400, msg("err.auto_ip_range"))
     for k in SETTING_KEYS:
         if k in body:
             core.set_setting(k, body[k])
@@ -57,9 +58,9 @@ def save_settings(body: dict = Body(...)):
 
 @router.post("/api/settings/tg-test")
 async def tg_test():
-    ok = await telegram.send("✅ TriCloud 测试消息：Telegram 通知已连通")
+    ok = await telegram.send(telegram.L("tg.testMsg"))
     if not ok:
-        raise HTTPException(400, "发送失败，请检查 Bot Token 与 Chat ID（需先给 Bot 发过一条消息）")
+        raise HTTPException(400, msg("err.tg_send_failed"))
     return {"ok": True}
 
 
@@ -73,9 +74,9 @@ def scripts():
 def save_script(body: dict = Body(...)):
     name, content = (body.get("name") or "").strip(), body.get("content") or ""
     if not name or not content.strip():
-        raise HTTPException(400, "名称和内容必填")
+        raise HTTPException(400, msg("err.name_content_required"))
     if len(content) > 16000:
-        raise HTTPException(400, "脚本过长（user-data 上限 16KB）")
+        raise HTTPException(400, msg("err.script_too_long"))
     if body.get("id"):
         core.ex("UPDATE scripts SET name=?, content=? WHERE id=?", (name, content, int(body["id"])))
         return {"id": int(body["id"])}
@@ -98,7 +99,7 @@ CREATE_DEFAULT_DROP = ("password", "confirm", "confirm_overage", "region")
 @router.get("/api/create-defaults/{provider}")
 def create_defaults_get(provider: str):
     if provider not in CREATE_DEFAULT_KINDS:
-        raise HTTPException(400, f"provider 只能是 {'/'.join(CREATE_DEFAULT_KINDS)}")
+        raise HTTPException(400, msg("err.provider_kinds", kinds="/".join(CREATE_DEFAULT_KINDS)))
     d = core.get_setting("default_create") or {}
     return (d.get(provider) if isinstance(d, dict) else None) or {}
 
@@ -108,12 +109,12 @@ def create_defaults_put(body: dict = Body(...)):
     import json as _json
     prov, vals = body.get("provider"), body.get("defaults")
     if prov not in CREATE_DEFAULT_KINDS:
-        raise HTTPException(400, f"provider 只能是 {'/'.join(CREATE_DEFAULT_KINDS)}")
+        raise HTTPException(400, msg("err.provider_kinds", kinds="/".join(CREATE_DEFAULT_KINDS)))
     if not isinstance(vals, dict):
-        raise HTTPException(400, "defaults 需为对象")
+        raise HTTPException(400, msg("err.defaults_object"))
     vals = {str(k): v for k, v in vals.items() if k not in CREATE_DEFAULT_DROP and not isinstance(v, (dict, list))}
     if len(_json.dumps(vals)) > 16000:
-        raise HTTPException(400, "默认参数过大")
+        raise HTTPException(400, msg("err.defaults_too_big"))
     d = core.get_setting("default_create") or {}
     d = dict(d) if isinstance(d, dict) else {}
     d[prov] = vals

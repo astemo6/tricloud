@@ -15,24 +15,24 @@ public class TasksActivity extends BaseActivity {
     private final Runnable tick = this::refresh;
 
     @Override
-    protected void onCreate(Bundle s) { super.onCreate(s); setTitle("任务"); refresh(); }
+    protected void onCreate(Bundle s) { super.onCreate(s); setTitle(getString(R.string.s1212)); refresh(); }
 
     @Override
     protected void onPause() { super.onPause(); body.removeCallbacks(tick); }
 
     static String tn(String t) {
         switch (t) {
-            case "snatch": return "抢机"; case "change_ip": return "换 IP"; case "resize": return "改配置"; case "ipv6": return "IPv6";
-            case "azure_create": return "创建 VM"; case "ensure_network": return "自动建网"; case "snapshot": return "快照（已移除）"; case "migrate": return "迁移"; case "cf_delete": return "删除 CDN 分发";
-            case "reinstall": return "重装系统"; case "net500m": return "下行 500Mbps"; case "foundry": return "部署 AI 模型"; case "billing_keep": return "保号账单";
-            case "aws_credit": return "新号 Credit"; case "onedrive_backup": return "OneDrive 备份";
+            case "snatch": return getString(R.string.s1213); case "change_ip": return getString(R.string.s0035); case "resize": return getString(R.string.s0042); case "ipv6": return "IPv6";
+            case "azure_create": return getString(R.string.s0015); case "ensure_network": return getString(R.string.s1214); case "snapshot": return getString(R.string.s1215); case "migrate": return getString(R.string.s0051); case "cf_delete": return getString(R.string.s1216);
+            case "reinstall": return getString(R.string.s0056); case "net500m": return getString(R.string.s1217); case "foundry": return getString(R.string.s1218); case "billing_keep": return getString(R.string.s1219);
+            case "aws_credit": return getString(R.string.s0013); case "onedrive_backup": return getString(R.string.s0985);
             default: return t;
         }
     }
 
     static String st(String s) {
         switch (s) {
-            case "running": return "运行中"; case "done": return "完成"; case "failed": return "失败"; case "stopped": return "已停止"; case "interrupted": return "已中断";
+            case "running": return getString(R.string.s1210); case "done": return getString(R.string.s0465); case "failed": return getString(R.string.s0728); case "stopped": return getString(R.string.s0313); case "interrupted": return getString(R.string.s1220);
             default: return s;
         }
     }
@@ -46,20 +46,20 @@ public class TasksActivity extends BaseActivity {
         Api.get(this, "/tasks", r -> {
             clear();
             JSONArray a = Api.arr(r);
-            muted(card(null), "任务完成 / 失败 / 停止会自动推送 Telegram；本页每 10 秒自动刷新。");
-            if (a.length() == 0) muted(card("暂无任务"), "");
+            muted(card(null), getString(R.string.s1221));
+            if (a.length() == 0) muted(card(getString(R.string.s1222)), "");
             SimpleDateFormat f = new SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault());
             for (int i = 0; i < a.length(); i++) {
                 JSONObject t = a.optJSONObject(i);
                 LinearLayout c = card("#" + t.optInt("id") + " " + tn(t.optString("type")) + "  [" + st(t.optString("status")) + "]");
-                text(c, str(t, "account_name", "-") + " · 尝试 " + t.optInt("attempts") + " 次\n" + str(t, "message", ""), 13, false);
-                muted(c, "更新于 " + f.format(new Date(t.optLong("updated") * 1000)));
+                text(c, getString(R.string.s1223, str(t, "account_name", "-"), t.optInt("attempts"), str(t, "message", "")), 13, false);
+                muted(c, getString(R.string.s1224, f.format(new Date(t.optLong("updated") * 1000))));
                 LinearLayout row = row(c);
                 int tid = t.optInt("id");
-                button(row, "日志", v -> openTask(tid));
+                button(row, getString(R.string.s1225), v -> openTask(tid));
                 if ("running".equals(t.optString("status")))
-                    button(row, "停止", v -> confirm("停止任务", "#" + tid, () -> Api.post(this, "/tasks/" + tid + "/stop", null, x -> refresh())));
-                else button(row, "删除", v -> Api.del(this, "/tasks/" + tid, x -> refresh()));
+                    button(row, getString(R.string.s0033), v -> confirm(getString(R.string.s1206), "#" + tid, () -> Api.post(this, "/tasks/" + tid + "/stop", null, x -> refresh())));
+                else button(row, getString(R.string.s0057), v -> Api.del(this, "/tasks/" + tid, x -> refresh()));
             }
             body.postDelayed(tick, 10000);
         });

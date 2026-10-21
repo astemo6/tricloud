@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Body, HTTPException
 
 from .. import core, port_traffic, tasks, telegram, traffic_guard
+from ..i18n import msg
 from .common import need_acc, run
 
 router = APIRouter()
@@ -22,7 +23,7 @@ def task_detail(tid: int, after: int = 0):
     t = core.q("SELECT t.*, a.name AS account_name, a.provider FROM tasks t LEFT JOIN accounts a ON a.id=t.account_id WHERE t.id=?",
                (tid,), one=True)
     if not t:
-        raise HTTPException(404, "任务不存在")
+        raise HTTPException(404, msg("err.task_not_found"))
     try:
         params = _json.loads(t.pop("params") or "{}")
     except ValueError:
@@ -66,7 +67,7 @@ def monitors():
 def add_monitor(body: dict = Body(...)):
     port = int(body.get("check_port") or 0)
     if port and not 0 < port < 65536:
-        raise HTTPException(400, "端口无效")
+        raise HTTPException(400, msg("err.port_invalid"))
     core.ex("INSERT INTO monitors(account_id,instance_id,region,kind,name,auto_start,last_state,check_port,auto_change_ip,public_ip) "
             "VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,instance_id) DO UPDATE SET auto_start=excluded.auto_start, "
             "name=excluded.name, check_port=excluded.check_port, auto_change_ip=excluded.auto_change_ip, public_ip=excluded.public_ip",
@@ -109,30 +110,30 @@ async def traffic_guard_save(body: dict = Body(...)):
     limit = float(body.get("limit_gb") or traffic_guard.DEFAULT_LIMIT[acc["provider"]])
     warn = int(body.get("warn_pct") or 80)
     if limit <= 0 or not 10 <= warn <= 99:
-        raise HTTPException(400, "上限需大于 0，预警比例 10~99")
+        raise HTTPException(400, msg("err.limit_warn_range"))
     action = body.get("action") if body.get("action") in traffic_guard.ACTIONS else "notify"
     try:
         mbps = float(body["throttle_mbps"]) if body.get("throttle_mbps") not in (None, "") else traffic_guard.THROTTLE_DEFAULT_MBPS
     except (TypeError, ValueError):
-        raise HTTPException(400, "限速 Mbps 需为数字")
+        raise HTTPException(400, msg("err.throttle_number"))
     if not traffic_guard.THROTTLE_MIN_MBPS <= mbps <= traffic_guard.THROTTLE_MAX_MBPS:
-        raise HTTPException(400, f"限速 {traffic_guard.THROTTLE_MIN_MBPS:g}~{traffic_guard.THROTTLE_MAX_MBPS:g} Mbps")
+        raise HTTPException(400, msg("err.throttle_range", lo=f"{traffic_guard.THROTTLE_MIN_MBPS:g}", hi=f"{traffic_guard.THROTTLE_MAX_MBPS:g}"))
     # v1.4：滚动窗口 / 方向 / 关机 M 小时 / 启停（都可省略，省略时与 v1.3 行为一致）
     mode = body.get("mode") or "monthly"
     if mode not in ("monthly", "rolling"):
-        raise HTTPException(400, "mode 只能是 monthly 或 rolling")
+        raise HTTPException(400, msg("err.mode_bad"))
     try:
         window = int(body["window_hours"]) if body.get("window_hours") not in (None, "") else 24
         shut = float(body["shutdown_hours"]) if body.get("shutdown_hours") not in (None, "") else 0.0
     except (TypeError, ValueError):
-        raise HTTPException(400, "窗口小时数 / 关机小时数需为数字")
+        raise HTTPException(400, msg("err.window_number"))
     if not 1 <= window <= 720:
-        raise HTTPException(400, "滚动窗口 1~720 小时")
+        raise HTTPException(400, msg("err.window_range"))
     if not 0 <= shut <= 720:
-        raise HTTPException(400, "关机时长 0~720 小时")
+        raise HTTPException(400, msg("err.shutdown_range"))
     direction = body.get("direction") or ("both" if body.get("count_in") else "out")
     if direction not in traffic_guard.DIRECTIONS:
-        raise HTTPException(400, "direction 只能是 out / in / both")
+        raise HTTPException(400, msg("err.direction_bad2"))
     enabled = 0 if body.get("enabled") in (False, 0, "0", "false") else 1
     core.ex("INSERT INTO traffic_guards(account_id,instance_id,region,kind,name,limit_gb,warn_pct,action,count_in,mode,window_hours,"
             "direction,shutdown_hours,enabled,throttle_mbps) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
@@ -163,7 +164,7 @@ def traffic_guard_patch(gid: int, body: dict = Body(...)):
     """v1.4：启用 / 停用规则；cancel_resume 取消待执行的自动开机；reset_state 清除「已触发 / 开机失败」状态。"""
     g = core.q("SELECT * FROM traffic_guards WHERE id=?", (gid,), one=True)
     if not g:
-        raise HTTPException(404, "规则不存在")
+        raise HTTPException(404, msg("err.rule_not_found"))
     if "enabled" in body:
         core.ex("UPDATE traffic_guards SET enabled=?, checked_at=0 WHERE id=?", (1 if body["enabled"] else 0, gid))
     if body.get("cancel_resume") and g.get("state") == "tripped":
@@ -186,7 +187,7 @@ def traffic_guard_patch(gid: int, body: dict = Body(...)):
 async def traffic_guard_check(gid: int):
     g = core.q("SELECT * FROM traffic_guards WHERE id=?", (gid,), one=True)
     if not g:
-        raise HTTPException(404, "规则不存在")
+        raise HTTPException(404, msg("err.rule_not_found"))
     txt = await run(traffic_guard.check, g)
     if txt:
         await telegram.send(txt)

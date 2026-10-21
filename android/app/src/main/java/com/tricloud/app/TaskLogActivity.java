@@ -37,7 +37,7 @@ public class TaskLogActivity extends BaseActivity {
     protected void onCreate(Bundle s) {
         super.onCreate(s);
         tid = getIntent().getIntExtra("tid", 0);
-        setTitle("任务 #" + tid);
+        setTitle(getString(R.string.s1203, tid));
         refresh();
     }
 
@@ -50,7 +50,7 @@ public class TaskLogActivity extends BaseActivity {
     private void build() {
         clear();
         LinearLayout c = card(null);
-        status = text(c, "读取中…", 16, true);
+        status = text(c, getString(R.string.s0527), 16, true);
         msg = text(c, "", 13, false);
         logScroll = new ScrollView(this);
         logView = new TextView(this);
@@ -82,7 +82,7 @@ public class TaskLogActivity extends BaseActivity {
             JSONObject t = Api.obj(r);
             running = "running".equals(t.optString("status"));
             String head = str(t, "type_name", t.optString("type")) + " · " + stName(t.optString("status")) + "\n"
-                    + str(t, "account_name", "-") + (t.optInt("attempts") > 1 ? " · 已尝试 " + t.optInt("attempts") + " 次" : "");
+                    + str(t, "account_name", "-") + (t.optInt("attempts") > 1 ? getString(R.string.s1204, t.optInt("attempts")) : "");
             status.setText(head);
             msg.setText(str(t, "message", ""));
             JSONArray a = t.optJSONArray("logs");
@@ -95,22 +95,22 @@ public class TaskLogActivity extends BaseActivity {
             }
             if (logs.length() > 60000) logs.delete(0, logs.length() - 50000);
             last = t.optLong("last_log_id", last);
-            logView.setText(logs.length() == 0 ? "暂无日志" : logs);
+            logView.setText(logs.length() == 0 ? getString(R.string.s1205) : logs);
             logScroll.post(() -> logScroll.fullScroll(android.view.View.FOCUS_DOWN));   // 自动滚到最底部
             JSONObject res = t.optJSONObject("result");
             StringBuilder sb = new StringBuilder();
             if (res != null) for (Iterator<String> it = res.keys(); it.hasNext(); ) { String k = it.next(); sb.append(k).append("：").append(res.opt(k)).append("\n"); }
             result.setText(sb.toString().trim());
             acts.removeAllViews();
-            if (running) button(acts, "停止任务", v -> confirm("停止任务", "停止任务 #" + tid + "？", () -> Api.post(this, "/tasks/" + tid + "/stop", null, x -> poll())));
-            else button(acts, "删除记录", v -> confirm("删除记录", "删除任务 #" + tid + " 及其日志？", () -> Api.del(this, "/tasks/" + tid, x -> finish())));
-            button(acts, "刷新", v -> refresh());
+            if (running) button(acts, getString(R.string.s1206), v -> confirm(getString(R.string.s1206), getString(R.string.s1207, tid), () -> Api.post(this, "/tasks/" + tid + "/stop", null, x -> poll())));
+            else button(acts, getString(R.string.s1208), v -> confirm(getString(R.string.s1208), getString(R.string.s1209, tid), () -> Api.del(this, "/tasks/" + tid, x -> finish())));
+            button(acts, getString(R.string.s0329), v -> refresh());
             if (running) body.postDelayed(tick, 2000);
         });
     }
 
     static String stName(String s) {
-        switch (s) { case "running": return "运行中"; case "done": return "完成"; case "failed": return "失败"; case "stopped": return "已停止"; case "interrupted": return "已中断（服务重启）"; default: return s; }
+        switch (s) { case "running": return getString(R.string.s1210); case "done": return getString(R.string.s0465); case "failed": return getString(R.string.s0728); case "stopped": return getString(R.string.s0313); case "interrupted": return getString(R.string.s1211); default: return s; }
     }
 
     static int colorOf(String level) {

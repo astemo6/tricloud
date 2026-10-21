@@ -103,6 +103,13 @@ final class SettingsPage: Page {
                 r4.button((m.0 == cur ? "● " : "") + m.1) { AppState.shared.setTheme(m.0); self.refresh() }
             }
 
+            let lg = self.card("界面语言")
+            let lgr = lg.row()
+            let curl = AppState.shared.lang
+            for m in [("system", "跟随系统"), ("zh", "中文"), ("en", "English")] {
+                lgr.button((m.0 == curl ? "● " : "") + m.1) { AppState.shared.setLang(m.0); self.refresh() }
+            }
+
             let od = self.card("OneDrive 备份")
             od.muted("把数据库和加密密钥用你的备份密码加密后，定期上传到你自己的 OneDrive「应用」文件夹（只授权这一个文件夹）。")
             od.row().button("打开 OneDrive 备份") { self.push(OneDrivePage()) }

@@ -1,4 +1,5 @@
 // TriCloud 前端 v1.6.0 · 基础：DOM 工具、API 请求、提示 / 弹窗、全局常量与共享状态（账号 / 设置 / 可添加云厂商）、区域、时间格式化
+import { getLang, t } from "./i18n.js";
 // v1.4 紧凑模式（每台设备单独记忆）尽早生效，避免闪烁
 try { if (localStorage.getItem("tc_compact") === "1") document.documentElement.classList.add("compact"); } catch (_) { /* ignore */ }
 export const $ = (s, r = document) => r.querySelector(s);
@@ -10,14 +11,15 @@ export let SETTINGS = {};
 // ---------------- API ----------------
 export async function api(path, opt = {}) {
   const init = { method: opt.method || "GET", headers: {}, credentials: "same-origin" };
+  init.headers["X-Lang"] = getLang();
   if (opt.body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(opt.body); }
   const r = await fetch("/api" + path, init);
-  if (r.status === 401) { sessionStorage.setItem("tc_back", location.hash); location.href = "/login"; throw new Error("未登录"); }
+  if (r.status === 401) { sessionStorage.setItem("tc_back", location.hash); location.href = "/login"; throw new Error(t("core.api.notLoggedIn")); }
   const j = await r.json().catch(() => ({}));
   if (r.status === 409 && j.detail && j.detail.guard) {   // v1.2 免费额度护栏：二次确认后带 confirm_overage 重发
-    const go = await modal("⚠️ 可能超出免费额度", `<ul class="guard">${j.detail.guard.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>
-      <p class="muted">免费额度以云厂商公示和你的账号类型为准。可在「设置 → 免费额度护栏」关闭此提醒。</p>`, null, "仍然继续", true);
-    if (!go) throw new Error("已取消");
+    const go = await modal(t("core.guard.title"), `<ul class="guard">${j.detail.guard.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>
+      <p class="muted">${t("core.guard.hint")}</p>`, null, t("core.guard.proceed"), true);
+    if (!go) throw new Error(t("common.cancelled"));
     return api(path, { ...opt, body: { ...(opt.body || {}), confirm_overage: true } });
   }
   if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : (j.detail && j.detail.msg) || r.statusText);
@@ -29,8 +31,8 @@ export const post = (p, b) => api(p, { method: "POST", body: b || {} });
 export const del = (p) => api(p, { method: "DELETE" });
 
 // 页面脚本出错时直接提示，避免点了按钮没反应（例如 Windows 客户端里）
-window.addEventListener("error", (e) => { try { toast("页面出错：" + (e.message || e.error), true); } catch (_) {} });
-window.addEventListener("unhandledrejection", (e) => { try { toast("操作出错：" + ((e.reason && e.reason.message) || e.reason), true); } catch (_) {} });
+window.addEventListener("error", (e) => { try { toast(t("core.err.page", { msg: e.message || e.error }), true); } catch (_) {} });
+window.addEventListener("unhandledrejection", (e) => { try { toast(t("core.err.action", { msg: (e.reason && e.reason.message) || e.reason }), true); } catch (_) {} });
 export function toast(msg, err) {
   const d = document.createElement("div");
   d.className = "toast" + (err ? " err" : "");
@@ -44,12 +46,12 @@ export async function act(btn, fn, okMsg) {
   catch (e) { toast(e.message, true); }
   finally { if (btn) btn.disabled = false; }
 }
-export function modal(title, bodyHtml, onOk, okText = "确定", danger = false, onOpen = null) {
+export function modal(title, bodyHtml, onOk, okText = t("common.ok"), danger = false, onOpen = null) {
   return new Promise((resolve) => {
     const bg = document.createElement("div");
     bg.className = "modal-bg";
     bg.innerHTML = `<div class="modal"><h3>${esc(title)}</h3><div class="mb">${bodyHtml}</div>
-      <div class="acts"><button class="btn" data-x>取消</button><button class="btn ${danger ? "danger" : "primary"}" data-ok>${esc(okText)}</button></div></div>`;
+      <div class="acts"><button class="btn" data-x>${t("common.cancel")}</button><button class="btn ${danger ? "danger" : "primary"}" data-ok>${esc(okText)}</button></div></div>`;
     document.body.appendChild(bg);
     applyShowWhen(bg); bg.addEventListener("change", () => applyShowWhen(bg));
     if (onOpen) onOpen(bg);
@@ -80,15 +82,16 @@ export function applyShowWhen(root) {
     el.style.display = okAll ? "" : "none";
   });
 }
-export const confirmBox = (t, msg, danger) => modal(t, `<p>${msg}</p>`, null, "确认", danger);
+export const confirmBox = (title, msg, danger) => modal(title, `<p>${msg}</p>`, null, t("common.confirm"), danger);
 export const form = (root) => Object.fromEntries([...root.querySelectorAll("[name]")].map((i) => [i.name, i.type === "checkbox" ? i.checked : i.value.trim()]));
-export const loading = () => (view.innerHTML = `<div class="empty"><span class="spin"></span> 加载中…</div>`);
+export const loading = () => (view.innerHTML = `<div class="empty"><span class="spin"></span>${t("common.loading")}</div>`);
 
 // ---------------- 路由 ----------------
+// 标签文案存 i18n key（语言切换不刷新页面，常量表若存译文会冻住旧语言），显示处 t() 翻译
 export const TABS = {
-  oci: [["instances", "实例"], ["create", "创建实例"], ["snatch", "自动抢机"], ["secgroup", "安全组"], ["storage", "存储"], ["objects", "对象存储"], ["traffic", "流量"], ["limits", "配额/网络"], ["billing", "账单"]],   // 区域订阅收在「配额/网络」页底部的折叠区（防误点）
-  aws: [["ec2", "EC2"], ["lightsail", "Lightsail"], ["regions", "区域"], ["cloudfront", "CloudFront"], ["quota", "配额"], ["recycle", "闲置资源"], ["billing", "账单"], ["credit", "新号 Credit"]],
-  azure: [["vms", "虚拟机"], ["azcreate", "创建 VM"], ["rgs", "资源组"], ["azquota", "配额"], ["foundry", "Foundry"], ["subscription", "订阅"], ["billing", "账单"]],
+  oci: [["instances", "tab.instances"], ["create", "tab.create"], ["snatch", "tab.snatch"], ["secgroup", "tab.secgroup"], ["storage", "tab.storage"], ["objects", "tab.objects"], ["traffic", "tab.traffic"], ["limits", "tab.limits"], ["billing", "tab.billing"]],   // 区域订阅收在「配额/网络」页底部的折叠区（防误点）
+  aws: [["ec2", "tab.ec2"], ["lightsail", "tab.lightsail"], ["regions", "tab.regions"], ["cloudfront", "tab.cloudfront"], ["quota", "tab.quota"], ["recycle", "tab.recycle"], ["billing", "tab.billing"], ["credit", "tab.credit"]],
+  azure: [["vms", "tab.vms"], ["azcreate", "tab.azcreate"], ["rgs", "tab.rgs"], ["azquota", "tab.azquota"], ["foundry", "tab.foundry"], ["subscription", "tab.subscription"], ["billing", "tab.billing"]],
 };
 // 已移除的标签：旧链接跳到新位置（#/oci/1/regionsub → 配额/网络）
 export const TAB_ALIAS = { oci: { regionsub: "limits" } };
@@ -141,6 +144,48 @@ export const REGION_CITY = {
   "polandcentral": "华沙", "italynorth": "米兰", "spaincentral": "马德里", "uaenorth": "迪拜", "qatarcentral": "多哈", "israelcentral": "以色列",
   "southafricanorth": "约翰内斯堡", "indonesiacentral": "雅加达", "malaysiawest": "吉隆坡", "newzealandnorth": "奥克兰",
 };
+// 同上的英文城市名（en 语言时用；与 REGION_CITY 的区域代码一一对应）
+export const REGION_CITY_EN = {
+  // AWS
+  "us-east-1": "N. Virginia", "us-east-2": "Ohio", "us-west-1": "N. California", "us-west-2": "Oregon",
+  "af-south-1": "Cape Town", "ap-east-1": "Hong Kong", "ap-east-2": "Taipei", "ap-south-1": "Mumbai", "ap-south-2": "Hyderabad",
+  "ap-northeast-1": "Tokyo", "ap-northeast-2": "Seoul", "ap-northeast-3": "Osaka",
+  "ap-southeast-1": "Singapore", "ap-southeast-2": "Sydney", "ap-southeast-3": "Jakarta", "ap-southeast-4": "Melbourne",
+  "ap-southeast-5": "Kuala Lumpur", "ap-southeast-6": "New Zealand", "ap-southeast-7": "Bangkok",
+  "ca-central-1": "Montreal", "ca-west-1": "Calgary",
+  "eu-central-1": "Frankfurt", "eu-central-2": "Zurich", "eu-north-1": "Stockholm", "eu-south-1": "Milan", "eu-south-2": "Spain",
+  "eu-west-1": "Ireland", "eu-west-2": "London", "eu-west-3": "Paris",
+  "il-central-1": "Tel Aviv", "me-central-1": "UAE", "me-south-1": "Bahrain", "mx-central-1": "Mexico", "sa-east-1": "São Paulo",
+  "cn-north-1": "Beijing", "cn-northwest-1": "Ningxia", "us-gov-west-1": "GovCloud West", "us-gov-east-1": "GovCloud East",
+  // OCI
+  "ap-sydney-1": "Sydney", "ap-melbourne-1": "Melbourne", "sa-saopaulo-1": "São Paulo", "sa-vinhedo-1": "Vinhedo",
+  "ca-montreal-1": "Montreal", "ca-toronto-1": "Toronto", "sa-santiago-1": "Santiago", "sa-valparaiso-1": "Valparaíso", "sa-bogota-1": "Bogotá",
+  "eu-paris-1": "Paris", "eu-marseille-1": "Marseille", "eu-frankfurt-1": "Frankfurt", "ap-hyderabad-1": "Hyderabad", "ap-mumbai-1": "Mumbai",
+  "ap-batam-1": "Batam", "il-jerusalem-1": "Jerusalem", "eu-milan-1": "Milan", "eu-turin-1": "Turin", "ap-osaka-1": "Osaka", "ap-tokyo-1": "Tokyo",
+  "ap-kulai-2": "Kulai", "mx-queretaro-1": "Querétaro", "mx-monterrey-1": "Monterrey", "af-casablanca-1": "Casablanca", "eu-amsterdam-1": "Amsterdam",
+  "me-riyadh-1": "Riyadh", "me-jeddah-1": "Jeddah", "eu-jovanovac-1": "Jovanovac", "ap-singapore-1": "Singapore", "ap-singapore-2": "West Singapore",
+  "af-johannesburg-1": "Johannesburg", "ap-seoul-1": "Seoul", "ap-chuncheon-1": "Chuncheon", "eu-madrid-1": "Madrid", "eu-madrid-3": "Madrid 3",
+  "eu-stockholm-1": "Stockholm", "eu-zurich-1": "Zurich", "me-abudhabi-1": "Abu Dhabi", "me-dubai-1": "Dubai", "uk-london-1": "London",
+  "uk-cardiff-1": "Newport", "us-ashburn-1": "Ashburn", "us-chicago-1": "Chicago", "us-phoenix-1": "Phoenix", "us-sanjose-1": "San Jose",
+  // Azure
+  "eastasia": "Hong Kong", "southeastasia": "Singapore", "japaneast": "East Japan", "japanwest": "West Japan", "koreacentral": "Central Korea", "koreasouth": "South Korea",
+  "australiaeast": "New South Wales", "australiasoutheast": "Victoria", "australiacentral": "Canberra", "centralindia": "Pune", "southindia": "Chennai", "westindia": "Mumbai",
+  "eastus": "Virginia", "eastus2": "Virginia 2", "westus": "California", "westus2": "Washington", "westus3": "Arizona", "centralus": "Iowa",
+  "northcentralus": "Illinois", "southcentralus": "Texas", "westcentralus": "Wyoming", "canadacentral": "Toronto", "canadaeast": "Quebec",
+  "brazilsouth": "São Paulo", "mexicocentral": "Querétaro", "northeurope": "Ireland", "westeurope": "Netherlands", "uksouth": "London", "ukwest": "Cardiff",
+  "francecentral": "Paris", "germanywestcentral": "Frankfurt", "switzerlandnorth": "Zurich", "norwayeast": "Oslo", "swedencentral": "Gävle",
+  "polandcentral": "Warsaw", "italynorth": "Milan", "spaincentral": "Madrid", "uaenorth": "Dubai", "qatarcentral": "Doha", "israelcentral": "Israel",
+  "southafricanorth": "Johannesburg", "indonesiacentral": "Jakarta", "malaysiawest": "Kuala Lumpur", "newzealandnorth": "Auckland",
+};
+// 本块会被测试抽出在无 window 的 node 里运行：无 TCI18N 时退回中文原文，页面里走 TCI18N
+const _t = (k, v) => {
+  if (typeof window !== "undefined" && window.TCI18N) return window.TCI18N.t(k, v);
+  let s = { "core.regions.brief": "{city} 等 {n} 个区域", "core.ov.count": "{total} 台（运行 {running}）",
+    "core.ov.lsPartial": "（部分区域失败）", "core.ov.queryFailed": "查询失败", "core.ov.regionsFailed": "{n} 个区域查询失败",
+    "core.acc.noMachines": "无机器", "core.acc.noMachinesDefault": "无机器 · 默认 {d}", "core.acc.defaultRegion": "{d}（默认区域）" }[k] || k;
+  for (const x in (v || {})) s = s.replaceAll("{" + x + "}", v[x]);
+  return s;
+};
 // OCI 可用域名形如「Uocm:NRT-AD-1」，用区域 Key 反查
 const OCI_KEY = { SYD: "ap-sydney-1", MEL: "ap-melbourne-1", GRU: "sa-saopaulo-1", VCP: "sa-vinhedo-1", YUL: "ca-montreal-1", YYZ: "ca-toronto-1",
   SCL: "sa-santiago-1", VAP: "sa-valparaiso-1", BOG: "sa-bogota-1", CDG: "eu-paris-1", MRS: "eu-marseille-1", FRA: "eu-frankfurt-1",
@@ -153,13 +198,15 @@ const OCI_KEY = { SYD: "ap-sydney-1", MEL: "ap-melbourne-1", GRU: "sa-saopaulo-1
 export function regionCity(code) {
   const c = String(code ?? "").trim().toLowerCase();
   if (!c) return "";
-  if (REGION_CITY[c]) return REGION_CITY[c];
+  // 本块禁止引用 i18n.js 导出名（tests/test_region_city.py 会抽出在 node 里独立运行）：只能用 window.TCI18N 守卫判断语言
+  const T = (typeof window !== "undefined" && window.TCI18N && window.TCI18N.getLang() === "en") ? REGION_CITY_EN : REGION_CITY;
+  if (T[c]) return T[c];
   let m = c.match(/^([a-z]{2}(?:-[a-z]+)+-\d+)[a-z]$/);           // AWS / Lightsail 可用区 ap-northeast-1a
-  if (m && REGION_CITY[m[1]]) return REGION_CITY[m[1]];
+  if (m && T[m[1]]) return T[m[1]];
   m = c.match(/([a-z]+-[a-z]+-\d+)-ad-\d+$/);                       // ap-tokyo-1-ad-1
-  if (m && REGION_CITY[m[1]]) return REGION_CITY[m[1]];
+  if (m && T[m[1]]) return T[m[1]];
   m = String(code).trim().match(/(?:^|:)([A-Z]{3})-AD-\d+$/i);       // Uocm:NRT-AD-1
-  if (m && OCI_KEY[m[1].toUpperCase()]) return REGION_CITY[OCI_KEY[m[1].toUpperCase()]];
+  if (m && OCI_KEY[m[1].toUpperCase()]) return T[OCI_KEY[m[1].toUpperCase()]];
   return "";
 }
 // 「ap-northeast-1 · 东京」；未知区域只返回代码（未转义，调用方自行 esc）
@@ -171,16 +218,16 @@ export const regionsBrief = (regions) => {
   const l = regions || [];
   if (!l.length) return "";
   if (l.length === 1) return regionLabel(l[0].region);
-  return `${regionCity(l[0].region) || l[0].region} 等 ${l.length} 个区域`;
+  return _t("core.regions.brief", { city: regionCity(l[0].region) || l[0].region, n: l.length });
 };
 // 多区域分布：「东京 2 · 新加坡 1」（城市名未知时用代码）
 export const regionsDist = (regions) => (regions || []).map((r) => `${regionCity(r.region) || r.region} ${r.count}`).join(" · ");
 // 实例数文字：「3 台（运行 2）· EC2 2 · Lightsail 1」；AWS Lightsail 全部失败显示「查询失败」，部分失败加注
 export const overviewCount = (o) => {
   const parts = [];
-  if (o.provider === "aws") parts.push(`EC2 ${o.ec2}`, `Lightsail ${o.lightsail_failed ? (o.lightsail ? `${o.lightsail}（部分区域失败）` : "查询失败") : o.lightsail}`);
-  if (o.errors && o.errors.length) parts.push(`${o.errors.length} 个区域查询失败`);
-  return `${o.total} 台（运行 ${o.running}）` + (parts.length ? "· " + parts.join(" · ") : "");
+  if (o.provider === "aws") parts.push(`EC2 ${o.ec2}`, `Lightsail ${o.lightsail_failed ? (o.lightsail ? `${o.lightsail}${_t("core.ov.lsPartial")}` : _t("core.ov.queryFailed")) : o.lightsail}`);
+  if (o.errors && o.errors.length) parts.push(_t("core.ov.regionsFailed", { n: o.errors.length }));
+  return _t("core.ov.count", { total: o.total, running: o.running }) + (parts.length ? "· " + parts.join(" · ") : "");
 };
 // build 25：GET /accounts 每个账号带 machine_regions（有机器的区域，台数多的在前；null = 还没扫描过，[] = 没有机器）
 // 机器最多的区域（Azure 按订阅管理，不用区域）
@@ -190,9 +237,9 @@ export const machineRegion = (acc) => { const l = acc && acc.provider !== "azure
 export const accountRegionText = (acc) => {
   const l = acc.machine_regions;
   if (l && l.length) return regionsBrief(l);
-  if (acc.provider === "azure") return l ? "无机器" : "";
+  if (acc.provider === "azure") return l ? _t("core.acc.noMachines") : "";
   const d = acc.region ? regionLabel(acc.region) : "-";
-  return l ? `无机器 · 默认 ${d}` : `${d}（默认区域）`;
+  return l ? _t("core.acc.noMachinesDefault", { d }) : _t("core.acc.defaultRegion", { d });
 };
 // 当前区域：用户手动选过的 > 机器最多的区域 > 账号默认区域
 export const regionOf = (acc) => localStorage.getItem("tc_region_" + acc.id) || machineRegion(acc) || acc.region || "";
@@ -234,7 +281,7 @@ export async function ensureLsRegion(acc) {
   if (!rs.length || rs.includes(cur)) return cur;
   const to = rs.includes(acc.region) ? acc.region : rs[0];
   localStorage.setItem("tc_region_" + acc.id, to);
-  toast(`Lightsail 不支持 ${regionLabel(cur)}，已切换到 ${regionLabel(to)}`);
+  toast(t("core.ls.unsupported", { from: regionLabel(cur), to: regionLabel(to) }));
   return to;
 }
 export async function regionSelect(acc, onChange, service) {
@@ -252,7 +299,7 @@ export async function regionSelect(acc, onChange, service) {
     } catch (e) { /* 保持默认 */ }
     sel.onchange = () => { localStorage.setItem("tc_region_" + acc.id, sel.value); onChange(); };
   });
-  return `<select id="${id}" title="区域">${regionOpt(regionOf(acc), true)}</select>`;
+  return `<select id="${id}" title="${t("core.region.title")}">${regionOpt(regionOf(acc), true)}</select>`;
 }
 export const rq = (acc) => (NOREG(acc) ? "" : `region=${encodeURIComponent(regionOf(acc))}`);
 export const fmtTime = (t) => (t ? new Date(t * 1000).toLocaleTimeString([], { hour12: false }) : "");

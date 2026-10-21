@@ -38,8 +38,10 @@ _ls_static = None
 
 
 def ls_region_msg(region):
+    from ..i18n import get_lang, msg
     city = AWS_CITY.get(region)
-    return f"Lightsail 不支持该区域（{city + ' ' if city else ''}{region}），请换区域"
+    city_part = (city + " ") if (city and get_lang() == "zh") else ""
+    return msg("err.ls_region", city=city_part, region=region)
 
 
 # AWS 默认启用（Opt-in status: Not required）的 17 个商用区域，以

@@ -18,7 +18,7 @@ public class LoginActivity extends BaseActivity {
     @Override
     protected void onCreate(Bundle s) {
         super.onCreate(s);
-        setTitle("TriCloud 登录");
+        setTitle(getString(R.string.s0943));
         if (!Api.token().isEmpty() && !Api.server().isEmpty()) {
             startActivity(new Intent(this, MainActivity.class));
             finish();
@@ -31,26 +31,26 @@ public class LoginActivity extends BaseActivity {
     protected void refresh() {
         clear();
         LinearLayout c = card("☁️ TriCloud");
-        muted(c, "OCI · AWS · Azure 多云管理。直连你自托管的面板，凭证不经过第三方。");
-        com.google.android.material.textfield.TextInputLayout t1 = inputLayout("面板地址", "https://panel.example.com",
+        muted(c, getString(R.string.s0944));
+        com.google.android.material.textfield.TextInputLayout t1 = inputLayout(getString(R.string.s0945), "https://panel.example.com",
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         server = t1.getEditText();
         server.setText(Api.server());
         c.addView(t1);
-        com.google.android.material.textfield.TextInputLayout t2 = inputLayout("面板密码", null,
+        com.google.android.material.textfield.TextInputLayout t2 = inputLayout(getString(R.string.s0946), null,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         pw = t2.getEditText();
         c.addView(t2);
-        com.google.android.material.textfield.TextInputLayout t3 = inputLayout("二次验证码", "未开启 2FA 留空",
+        com.google.android.material.textfield.TextInputLayout t3 = inputLayout(getString(R.string.s0947), getString(R.string.s0948),
                 InputType.TYPE_CLASS_NUMBER);
         otp = t3.getEditText();
         c.addView(t3);
-        bigButton("登录", v -> login());
+        bigButton(getString(R.string.s0949), v -> login());
     }
 
     private void login() {
         String url = server.getText().toString().trim().replaceAll("/+$", "");
-        if (!url.startsWith("http")) { toast("请填写完整地址（含 https://）"); return; }
+        if (!url.startsWith("http")) { toast(getString(R.string.s0950)); return; }
         Api.save(url, "");
         try {
             JSONObject b = new JSONObject().put("password", pw.getText().toString()).put("client", "app")
@@ -64,5 +64,5 @@ public class LoginActivity extends BaseActivity {
     }
 
     @Override
-    public void toLogin() { toast("密码或验证码错误（开启了 2FA 需填验证码）"); }
+    public void toLogin() { toast(getString(R.string.s0951)); }
 }

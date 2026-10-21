@@ -3,6 +3,7 @@ API Token 只能 GET 状态与列表、调用立即备份；绑定、设置、�
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Request
 
 from .. import core, onedrive, security, services, tasks
+from ..i18n import msg
 from .common import client_ip, run
 
 router = APIRouter()
@@ -23,11 +24,11 @@ def running_task():
 def start_backup(trigger="manual"):
     """创建一个 onedrive_backup 任务（同时只允许一个）。返回任务 id；已在运行则抛 409。"""
     if running_task():
-        raise HTTPException(409, "已有 OneDrive 备份在运行，请等它结束")
+        raise HTTPException(409, msg("err.od_backup_running"))
     if not onedrive.bound():
-        raise HTTPException(400, "尚未绑定 OneDrive")
+        raise HTTPException(400, msg("err.od_not_bound"))
     if not onedrive.password():
-        raise HTTPException(400, "尚未设置备份密码")
+        raise HTTPException(400, msg("err.od_no_password"))
     return tasks.create_task("onedrive_backup", 0, {"name": "OneDrive 备份", "trigger": trigger})
 
 
@@ -72,9 +73,9 @@ def od_unbind(confirm: bool = False, pending_only: bool = False):
         onedrive.bind_cancel()
         return {"ok": True}
     if not confirm:
-        raise HTTPException(400, "解绑会删除本地保存的 OneDrive 授权（OneDrive 上的备份文件不会删除），需 confirm=true")
+        raise HTTPException(400, msg("err.od_unbind_confirm"))
     if running_task():
-        raise HTTPException(409, "OneDrive 备份正在运行，请等它结束再解绑")
+        raise HTTPException(409, msg("err.od_unbind_running"))
     onedrive.unbind()
     return {"ok": True}
 
@@ -88,7 +89,7 @@ def od_backup_now():
 @router.get("/api/onedrive/backups")
 async def od_list():
     if not onedrive.bound():
-        raise HTTPException(400, "尚未绑定 OneDrive")
+        raise HTTPException(400, msg("err.od_not_bound"))
     items = await _call(onedrive.list_backups)
     return {"items": items, "keep": onedrive.cfg()["keep"]}
 
@@ -96,16 +97,16 @@ async def od_list():
 @router.post("/api/onedrive/restore")
 async def od_restore(req: Request, bg: BackgroundTasks, body: dict = Body(...)):
     if not body.get("confirm"):
-        raise HTTPException(400, "恢复会用备份覆盖当前全部数据（账号、设置、任务），需 confirm")
+        raise HTTPException(400, msg("err.od_restore_confirm"))
     item = str(body.get("item_id") or "").strip()
     if not item:
-        raise HTTPException(400, "缺少参数：item_id")
+        raise HTTPException(400, msg("err.missing_param", k="item_id"))
     if not body.get("password"):
-        raise HTTPException(400, "请输入备份密码")
+        raise HTTPException(400, msg("err.od_enter_password"))
     if not onedrive.bound():
-        raise HTTPException(400, "尚未绑定 OneDrive")
+        raise HTTPException(400, msg("err.od_not_bound"))
     if running_task():
-        raise HTTPException(409, "OneDrive 备份正在运行，请等它结束再恢复")
+        raise HTTPException(409, msg("err.od_restore_running"))
     r = await _call(onedrive.restore, item, str(body["password"]))
     services._cache.clear()
     core.drop_all_sessions()   # 备份里的旧会话一律作废，所有设备重新登录

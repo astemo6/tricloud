@@ -4,6 +4,7 @@ import time
 from fastapi import APIRouter, Body, HTTPException
 
 from .. import cloudinit, overview, services, tasks
+from ..i18n import msg
 from .common import _created, _public_guard, _req, call, guarded, need_acc, P, run
 
 router = APIRouter()
@@ -79,7 +80,7 @@ async def cf_op(acc_id: int, body: dict = Body(...)):
         return await run(p.cf_set_enabled, body["id"], op == "enable")
     if op == "delete":
         return await run(p.cf_delete, body["id"])
-    raise HTTPException(400, "无效操作")
+    raise HTTPException(400, msg("err.invalid_op"))
 
 
 _quota_cache = {}
@@ -109,7 +110,7 @@ async def cf_invalidate(acc_id: int, body: dict = Body(...)):
     need_acc(acc_id, "aws")
     did = body.get("distribution_id") or body.get("id")
     if not did:
-        raise HTTPException(400, "缺少 distribution_id")
+        raise HTTPException(400, msg("err.missing_distribution"))
     paths = body.get("paths") or []
     if isinstance(paths, str):
         paths = [x for x in paths.replace(",", "\n").split("\n")]
@@ -148,9 +149,9 @@ async def cf_plan(acc_id: int, body: dict = Body(...)):
     tier = (body.get("plan_tier") or body.get("tier") or "").strip().upper()
     from ..providers.aws_provider import CF_PLANS
     if tier not in CF_PLANS:
-        raise HTTPException(400, f"套餐只能是 {' / '.join(CF_PLANS)}")
+        raise HTTPException(400, msg("err.cf_plan_only", plans=" / ".join(CF_PLANS)))
     if CF_PLANS[tier]["paid"] and not body.get("confirm"):
-        raise HTTPException(400, f"{tier} 套餐按月计费（{CF_PLANS[tier]['price']}），需确认")
+        raise HTTPException(400, msg("err.cf_plan_paid", tier=tier, price=CF_PLANS[tier]["price"]))
     try:
         return await run(services.provider(acc_id).cf_set_plan, body["distribution_id"], tier)
     except ValueError as e:
@@ -163,7 +164,7 @@ async def cf_delete_v15(acc_id: int, dist_id: str, confirm: bool = False):
     仍启用或部署中：创建后台任务，先停用并等待部署完成（Deployed）再删除，否则 AWS 会拒绝。"""
     need_acc(acc_id, "aws")
     if not confirm:
-        raise HTTPException(400, "删除分发需确认")
+        raise HTTPException(400, msg("err.cf_delete_confirm"))
     st = await run(services.provider(acc_id).cf_state, dist_id)
     if not st["enabled"] and st["status"] == "Deployed":
         await run(services.provider(acc_id).cf_delete, dist_id)
@@ -196,7 +197,7 @@ async def ls_ip_op(acc_id: int, body: dict = Body(...)):
     if op == "release":
         _req(body, "name")
         return await call(p.ls_release_ip, body["name"])
-    raise HTTPException(400, "op 无效")
+    raise HTTPException(400, msg("err.op_invalid"))
 
 
 @router.get("/api/accounts/{acc_id}/lightsail/ports")
@@ -213,9 +214,9 @@ async def ls_port_op(acc_id: int, body: dict = Body(...)):
     try:
         a, b = int(body.get("from_port")), int(body.get("to_port") or body.get("from_port"))
     except (TypeError, ValueError):
-        raise HTTPException(400, "请填写端口")
+        raise HTTPException(400, msg("err.port_required"))
     if not (0 <= a <= b <= 65535):
-        raise HTTPException(400, "端口范围无效")
+        raise HTTPException(400, msg("err.port_range_invalid"))
     p = P(acc_id, body.get("region"))
     if body.get("op") == "close":
         return await call(p.ls_close_port, body["instance"], proto, a, b)

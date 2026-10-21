@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Body, HTTPException
 
 from .. import core, services
+from ..i18n import msg
 from .. import credits as creditsm
 from .common import _num_or_none, _valid_date, need_acc, run
 
@@ -50,7 +51,7 @@ def _credit_fields(body, partial=False):
     if not partial or "amount" in body:
         amt = _num_or_none(body.get("amount"), "amount")
         if amt is None:
-            raise HTTPException(400, "初始额度必填")
+            raise HTTPException(400, msg("err.initial_required"))
         out["amount"] = amt
     for k in ("start_date", "expire_date"):
         if not partial or k in body:
@@ -78,7 +79,7 @@ def credits_manual_add(acc_id: int, body: dict = Body(...)):
 def credits_manual_edit(acc_id: int, cid: int, body: dict = Body(...)):
     need_acc(acc_id)
     if not core.q("SELECT 1 FROM aws_credits WHERE id=? AND account_id=?", (cid, acc_id), one=True):
-        raise HTTPException(404, "Credit 不存在")
+        raise HTTPException(404, msg("err.credit_not_found"))
     f = _credit_fields(body, partial=True)
     if f:
         core.ex(f"UPDATE aws_credits SET {', '.join(k + '=?' for k in f)} WHERE id=? AND account_id=?", (*f.values(), cid, acc_id))

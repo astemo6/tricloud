@@ -263,7 +263,7 @@ struct ButtonGrid: View {
                     Haptics.tap()
                     b.1()
                 } label: {
-                    Text(b.0)
+                    Text(L(b.0))
                         .font(.footnote.weight(.medium))
                         .lineLimit(2)
                         .minimumScaleFactor(0.8)
@@ -279,10 +279,10 @@ struct ButtonGrid: View {
                 Menu {
                     ForEach(m.1.indices, id: \.self) { j in
                         let it = m.1[j]
-                        Button(role: isDanger(it.0) ? .destructive : nil) { it.1() } label: { Text(it.0) }
+                        Button(role: isDanger(it.0) ? .destructive : nil) { it.1() } label: { Text(L(it.0)) }
                     }
                 } label: {
-                    Label(m.0, systemImage: "ellipsis.circle")
+                    Label(L(m.0), systemImage: "ellipsis.circle")
                         .font(.footnote.weight(.medium))
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
@@ -316,18 +316,18 @@ struct CardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let t = card.title {
-                Text(t).font(.headline).textSelection(.enabled)
+                Text(L(t)).font(.headline).textSelection(.enabled)
             }
             ForEach(card.items) { e in
                 switch e.item {
                 case .text(let s, let size, let bold):
                     if !s.isEmpty {
-                        Text(s).font(CardView.font(size, bold)).textSelection(.enabled)
+                        Text(L(s)).font(CardView.font(size, bold)).textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 case .muted(let s):
                     if !s.isEmpty {
-                        Text(s).font(.footnote).foregroundColor(.secondary).textSelection(.enabled)
+                        Text(L(s)).font(.footnote).foregroundColor(.secondary).textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 case .row(let r):
@@ -397,7 +397,7 @@ struct PageView: View {
                     Haptics.tap()
                     action()
                 } label: {
-                    Text(label).font(.body.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 36)
+                    Text(L(label)).font(.body.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 36)
                 }
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.roundedRectangle(radius: 12))
@@ -424,7 +424,7 @@ struct LiveTextView: View {
     var font: Font = .subheadline
     var body: some View {
         if !live.text.isEmpty {
-            Text(live.text).font(font).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            Text(L(live.text)).font(font).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -435,7 +435,7 @@ struct MeterView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if !label.isEmpty {
-                Text(label).font(.footnote).foregroundColor(ratio > 1 ? .red : .secondary)
+                Text(L(label)).font(.footnote).foregroundColor(ratio > 1 ? .red : .secondary)
             }
             ProgressView(value: min(max(ratio, 0), 1))
                 .tint(ratio > 1 ? .red : ratio >= 0.8 ? .orange : .accentColor)
@@ -457,7 +457,7 @@ struct ChipBarView: View {
                             Haptics.select()
                             bar.pick(it.0)
                         } label: {
-                            Text(it.1)
+                            Text(L(it.1))
                                 .font(.subheadline.weight(on ? .semibold : .regular))
                                 .lineLimit(1)
                                 .padding(.horizontal, 14).padding(.vertical, 7)
@@ -490,7 +490,7 @@ struct NavRowView: View {
                     .frame(width: 30, height: 30)
                     .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(item.tint))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title).font(.body).foregroundColor(.primary).lineLimit(1)
+                    Text(L(item.title)).font(.body).foregroundColor(.primary).lineLimit(1)
                     LiveTextView(live: item.detail, font: .caption)
                         .foregroundColor(.secondary)
                 }
@@ -535,7 +535,7 @@ struct PageChrome: ViewModifier {
                     if !items.isEmpty {
                         Menu {
                             ForEach(items.indices, id: \.self) { i in
-                                Button(items[i].0) { items[i].1() }
+                                Button(L(items[i].0)) { items[i].1() }
                             }
                         } label: {
                             Image(systemName: "ellipsis.circle")

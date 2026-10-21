@@ -1,6 +1,8 @@
 package com.tricloud.app;
 
+import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.text.InputType;
@@ -45,6 +47,37 @@ import java.util.List;
 
 /** 纯代码构建 UI 的基础类：列表、卡片、确认框、表单弹窗。 */
 public abstract class BaseActivity extends AppCompatActivity {
+    /** 界面语言：读 tricloud 偏好 app_lang（system/zh/en），非跟随时包装 Context 语言 */
+    @Override
+    protected void attachBaseContext(Context base) {
+        String lang = base.getSharedPreferences("tricloud", Context.MODE_PRIVATE).getString("app_lang", "system");
+        if (!"system".equals(lang)) {
+            java.util.Locale loc = new java.util.Locale("zh".equals(lang) ? "zh" : "en");
+            Configuration cfg = new Configuration(base.getResources().getConfiguration());
+            cfg.setLocale(loc);
+            base = base.createConfigurationContext(cfg);
+        }
+        super.attachBaseContext(base);
+    }
+
+    private String navLabel(String key) {
+        switch (key) {
+            case "accounts": return getString(R.string.nav_accounts);
+            case "health": return getString(R.string.nav_health);
+            case "freecheck": return getString(R.string.nav_freecheck);
+            case "traffic": return getString(R.string.nav_traffic);
+            case "tasks": return getString(R.string.nav_tasks);
+            case "monitors": return getString(R.string.nav_monitors);
+            case "secrets": return getString(R.string.nav_secrets);
+            case "scripts": return getString(R.string.nav_scripts);
+            case "dns": return getString(R.string.nav_dns);
+            case "security": return getString(R.string.nav_security);
+            case "onedrive": return getString(R.string.nav_onedrive);
+            case "settings": return getString(R.string.nav_settings);
+            default: return key;
+        }
+    }
+
     protected LinearLayout body;
     protected SwipeRefreshLayout swipe;
     protected LinearProgressIndicator busy;
@@ -61,6 +94,7 @@ public abstract class BaseActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle s) {
+        Regions.EN = getResources().getConfiguration().getLocales().get(0).getLanguage().equals("en");
         Api.init(this);
         applyTheme();
         super.onCreate(s);
@@ -141,7 +175,7 @@ public abstract class BaseActivity extends AppCompatActivity {
         logo.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_HeadlineSmall);
         head.addView(logo);
         TextView sub = new TextView(this);
-        sub.setText("OCI · AWS · Azure 多云面板");
+        sub.setText(getString(R.string.s0817));
         sub.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodySmall);
         head.addView(sub);
         nav.addHeaderView(head);
@@ -183,7 +217,7 @@ public abstract class BaseActivity extends AppCompatActivity {
             if (kv[0].equals(navKey())) it.setChecked(true);
             return it;
         };
-        add.apply(m, new String[]{"home", "🏠 总览"});
+        add.apply(m, new String[]{"home", getString(R.string.s0818)});
         JSONArray accs = Api.accounts == null ? new JSONArray() : Api.accounts;
         String[] dots = {"🟥", "🟧", "🟦", "🟩"};
         for (int p = 0; p < MainActivity.PROVS.length; p++) {
@@ -192,14 +226,14 @@ public abstract class BaseActivity extends AppCompatActivity {
                 JSONObject a = accs.optJSONObject(i);
                 if (!MainActivity.PROVS[p].equals(a.optString("provider"))) continue;
                 if (sm == null) sm = m.addSubMenu(0, nid[0]++, nid[0], provHeader(p));
-                android.view.MenuItem it = add.apply(sm, new String[]{"acc_" + a.optInt("id"), dots[p] + "  " + a.optString("name") + (a.optInt("disabled") == 1 ? "（已停用）" : "")});
+                android.view.MenuItem it = add.apply(sm, new String[]{"acc_" + a.optInt("id"), dots[p] + "  " + a.optString("name") + (a.optInt("disabled") == 1 ? getString(R.string.s0819) : "")});
                 navAccs.put(it.getItemId(), a);
             }
         }
-        android.view.SubMenu mg = m.addSubMenu(0, nid[0]++, nid[0], "管理");
-        for (String[] kv : NAV_PAGES) add.apply(mg, kv);
-        android.view.SubMenu out = m.addSubMenu(0, nid[0]++, nid[0], "账户");
-        add.apply(out, new String[]{"logout", "🚪 退出登录"}).setCheckable(false);
+        android.view.SubMenu mg = m.addSubMenu(0, nid[0]++, nid[0], getString(R.string.s0725));
+        for (String[] kv : NAV_PAGES) add.apply(mg, new String[]{kv[0], navLabel(kv[0])});
+        android.view.SubMenu out = m.addSubMenu(0, nid[0]++, nid[0], getString(R.string.s0783));
+        add.apply(out, new String[]{"logout", getString(R.string.s0820)}).setCheckable(false);
     }
 
     private static final int[] PROV_LOGOS = {R.drawable.logo_oci, R.drawable.logo_aws, R.drawable.logo_azure};
@@ -245,7 +279,7 @@ public abstract class BaseActivity extends AppCompatActivity {
         drawer.closeDrawer(GravityCompat.START);
         if (k.equals(navKey())) return;
         if ("logout".equals(k)) {
-            confirm("退出登录", "退出后需要重新输入面板地址和密码。", () -> Api.post(this, "/logout", null, r -> toLogin()));
+            confirm(getString(R.string.s0821), getString(R.string.s0822), () -> Api.post(this, "/logout", null, r -> toLogin()));
             return;
         }
         JSONObject acc = navAccs.get(it.getItemId());
@@ -272,17 +306,17 @@ public abstract class BaseActivity extends AppCompatActivity {
     public void copy(String label, String text) {
         android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
         if (cm != null) cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text));
-        toast("已复制");
+        toast(getString(R.string.s0098));
     }
 
     public void info(String title, String msg) {
-        new MaterialAlertDialogBuilder(this).setTitle(title).setMessage(msg).setPositiveButton("好的", null).show();
+        new MaterialAlertDialogBuilder(this).setTitle(title).setMessage(msg).setPositiveButton(getString(R.string.s0110), null).show();
     }
 
     /** 只显示一次的敏感内容（Token、开机密码）：可复制。 */
     public void secretDialog(String title, String msg, String value) {
         new MaterialAlertDialogBuilder(this).setTitle(title).setMessage(msg + "\n\n" + value)
-                .setPositiveButton("复制", (d, w) -> copy(title, value)).setNegativeButton("关闭", null).show();
+                .setPositiveButton(getString(R.string.s0500), (d, w) -> copy(title, value)).setNegativeButton(getString(R.string.s0074), null).show();
     }
 
     public static String fmtTime(long sec) {
@@ -309,28 +343,27 @@ public abstract class BaseActivity extends AppCompatActivity {
                 catch (Exception e) { return new JSONObject().put("error", e.getMessage()); }
             }, tr -> {
                 JSONObject t = Api.obj(tr);
-                String use = t.has("error") ? "读取流量失败：" + t.optString("error") : "本月（" + str(t, "period", "-") + "）出站 " + t.optString("out_gb") + " GB，入站 " + t.optString("in_gb") + " GB。";
+                String use = t.has("error") ? getString(R.string.s0823, t.optString("error")) : getString(R.string.s0824, str(t, "period", "-"), t.optString("out_gb"), t.optString("in_gb"));
                 String dir = str(gg, "direction", gg.optInt("count_in") == 1 ? "both" : "out");
                 List<Field> f = new ArrayList<>();
-                f.add(Field.select("mode", "统计方式", str(gg, "mode", "monthly"), new String[]{"monthly", "rolling"}, new String[]{"本月累计", "滚动窗口（最近 N 小时）"}));
-                f.add(Field.num("window_hours", "窗口小时数 N（滚动窗口时生效）", str(gg, "window_hours", "24")));
-                f.add(Field.select("direction", "方向", dir, new String[]{"out", "in", "both"}, new String[]{"出站", "入站", "双向（出+入）"}));
-                f.add(Field.num("limit_gb", "上限 GB（免费出站 " + free + " GB/月）", str(gg, "limit_gb", free)));
-                f.add(Field.num("warn_pct", "预警比例 %", str(gg, "warn_pct", "80")));
-                f.add(Field.select("action", "到达上限后", str(gg, "action", "notify"), new String[]{"notify", "stop", "throttle"},
-                        new String[]{"只推送", "推送并自动停机", "推送并限速（需在实例上装 agent）"}));
-                f.add(Field.num("shutdown_hours", "关机多少小时后自动开机（0 = 不自动开机，自动停机时生效）", str(gg, "shutdown_hours", "0")));
-                f.add(Field.num("throttle_mbps", "限速到 Mbps（出站，0.1–10000，推送并限速时生效）", str(gg, "throttle_mbps", "1")));
-                f.add(Field.check("acct_enabled", "流量明细：按端口 / 服务统计（同一个 agent，只计数不拦截）", gg.optInt("acct_enabled") == 1));
-                f.add(Field.check("enabled", "启用这条规则", gg.optInt("enabled", 1) != 0));
-                form("流量守护 · " + name, use + "\n月度模式每 30 分钟、滚动窗口每 10 分钟查一次平台指标（免费，有 5~15 分钟延迟）。到预警比例推送 Telegram；自动开机失败只告警、不重试。"
-                        + "\n推送并限速：由实例上的 agent（bash + tc，每 5 分钟）执行，SSH 端口不限速，回落或下月自动解除；保存后在「agent / 明细」里复制安装命令。", f, "保存", v -> {
+                f.add(Field.select("mode", getString(R.string.s0825), str(gg, "mode", "monthly"), new String[]{"monthly", "rolling"}, new String[]{getString(R.string.s0826), getString(R.string.s0827)}));
+                f.add(Field.num("window_hours", getString(R.string.s0828), str(gg, "window_hours", "24")));
+                f.add(Field.select("direction", getString(R.string.s0272), dir, new String[]{"out", "in", "both"}, new String[]{getString(R.string.s0256), getString(R.string.s0255), getString(R.string.s0829)}));
+                f.add(Field.num("limit_gb", getString(R.string.s0830, free), str(gg, "limit_gb", free)));
+                f.add(Field.num("warn_pct", getString(R.string.s0831), str(gg, "warn_pct", "80")));
+                f.add(Field.select("action", getString(R.string.s0832), str(gg, "action", "notify"), new String[]{"notify", "stop", "throttle"},
+                        new String[]{getString(R.string.s0833), getString(R.string.s0834), getString(R.string.s0835)}));
+                f.add(Field.num("shutdown_hours", getString(R.string.s0836), str(gg, "shutdown_hours", "0")));
+                f.add(Field.num("throttle_mbps", getString(R.string.s0837), str(gg, "throttle_mbps", "1")));
+                f.add(Field.check("acct_enabled", getString(R.string.s0838), gg.optInt("acct_enabled") == 1));
+                f.add(Field.check("enabled", getString(R.string.s0839), gg.optInt("enabled", 1) != 0));
+                form(getString(R.string.s0840, name), getString(R.string.s0841, use), f, getString(R.string.s0089), v -> {
                     try {
                         v.put("account_id", accId).put("instance_id", instId).put("kind", kind).put("name", name);
                         if (region != null && !region.isEmpty() && !MainActivity.noRegion(prov)) v.put("region", region);
                         Api.post(this, "/traffic-guards", v, x -> {
                             JSONObject o = Api.obj(x);
-                            toast(o.has("warning") && !o.isNull("warning") ? o.optString("warning") : "已保存，当前已用 " + str(o, "last_gb", "-") + " GB（" + str(o, "last_pct", "-") + "%）");
+                            toast(o.has("warning") && !o.isNull("warning") ? o.optString("warning") : getString(R.string.s0842, str(o, "last_gb", "-"), str(o, "last_pct", "-")));
                             if (onSaved != null) onSaved.run();
                             // build 22：首次选「推送并限速」/ 打开流量明细且 agent 未安装 → 直接打开 agent 页给安装命令
                             boolean wantAgent = "throttle".equals(v.optString("action")) || v.optBoolean("acct_enabled");
@@ -507,7 +540,7 @@ public abstract class BaseActivity extends AppCompatActivity {
     // ---------- 对话框 ----------
     public void confirm(String title, String msg, Runnable ok) {
         new MaterialAlertDialogBuilder(this).setTitle(title).setMessage(msg)
-                .setPositiveButton("确认", (d, w) -> ok.run()).setNegativeButton("取消", null).show();
+                .setPositiveButton(getString(R.string.s0843), (d, w) -> ok.run()).setNegativeButton(getString(R.string.s0614), null).show();
     }
 
     /** Material 3 Outlined 文本框（浮动标签）。 */
@@ -595,7 +628,7 @@ public abstract class BaseActivity extends AppCompatActivity {
             box.addView(shown != null ? shown : v);
             inputs.add(v);
         }
-        MaterialAlertDialogBuilder db = new MaterialAlertDialogBuilder(this).setTitle(title).setView(sv).setNegativeButton("取消", null);
+        MaterialAlertDialogBuilder db = new MaterialAlertDialogBuilder(this).setTitle(title).setView(sv).setNegativeButton(getString(R.string.s0614), null);
         if (neutral != null) db.setNeutralButton(neutral, (d, w) -> onNeutral.run());
         db.setPositiveButton(okText, (d, w) -> {
                     JSONObject o = new JSONObject();

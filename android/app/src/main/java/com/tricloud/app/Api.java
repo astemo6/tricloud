@@ -101,10 +101,10 @@ public final class Api {
                     else if (e.code == 409 && e.guard != null && body != null) {
                         StringBuilder sb = new StringBuilder();
                         for (int i = 0; i < e.guard.length(); i++) sb.append("• ").append(e.guard.optString(i)).append("\n\n");
-                        sb.append("免费额度以云厂商公示和账号类型为准。可在设置里关闭护栏。");
-                        new com.google.android.material.dialog.MaterialAlertDialogBuilder(act).setTitle("⚠️ 可能超出免费额度").setMessage(sb.toString())
-                                .setNegativeButton("取消", null)
-                                .setPositiveButton("仍然继续", (d, w) -> {
+                        sb.append(act.getString(R.string.api_guard_note));
+                        new com.google.android.material.dialog.MaterialAlertDialogBuilder(act).setTitle(act.getString(R.string.api_guard_title)).setMessage(sb.toString())
+                                .setNegativeButton(act.getString(R.string.s0614), null)
+                                .setPositiveButton(act.getString(R.string.api_continue), (d, w) -> {
                                     try { async(act, method, path, new JSONObject(body.toString()).put("confirm_overage", true), cb); }
                                     catch (Exception ignored) { }
                                 }).show();

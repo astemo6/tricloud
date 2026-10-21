@@ -5,6 +5,7 @@ import os
 from fastapi import HTTPException, Request
 
 from .. import cloudinit, core, guard, services
+from ..i18n import msg
 
 
 VERSION = "1.6.0"
@@ -45,15 +46,15 @@ async def guarded(acc_id, op, body, region=None):
         return
     w = await run(guard.check, acc_id, op, body, region)
     if w:
-        raise HTTPException(409, {"msg": "可能超出免费额度", "guard": w})
+        raise HTTPException(409, {"msg": msg("err.guard_msg"), "guard": w})
 
 
 def need_acc(acc_id, provider=None):
     acc = core.get_account(acc_id)
     if not acc:
-        raise HTTPException(404, "账号不存在")
+        raise HTTPException(404, msg("err.account_not_found"))
     if provider and acc["provider"] != provider:
-        raise HTTPException(400, f"该接口仅支持 {provider}")
+        raise HTTPException(400, msg("err.provider_only", provider=provider))
     return acc
 
 
@@ -64,7 +65,7 @@ def _valid_date(v, field):
     try:
         return _dt.date.fromisoformat(str(v)[:10]).isoformat()
     except ValueError:
-        raise HTTPException(400, f"{field} 日期格式应为 YYYY-MM-DD")
+        raise HTTPException(400, msg("err.date_format", field=field))
 
 
 def _num_or_none(v, field, minimum=0.0):
@@ -73,9 +74,9 @@ def _num_or_none(v, field, minimum=0.0):
     try:
         x = float(v)
     except (TypeError, ValueError):
-        raise HTTPException(400, f"{field} 需为数字")
+        raise HTTPException(400, msg("err.field_number", field=field))
     if x < minimum:
-        raise HTTPException(400, f"{field} 不能小于 {minimum:g}")
+        raise HTTPException(400, msg("err.field_min", field=field, minimum=f"{minimum:g}"))
     return x
 
 
@@ -97,9 +98,9 @@ def _public_guard(direction, protocol, cidr, port, confirmed):
     except ValueError as e:
         raise HTTPException(400, str(e))
     if protocol == "all" or (protocol in ("tcp", "udp") and (not ranges or any(a <= 1 and b >= 65535 for a, b in ranges))):
-        raise HTTPException(400, "不支持对 0.0.0.0/0（或 ::/0）放行全部端口，请填写具体端口")
+        raise HTTPException(400, msg("err.all_ports_public"))
     if not confirmed:
-        raise HTTPException(409, {"msg": "来源为 0.0.0.0/0：将对整个互联网开放", "public_warning": True})
+        raise HTTPException(409, {"msg": msg("err.public_warn_msg"), "public_warning": True})
 
 
 def _created(acc_id, r, region=None):
@@ -130,4 +131,4 @@ def P(acc_id, region=None):
 def _req(body, *keys):
     for k in keys:
         if not str(body.get(k) or "").strip():
-            raise HTTPException(400, f"缺少参数：{k}")
+            raise HTTPException(400, msg("err.missing_param", k=k))

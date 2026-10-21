@@ -32,7 +32,9 @@ import java.util.Locale;
  *  修改时实时调用 POST /onedrive/schedule/preview 显示「接下来 3 次」，非法配置在预览卡片里直接显示后端的友好错误。Material 3 Chip / TimePicker。 */
 public class OneDriveScheduleActivity extends BaseActivity {
     static final String[] MODES = {"hourly", "daily", "weekly", "monthly", "cron"};
-    static final String[] MODE_LABELS = {"每 N 小时", "每天", "每周", "每月", "Cron"};
+    static String[] modeLabels() {
+        return new String[]{L10n.s(R.string.lx_mode_hourly), L10n.s(R.string.lx_mode_daily), L10n.s(R.string.lx_mode_weekly), L10n.s(R.string.lx_mode_monthly), "Cron"};
+    }
     private JSONObject cfg = new JSONObject();
     private String tz = "";
     private String mode = "daily";
@@ -124,7 +126,7 @@ public class OneDriveScheduleActivity extends BaseActivity {
         a.addView(enabled);
         ChipGroup mg = chipGroup(a, true);
         for (int i = 0; i < MODES.length; i++) {
-            Chip c = chip(MODE_LABELS[i], true);
+            Chip c = chip(modeLabels()[i], true);
             c.setId(View.generateViewId());
             c.setTag(MODES[i]);
             c.setChecked(MODES[i].equals(mode));
@@ -159,7 +161,7 @@ public class OneDriveScheduleActivity extends BaseActivity {
         wdGroup = chipGroup(secWeekly, false);
         JSONArray wds = cfg.optJSONArray("weekdays");
         for (int i = 0; i < 7; i++) {
-            Chip c = chip(OneDriveActivity.WD[i], true);
+            Chip c = chip(OneDriveActivity.wd()[i], true);
             c.setTag(i);
             c.setChecked(contains(wds, i) || (wds == null && cfg.optInt("weekday", 0) == i));
             c.setOnCheckedChangeListener((v, on) -> schedulePreview());

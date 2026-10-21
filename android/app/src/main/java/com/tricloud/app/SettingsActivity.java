@@ -19,9 +19,11 @@ public class SettingsActivity extends BaseActivity {
 
     private void setLang(String v) {
         getSharedPreferences("tricloud", MODE_PRIVATE).edit().putString("app_lang", v).apply();
-        Intent i = new Intent(this, LoginActivity.class);
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        startActivity(i);
+        // 立即生效：重建整个页面栈（首页 + 设置页），所有页面按新语言重新创建，停留在设置页
+        Intent home = new Intent(this, MainActivity.class);
+        home.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        startActivities(new Intent[]{home, new Intent(this, SettingsActivity.class)});
+        overridePendingTransition(0, 0);
     }
 
     @Override

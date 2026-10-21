@@ -64,7 +64,7 @@ export async function bindDns(acc, inst) {
   try { zones = await api("/cf/zones"); } catch (e) { return toast(e.message + t("set.dnsNeedToken"), true); }
   const r = await modal(t("op.dns"), `<p class="muted">${t("set.dnsNote")}</p>
     <label>${t("set.dnsDomain")}</label><select name="zone">${zones.map((z) => `<option value="${esc(z.id)}|${esc(z.name)}">${esc(z.name)}</option>`).join("")}</select>
-    <label>${t("set.dnsRecord")}</label><input name="record" placeholder="node1.example.com">
+    <label>${t("set.dnsRecord")}</label><div style="display:flex;align-items:center;gap:6px"><input name="record" placeholder="node1" style="flex:1;min-width:0"><span class="mono muted" id="dnsSuffix" style="white-space:nowrap">.${esc((zones[0] || {}).name || "")}</span></div><p class="muted" style="margin:2px 0 6px">${t("set.dnsRecordHint")}</p>
     <label><input type="checkbox" name="v4" style="width:auto" checked> ${t("set.dnsA")}</label>
     <label><input type="checkbox" name="v6" style="width:auto"> ${t("set.dnsAAAA")}</label>
     <label><input type="checkbox" name="proxied" style="width:auto"> ${t("set.dnsProxied")}</label>
@@ -72,7 +72,10 @@ export async function bindDns(acc, inst) {
     const f = form(bg); const [zone_id, zone_name] = f.zone.split("|");
     return post("/dns-bindings", { account_id: acc.id, instance_id: inst.id, name: inst.name, zone_id, zone_name, record: f.record,
       v4: f.v4, v6: f.v6, proxied: f.proxied, sync_now: f.sync_now, ipv4: inst.public_ip, ipv6: inst.ipv6 });
-  }, t("aws.lsBind"));
+  }, t("aws.lsBind"), false, (bg) => {
+    const sel = bg.querySelector("[name=zone]"), suf = bg.querySelector("#dnsSuffix");
+    if (sel && suf) sel.onchange = () => (suf.textContent = "." + (sel.value.split("|")[1] || ""));
+  });
   if (r) toast(r.dns && r.dns.length ? r.dns.join("；") : t("set.dnsBound"));
 }
 export async function pageDns() {

@@ -1892,7 +1892,7 @@ const STR = {
     "set.pwTitle": "修改面板密码", "set.oldPw": "原密码", "set.newPw": "新密码（≥10 位）", "set.change": "修改",
     "set.pwNote": "修改后所有设备需要重新登录。登录连续失败 5 次将锁定该 IP 15 分钟。",
     "set.dnsNote": "绑定后，换 IP / 分配 IPv6 会自动更新这条 Cloudflare 记录。",
-    "set.dnsDomain": "域名", "set.dnsRecord": "完整记录名",
+    "set.dnsDomain": "域名", "set.dnsRecord": "记录名前缀", "set.dnsRecordHint": "只填前缀，自动加上面选的域名；填 @ 绑定根域名。",
     "set.dnsA": "更新 A 记录（IPv4）", "set.dnsAAAA": "更新 AAAA 记录（IPv6）",
     "set.dnsProxied": "开启 Cloudflare 代理（橙色云）", "set.dnsSync": "立即用当前 IP 同步一次",
     "set.dnsNeedToken": "，请先在设置页填写 Cloudflare Token", "set.dnsBound": "已绑定",
@@ -2672,7 +2672,7 @@ const STR = {
     "set.pwTitle": "Change panel password", "set.oldPw": "Current password", "set.newPw": "New password (≥10 chars)", "set.change": "Change",
     "set.pwNote": "After changing, all devices must log in again. 5 failed logins lock the IP for 15 minutes.",
     "set.dnsNote": "Once bound, IP changes / IPv6 assignment update this Cloudflare record automatically.",
-    "set.dnsDomain": "Domain", "set.dnsRecord": "Full record name",
+    "set.dnsDomain": "Domain", "set.dnsRecord": "Record prefix", "set.dnsRecordHint": "Enter just the prefix; the domain above is added automatically. Use @ for the root domain.",
     "set.dnsA": "Update A record (IPv4)", "set.dnsAAAA": "Update AAAA record (IPv6)",
     "set.dnsProxied": "Enable Cloudflare proxy (orange cloud)", "set.dnsSync": "Sync once with the current IP now",
     "set.dnsNeedToken": "; set a Cloudflare token in Settings first", "set.dnsBound": "Bound",
@@ -4414,7 +4414,7 @@ async function bindDns(acc, inst) {
   try { zones = await api("/cf/zones"); } catch (e) { return toast(e.message + t("set.dnsNeedToken"), true); }
   const r = await modal(t("op.dns"), `<p class="muted">${t("set.dnsNote")}</p>
     <label>${t("set.dnsDomain")}</label><select name="zone">${zones.map((z) => `<option value="${esc(z.id)}|${esc(z.name)}">${esc(z.name)}</option>`).join("")}</select>
-    <label>${t("set.dnsRecord")}</label><input name="record" placeholder="node1.example.com">
+    <label>${t("set.dnsRecord")}</label><div style="display:flex;align-items:center;gap:6px"><input name="record" placeholder="node1" style="flex:1;min-width:0"><span class="mono muted" id="dnsSuffix" style="white-space:nowrap">.${esc((zones[0] || {}).name || "")}</span></div><p class="muted" style="margin:2px 0 6px">${t("set.dnsRecordHint")}</p>
     <label><input type="checkbox" name="v4" style="width:auto" checked> ${t("set.dnsA")}</label>
     <label><input type="checkbox" name="v6" style="width:auto"> ${t("set.dnsAAAA")}</label>
     <label><input type="checkbox" name="proxied" style="width:auto"> ${t("set.dnsProxied")}</label>
@@ -4422,7 +4422,10 @@ async function bindDns(acc, inst) {
     const f = form(bg); const [zone_id, zone_name] = f.zone.split("|");
     return post("/dns-bindings", { account_id: acc.id, instance_id: inst.id, name: inst.name, zone_id, zone_name, record: f.record,
       v4: f.v4, v6: f.v6, proxied: f.proxied, sync_now: f.sync_now, ipv4: inst.public_ip, ipv6: inst.ipv6 });
-  }, t("aws.lsBind"));
+  }, t("aws.lsBind"), false, (bg) => {
+    const sel = bg.querySelector("[name=zone]"), suf = bg.querySelector("#dnsSuffix");
+    if (sel && suf) sel.onchange = () => (suf.textContent = "." + (sel.value.split("|")[1] || ""));
+  });
   if (r) toast(r.dns && r.dns.length ? r.dns.join("；") : t("set.dnsBound"));
 }
 async function pageDns() {

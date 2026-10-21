@@ -251,6 +251,7 @@ class Page: ObservableObject {
 // MARK: - 视图
 
 struct ButtonGrid: View {
+    @ObservedObject private var langTick = LangTick.shared  // 切换语言后立即重绘
     let row: ButtonRow
     private let cols = Array(repeating: GridItem(.flexible(), spacing: 6), count: 3)
 
@@ -312,6 +313,7 @@ struct EditorView: View {
 }
 
 struct CardView: View {
+    @ObservedObject private var langTick = LangTick.shared  // 切换语言后立即重绘
     @ObservedObject var card: Card
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -366,6 +368,7 @@ enum Haptics {
 }
 
 struct PageView: View {
+    @ObservedObject private var langTick = LangTick.shared  // 切换语言后立即重绘
     @ObservedObject var page: Page
 
     var body: some View {
@@ -420,6 +423,7 @@ struct PageView: View {
 }
 
 struct LiveTextView: View {
+    @ObservedObject private var langTick = LangTick.shared  // 切换语言后立即重绘
     @ObservedObject var live: LiveText
     var font: Font = .subheadline
     var body: some View {
@@ -430,6 +434,7 @@ struct LiveTextView: View {
 }
 
 struct MeterView: View {
+    @ObservedObject private var langTick = LangTick.shared  // 切换语言后立即重绘
     let ratio: Double
     let label: String
     var body: some View {
@@ -445,6 +450,7 @@ struct MeterView: View {
 }
 
 struct ChipBarView: View {
+    @ObservedObject private var langTick = LangTick.shared  // 切换语言后立即重绘
     let bar: ChipBar
     var body: some View {
         ScrollViewReader { proxy in
@@ -477,6 +483,7 @@ struct ChipBarView: View {
 }
 
 struct NavRowView: View {
+    @ObservedObject private var langTick = LangTick.shared  // 切换语言后立即重绘
     let item: NavItem
     var body: some View {
         Button {
@@ -511,11 +518,12 @@ struct NavRowView: View {
 
 /// 标题、忙碌指示、菜单、隐藏的导航链接（打开账号 / 任务日志等）。
 struct PageChrome: ViewModifier {
+    @ObservedObject private var langTick = LangTick.shared
     @ObservedObject var page: Page
 
     func body(content: Content) -> some View {
         content
-            .navigationTitle(page.title)
+            .navigationTitle(L(page.title))
             // 首页用大标题，二级页内联标题（iOS 惯例）
             .navigationBarTitleDisplayMode(page.parent == nil ? .large : .inline)
             .overlay(alignment: .top) {
@@ -553,6 +561,7 @@ struct PageChrome: ViewModifier {
 }
 
 struct PushedView: View {
+    @ObservedObject private var langTick = LangTick.shared  // 切换语言后立即重绘
     @ObservedObject var page: Page
     var body: some View {
         if let p = page.pushed { p.makeView() } else { EmptyView() }

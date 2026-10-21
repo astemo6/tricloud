@@ -37,29 +37,34 @@ import java.util.Map;
 /** 云账号管理（同 Web pageAccounts）：列表、测活、信息、类型、编辑、代理、停用、删除；添加（粘贴自动识别）与批量添加。 */
 public class AccountsActivity extends BaseActivity {
     /** {key, 标签, 占位提示, 类型(text/password/multi)}，与 Web CRED_FIELDS 一致。 */
-    static final Map<String, String[][]> CRED = new LinkedHashMap<>();
-    static {
-        CRED.put("oci", new String[][]{{"user", L10n.s(R.string.s0707), "", "text"}, {"tenancy", "租户 OCID", "", "text"}, {"fingerprint", "API Key 指纹", "", "text"},
-                {"region", "区域", "ap-tokyo-1", "text"}, {"key_content", "私钥 (PEM)", "-----BEGIN PRIVATE KEY-----", "multi"}, {"pass_phrase", "私钥密码（可选）", "", "password"},
-                {"compartment", "区间 OCID（可选，默认根区间）", "", "text"}, {"home_region", "主区域（账单用，可选）", "", "text"},
-                {"proxy", "出口代理（可选）", "http://host:port", "text"}, {"proxy_user", "代理用户名（可选）", "", "text"}, {"proxy_pass", "代理密码（可选）", "", "password"}});
-        CRED.put("aws", new String[][]{{"access_key", "Access Key ID", "", "text"}, {"secret_key", "Secret Access Key", "", "password"}, {"region", "默认区域", "us-east-1", "text"},
-                {"proxy", "出口代理（可选）", "socks5://host:port", "text"}, {"proxy_user", "代理用户名（可选）", "", "text"}, {"proxy_pass", "代理密码（可选）", "", "password"}});
-        CRED.put("azure", new String[][]{{"tenant_id", "Tenant ID", "", "text"}, {"client_id", "Client (App) ID", "", "text"}, {"client_secret", "Client Secret", "", "password"},
+    /** 每次调用按当前语言生成（切换语言后立即生效，不缓存在静态常量里）。 */
+    static Map<String, String[][]> cred() {
+        Map<String, String[][]> m = new LinkedHashMap<>();
+        String px = L10n.s(R.string.lx_proxy), pu = L10n.s(R.string.lx_proxy_user), pp = L10n.s(R.string.lx_proxy_pass);
+        m.put("oci", new String[][]{{"user", L10n.s(R.string.s0707), "", "text"}, {"tenancy", L10n.s(R.string.lx_tenancy), "", "text"}, {"fingerprint", L10n.s(R.string.lx_fingerprint), "", "text"},
+                {"region", L10n.s(R.string.lx_region), "ap-tokyo-1", "text"}, {"key_content", L10n.s(R.string.lx_key_content), "-----BEGIN PRIVATE KEY-----", "multi"}, {"pass_phrase", L10n.s(R.string.lx_pass_phrase), "", "password"},
+                {"compartment", L10n.s(R.string.lx_compartment), "", "text"}, {"home_region", L10n.s(R.string.lx_home_region), "", "text"},
+                {"proxy", px, "http://host:port", "text"}, {"proxy_user", pu, "", "text"}, {"proxy_pass", pp, "", "password"}});
+        m.put("aws", new String[][]{{"access_key", "Access Key ID", "", "text"}, {"secret_key", "Secret Access Key", "", "password"}, {"region", L10n.s(R.string.lx_default_region), "us-east-1", "text"},
+                {"proxy", px, "socks5://host:port", "text"}, {"proxy_user", pu, "", "text"}, {"proxy_pass", pp, "", "password"}});
+        m.put("azure", new String[][]{{"tenant_id", "Tenant ID", "", "text"}, {"client_id", "Client (App) ID", "", "text"}, {"client_secret", "Client Secret", "", "password"},
                 {"subscription_id", "Subscription ID", "", "text"},
-                {"proxy", "出口代理（可选）", "http://host:port", "text"}, {"proxy_user", "代理用户名（可选）", "", "text"}, {"proxy_pass", "代理密码（可选）", "", "password"}});
+                {"proxy", px, "http://host:port", "text"}, {"proxy_user", pu, "", "text"}, {"proxy_pass", pp, "", "password"}});
+        return m;
     }
     /** 添加账号页切换按钮用的短名。 */
     static final String[] PSHORT = {"OCI", "AWS", "Azure"};
-    static final Map<String, String> PROV_HINT = new LinkedHashMap<>();
-    static {
-        PROV_HINT.put("oci", "OCI 控制台右上角头像 → User settings（进入 My profile）→ Tokens and keys 标签 → Add API key 生成。");
-        PROV_HINT.put("aws", "建议使用仅含 EC2/Lightsail/CloudFront/Service Quotas/CE 权限的 IAM 用户。");
-        PROV_HINT.put("azure", "用 az ad sp create-for-rbac --role Contributor --scopes /subscriptions/<订阅 ID> 生成。");
+    static String provHint(String p) {
+        switch (p) {
+            case "oci": return L10n.s(R.string.lx_hint_oci);
+            case "aws": return L10n.s(R.string.lx_hint_aws);
+            case "azure": return L10n.s(R.string.lx_hint_azure);
+            default: return "";
+        }
     }
 
     static String credLabel(String k) {
-        for (String[][] fs : CRED.values()) for (String[] f : fs) if (f[0].equals(k)) return f[1].replace(L10n.s(R.string.s0708), "").replaceAll(L10n.s(R.string.s0709), "");
+        for (String[][] fs : cred().values()) for (String[] f : fs) if (f[0].equals(k)) return f[1].replace(L10n.s(R.string.s0708), "").replaceAll(L10n.s(R.string.s0709), "");
         return k;
     }
 
@@ -213,7 +218,7 @@ public class AccountsActivity extends BaseActivity {
         Runnable rebuild = () -> {
             credBox.removeAllViews();
             inputs.clear();
-            for (String[] f : CRED.get(prov[0])) {
+            for (String[] f : cred().get(prov[0])) {
                 int it = "password".equals(f[3]) ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
                         : "multi".equals(f[3]) ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                         : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
@@ -222,7 +227,7 @@ public class AccountsActivity extends BaseActivity {
                 credBox.addView(til);
                 inputs.put(f[0], til.getEditText());
             }
-            provHint.setText(PROV_HINT.get(prov[0]));
+            provHint.setText(provHint(prov[0]));
         };
         grp.addOnButtonCheckedListener((g, id, checked) -> {
             if (!checked || filling[0]) return;

@@ -436,7 +436,7 @@
 "完成" = "Done";
 "完成后停掉源实例（不删除）" = "Stop the source instance when done (don't delete)";
 "完成后把域名切到新 IP" = "Point domains to the new IP when done";
-"完整记录名（如 node1. 加上面的域名）" = "Full record name (e.g. node1. + the domain above)";
+"记录名前缀（如 node1，自动加上所选域名；@ 为根域名）" = "Record prefix (e.g. node1; the selected domain is added; @ = root)";
 "定时备份已停用" = "Scheduled backup is off";
 "实例" = "Instances";
 "实例关联的全部安全组" = "All security groups of the instance";

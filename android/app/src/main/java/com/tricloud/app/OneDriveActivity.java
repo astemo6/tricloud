@@ -17,7 +17,9 @@ import java.util.Arrays;
  *  计划 / 保留 / 备份密码、立即备份、备份列表与恢复（密码 + 二次确认）、解绑。 */
 public class OneDriveActivity extends BaseActivity {
     static final String LOGIN_URL = "https://microsoft.com/devicelogin";
-    static final String[] WD = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"};
+    static String[] wd() {
+        return new String[]{L10n.s(R.string.lx_wd_1), L10n.s(R.string.lx_wd_2), L10n.s(R.string.lx_wd_3), L10n.s(R.string.lx_wd_4), L10n.s(R.string.lx_wd_5), L10n.s(R.string.lx_wd_6), L10n.s(R.string.lx_wd_7)};
+    }
     private boolean justSaved = false;   // build 22：刚保存 client_id 且未绑定 → 卡片里提示「点绑定 OneDrive 获取代码」
     private int pollGen = 0;          // 每次开始绑定 / 离开页面 +1，旧的轮询自动作废
     private boolean visible = false;
@@ -40,7 +42,7 @@ public class OneDriveActivity extends BaseActivity {
     /** build 23：计划描述用后端的 desc（每 N 小时 / 多时间点 / 每周多选 / 每月 / Cron）；旧后端没有 desc 时退回 freq/time。 */
     static String plan(JSONObject s, JSONObject c) {
         String d = s.optString("desc", "");
-        if (d.isEmpty()) d = ("weekly".equals(c.optString("freq")) ? L10n.s(R.string.s0986, WD[Math.max(0, Math.min(6, c.optInt("weekday")))]) : L10n.s(R.string.s0987)) + c.optString("time", "03:30");
+        if (d.isEmpty()) d = ("weekly".equals(c.optString("freq")) ? L10n.s(R.string.s0986, wd()[Math.max(0, Math.min(6, c.optInt("weekday")))]) : L10n.s(R.string.s0987)) + c.optString("time", "03:30");
         return L10n.s(R.string.s0988, d, c.optInt("keep", 30));
     }
 

@@ -93,7 +93,7 @@ extension AccountPage {
             let labels = (0..<z.count).map { z.obj($0).optString("name") }
             self.form("绑定域名 · " + inst.optString("name"), "绑定后，换 IP / 分配 IPv6 会自动更新这条 Cloudflare 记录。", [
                 Field.select("zone", "域名", vals[0], vals, labels),
-                Field.text("record", "完整记录名（如 node1. 加上面的域名）", ""),
+                Field.text("record", "记录名前缀（如 node1，自动加上所选域名；@ 为根域名）", ""),
                 Field.check("v4", "更新 A 记录（IPv4）", true),
                 Field.check("v6", "更新 AAAA 记录（IPv6）", false),
                 Field.check("proxied", "开启 Cloudflare 代理（橙色云）", false),

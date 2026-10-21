@@ -139,8 +139,13 @@ with TestClient(main.app) as c:
     calls = []
     with mock.patch.object(dns, "cf_upsert", lambda z, n, t, v, p=False: calls.append((n, t, v)) or f"{n} {t} → {v}"):
         r = c.post("/api/dns-bindings", json={"account_id": aid, "instance_id": "i-1", "name": "n1", "zone_id": "z",
-                                              "zone_name": "example.com", "record": "evil.com"})
-        ok("DNS record must belong to zone", r.status_code == 400)
+                                              "zone_name": "example.com", "record": "bad name/x"})
+        ok("DNS record with invalid chars rejected", r.status_code == 400)
+        # build 27：只填前缀会补上域名，外域名也只会落在本域名之下（evil.com → evil.com.example.com）
+        from app.routers.cloudflare import full_record
+        ok("DNS record stays inside zone", full_record("evil.com", "example.com") == "evil.com.example.com"
+           and full_record("orajp02", "example.com") == "orajp02.example.com" and full_record("@", "example.com") == "example.com"
+           and full_record("N1.Example.com.", "example.com") == "n1.example.com" and full_record("example.com", "example.com") == "example.com")
         c.post("/api/dns-bindings", json={"account_id": aid, "instance_id": "i-1", "name": "n1", "zone_id": "z",
                                           "zone_name": "example.com", "record": "n1.example.com", "v6": True})
         out = dns.dns_sync(aid, "i-1", "1.2.3.4", "2001:db8::1")

@@ -113,3 +113,7 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 | 1.2.0 | 免费额度护栏、账号健康度、跨云迁移（当时的快照功能已在 1.5.0 移除） |
 | 1.1.x | 融合各家面板功能；Material Design 3 界面、手机竖屏适配 |
 
+
+## 1.6.0 build 27
+- 绑定域名：记录名只填前缀，自动补所选域名（`@` = 根域名，完整名仍可用），后端统一补全与校验。
+- App 切换语言立即生效（Android 重建页面栈停在设置页；iOS 已打开页面即时重绘）。

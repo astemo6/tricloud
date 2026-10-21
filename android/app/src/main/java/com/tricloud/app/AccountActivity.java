@@ -546,11 +546,9 @@ public class AccountActivity extends BaseActivity {
     // ---------------- OCI 创建 / 抢机 ----------------
     // 规格标明是否 Always Free（免费额度只在主区域有效）
     static final String[] SHAPES = {"VM.Standard.A1.Flex", "VM.Standard.E2.1.Micro", "VM.Standard.E4.Flex", "VM.Standard3.Flex"};
-    static final String[] SHAPE_LABELS = {
-            "A1.Flex · ARM · ✅ Always Free（免费号合计 2 OCPU / 12 GB，付费号 4 / 24）",
-            "E2.1.Micro · AMD 1/8 OCPU · 1 GB · ✅ Always Free（最多 2 台）",
-            "E4.Flex · AMD · 💰 付费，非 Always Free",
-            "Standard3.Flex · Intel · 💰 付费，非 Always Free"};
+    static String[] shapeLabelsBase() {
+        return new String[]{L10n.s(R.string.lx_shape_a1), L10n.s(R.string.lx_shape_e2), L10n.s(R.string.lx_shape_e4), L10n.s(R.string.lx_shape_std3)};
+    }
     /** A1 免费额度按账号类型（与后端 core.oci_a1_free 一致）：plan_type 为 FREE_TIER → free，其他非空 → paid，未知 → unknown。 */
     String a1Basis() {
         JSONObject a = acc;
@@ -564,7 +562,7 @@ public class AccountActivity extends BaseActivity {
     }
 
     String[] shapeLabels() {
-        String[] l = SHAPE_LABELS.clone();
+        String[] l = shapeLabelsBase();
         String b = a1Basis();
         if ("free".equals(b)) l[0] = getString(R.string.s0161);
         else if ("paid".equals(b)) l[0] = getString(R.string.s0162);
@@ -657,12 +655,14 @@ public class AccountActivity extends BaseActivity {
 
     // ---------------- CloudFront（v1.5：缓存刷新 / 编辑 / 启停 / 套餐 / 删除前自动停用） ----------------
     static final String[] CF_TIERS = {"PAYGO", "FREE", "PRO", "BUSINESS", "PREMIUM"};
-    static final String[] CF_TIER_NAMES = {"按量付费", "Free $0/月", "Pro $15/月", "Business $200/月", "Premium $1000/月起"};
+    static String[] cfTierNames() {
+        return new String[]{L10n.s(R.string.lx_cf_paygo), L10n.s(R.string.lx_cf_free), L10n.s(R.string.lx_cf_pro), L10n.s(R.string.lx_cf_business), L10n.s(R.string.lx_cf_premium)};
+    }
 
     static String cfPlanName(JSONObject d) {
         if (d.isNull("plan") || !d.has("plan")) return L10n.s(R.string.s0189);
         int i = Arrays.asList(CF_TIERS).indexOf(d.optString("plan"));
-        return i >= 0 ? CF_TIER_NAMES[i] : d.optString("plan");
+        return i >= 0 ? cfTierNames()[i] : d.optString("plan");
     }
 
     private void cloudfront() {
@@ -732,7 +732,7 @@ public class AccountActivity extends BaseActivity {
 
     private void cfPlan(JSONObject d) {
         String did = d.optString("id");
-        choose(getString(R.string.s0234, cfPlanName(d)), CF_TIER_NAMES, i -> {
+        choose(getString(R.string.s0234, cfPlanName(d)), cfTierNames(), i -> {
             String tier = CF_TIERS[i];
             boolean paid = i >= 2;
             Runnable go = () -> {
@@ -740,7 +740,7 @@ public class AccountActivity extends BaseActivity {
                         x -> { toast(Api.obj(x).optString("message")); refresh(); }); }
                 catch (Exception ignored) { }
             };
-            if (paid) confirm(getString(R.string.s0235), getString(R.string.s0236, did, CF_TIER_NAMES[i]), go);
+            if (paid) confirm(getString(R.string.s0235), getString(R.string.s0236, did, cfTierNames()[i]), go);
             else go.run();
         });
     }
@@ -1421,7 +1421,7 @@ public class AccountActivity extends BaseActivity {
                 List<Field> f = new ArrayList<>();
                 f.add(Field.text("name", getString(R.string.s0451), inst.optString("name") + "-new"));
                 if ("oci".equals(tp)) {
-                    f.add(Field.select("shape", getString(R.string.s0170), "VM.Standard.A1.Flex", new String[]{"VM.Standard.A1.Flex", "VM.Standard.E2.1.Micro"}, new String[]{SHAPE_LABELS[0], SHAPE_LABELS[1]}));
+                    f.add(Field.select("shape", getString(R.string.s0170), "VM.Standard.A1.Flex", new String[]{"VM.Standard.A1.Flex", "VM.Standard.E2.1.Micro"}, new String[]{shapeLabelsBase()[0], shapeLabelsBase()[1]}));
                     f.add(Field.num("ocpus", "OCPU", "1"));
                     f.add(Field.num("memory_gb", getString(R.string.s0126), "6"));
                     f.add(Field.num("disk_gb", getString(R.string.s0144), "50"));
@@ -1830,7 +1830,7 @@ public class AccountActivity extends BaseActivity {
 
     private void ociObjects() {
         if (objBucket == null) {
-            LinearLayout bk = card(BK_TITLE);
+            LinearLayout bk = card(bkTitle());
             muted(bk, getString(R.string.s0590));
             billingKeep(bk, false, false);
             Api.get(this, "/accounts/" + id + "/oci/buckets?" + rq(), r -> {
@@ -1909,7 +1909,7 @@ public class AccountActivity extends BaseActivity {
     }
 
     // ---------------- 保号账单（仅 PAYG，build 19 补到 App）：先检测已有存储，标准层补足到约 11 GB ----------------
-    static final String BK_TITLE = "一键生成保号账单";
+    static String bkTitle() { return L10n.s(R.string.lx_bk_title); }
 
     static String tierLabel(JSONObject b) {
         String t = str(b, "tier", "");
@@ -1954,9 +1954,9 @@ public class AccountActivity extends BaseActivity {
             if (!bkAlive(el)) return;
             JSONObject d = Api.obj(r);
             el.removeAllViews();
-            if (d.has("__error")) { text(el, BK_TITLE, 16, true); muted(el, "❌ " + d.optString("__error")); return; }
+            if (d.has("__error")) { text(el, bkTitle(), 16, true); muted(el, "❌ " + d.optString("__error")); return; }
             String plan = d.optString("plan");
-            text(el, BK_TITLE + " · " + ("paid".equals(plan) ? "PAYG" : "free".equals(plan) ? getString(R.string.s0615) : getString(R.string.s0616)), 16, true);
+            text(el, bkTitle() + " · " + ("paid".equals(plan) ? "PAYG" : "free".equals(plan) ? getString(R.string.s0615) : getString(R.string.s0616)), 16, true);
             if (!d.optBoolean("eligible")) { muted(el, str(d, "hint", "")); return; }   // 免费号：「免费号 20GB 内不收费，无需操作」
             muted(el, d.optString("note"));
             JSONObject t = d.optJSONObject("task");
@@ -2065,7 +2065,7 @@ public class AccountActivity extends BaseActivity {
             try { size = Double.parseDouble(sz.getText().toString().trim()); } catch (Exception e) { size = defGb; }
             if (!(size >= minGb && size <= maxGb)) { toast(getString(R.string.s0644, numStr(minGb), numStr(maxGb))); return; }
             double fs = size;
-            Runnable start = () -> confirm(BK_TITLE, getString(R.string.s0646, d.optString("note"), numStr(fs), (s != null ? getString(R.string.s0645, gb2(used + fs)) : "")), () -> {
+            Runnable start = () -> confirm(bkTitle(), getString(R.string.s0646, d.optString("note"), numStr(fs), (s != null ? getString(R.string.s0645, gb2(used + fs)) : "")), () -> {
                 try {
                     Api.post(this, "/accounts/" + id + "/oci/billing-keep", new JSONObject().put("size_gb", fs).put("confirm", true), x -> {
                         JSONObject o = Api.obj(x);
@@ -2169,11 +2169,11 @@ public class AccountActivity extends BaseActivity {
         });
     }
 
-    static final String REGION_SUB_TITLE = "高级 · 区域订阅（不可撤销）";
+    static String regionSubTitle() { return L10n.s(R.string.lx_region_sub_title); }
 
     /** v1.6 build 18：区域订阅不再单独占标签，收在「配额/网络」页底部，默认折叠，展开才加载。 */
     private void ociRegionSubSection() {
-        LinearLayout adv = card(REGION_SUB_TITLE);
+        LinearLayout adv = card(regionSubTitle());
         muted(adv, getString(R.string.s0669));
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);

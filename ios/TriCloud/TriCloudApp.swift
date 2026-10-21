@@ -69,6 +69,7 @@ final class AppState: ObservableObject {
     func setLang(_ l: String) {
         Prefs.set("app_lang", l)
         lang = l
+        LangTick.shared.bump()
     }
 
     var locale: Locale {

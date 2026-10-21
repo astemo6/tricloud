@@ -169,7 +169,7 @@ struct SidebarRoot: View {
                                 let acc = list[i]
                                 NavigationLink(destination: app.pages.account(acc).makeView(), tag: "acc\(acc.optInt("id"))", selection: $sel) {
                                     Label {
-                                        Text(acc.optString("name") + (acc.optInt("disabled") == 1 ? "（已停用）" : ""))
+                                        Text(acc.optString("name") + (acc.optInt("disabled") == 1 ? L("（已停用）") : ""))
                                     } icon: {
                                         Image(systemName: Brand.icon(p)).foregroundColor(Brand.color(p))
                                     }
@@ -183,7 +183,7 @@ struct SidebarRoot: View {
                         let m = Menus.manage[i]
                         NavigationLink(destination: app.pages.cached(m.key, m.make).makeView(), tag: m.key, selection: $sel) {
                             Label {
-                                Text(m.title)
+                                Text(L(m.title))
                             } icon: {
                                 Image(systemName: m.icon).foregroundColor(m.tint)
                             }

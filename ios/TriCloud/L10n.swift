@@ -34,3 +34,10 @@ enum L10n {
 
 /// 全局简写：渲染层查表
 func L(_ s: String) -> String { L10n.t(s) }
+
+/// 语言切换信号：渲染层视图观察它，切换语言时 bump 一次，已打开的页面立即按新语言重绘（不用重启 App）。
+final class LangTick: ObservableObject {
+    static let shared = LangTick()
+    @Published var v = 0
+    func bump() { v += 1 }
+}

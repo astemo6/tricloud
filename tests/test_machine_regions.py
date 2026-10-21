@@ -289,7 +289,7 @@ ok("hints reset when /accounts reloads (android/ios)", "Regions.HINTS.clear()" i
 ok("same texts on three ends", all(all(t in S[k] for t in ("无机器 · 默认 ", "（默认区域）", "\"无机器\"")) for k in ("core", "rj", "rs")))
 ok("demo /accounts carries machine_regions", "machine_regions: o.regions" in S["mock"] and "function ovOf(id)" in S["mock"])
 vc = re.search(r"versionCode (\d+)", S["gradle"]).group(1)
-ok("version: Android versionCode 26 == iOS build 26", vc == "26" and 'CURRENT_PROJECT_VERSION: "26"' in S["pyml"])
+ok("version: Android versionCode 27 == iOS build 27", vc == "27" and 'CURRENT_PROJECT_VERSION: "27"' in S["pyml"])
 
 # ================= JS 助手实际输出 =================
 node = shutil.which("node")

@@ -10,6 +10,7 @@ os.environ.update(TRICLOUD_DATA=D, PANEL_PASSWORD="devpassword123")
 for k in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "FERNET_KEY"):
     os.environ.pop(k, None)
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+import sys as _s; _s.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _l10n_src  # noqa: E402
 sys.path.insert(0, ROOT)
 from unittest import mock
 
@@ -233,15 +234,16 @@ with TestClient(main.app) as c:
         ok("route lightsail options in ap-east-2: friendly 400", op.status_code == 400 and "台北" in op.json()["detail"])
 
 # ================= 4. Web / demo 静态检查 =================
-W = open(os.path.join(ROOT, "web", "js", "oci.js"), encoding="utf-8").read()
-C = open(os.path.join(ROOT, "web", "js", "core.js"), encoding="utf-8").read()
-I = open(os.path.join(ROOT, "web", "js", "instances.js"), encoding="utf-8").read()
+W = _l10n_src.read(os.path.join(ROOT, "web", "js", "oci.js"))
+C = _l10n_src.read(os.path.join(ROOT, "web", "js", "core.js"))
+I = _l10n_src.read(os.path.join(ROOT, "web", "js", "instances.js"))
 M = open(os.path.join(ROOT, "demo", "mock.js"), encoding="utf-8").read()
 ok("web: rename button next to subnet dropdown", 'id="sgRen"' in W and "renameSubnet(acc, s, reload)" in W)
 ok("web: PATCH subnets + vcns, keeps selection", '/oci/subnets/${encodeURIComponent(s.id)}' in W and '/oci/vcns/${encodeURIComponent(s.vcn_id)}' in W
    and 'method: "PATCH"' in W and 'localStorage.setItem("tc_sgsub_" + acc.id, s.id)' in W)
 ok("web: rename note says instances/IP/rules unaffected", "不影响子网里的实例、IP 和安全规则" in W)
-ok("web: lightsail regions via service=lightsail + auto switch toast", "/regions?service=lightsail" in C and "Lightsail 不支持 ${regionLabel(cur)}，已切换到 ${regionLabel(to)}" in C)
+ok("web: lightsail regions via service=lightsail + auto switch toast", "/regions?service=lightsail" in C and 't("core.ls.unsupported", { from: regionLabel(cur), to: regionLabel(to) })' in open(os.path.join(ROOT, "web", "js", "core.js"), encoding="utf-8").read()
+   and "Lightsail 不支持 {from}，已切换到 {to}" in _l10n_src._web_zh().values())
 ok("web: lightsail page ensures region before loading", 'if (kind === "lightsail") await ensureLsRegion(acc);' in I and 'kind === "lightsail" ? "lightsail" : undefined' in I)
 ok("demo mock: subnet/vcn PATCH + lightsail regions + ap-east-2 refusal", '(subnets|vcns)' in M and 'q.get("service") === "lightsail"' in M and "Lightsail 不支持该区域（台北 ap-east-2）" in M)
 

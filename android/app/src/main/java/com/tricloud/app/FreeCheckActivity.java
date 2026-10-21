@@ -18,7 +18,7 @@ public class FreeCheckActivity extends BaseActivity {
         if (o == null) return "-";
         String v = o.isNull(k) ? "-" : o.optString(k);
         double dv = o.optDouble(k, 0), dl = o.optDouble(lim, 0);
-        return v + " / " + o.optString(lim) + (dv > dl ? getString(R.string.s0865) : "");
+        return v + " / " + o.optString(lim) + (dv > dl ? L10n.s(R.string.s0865) : "");
     }
 
     @Override

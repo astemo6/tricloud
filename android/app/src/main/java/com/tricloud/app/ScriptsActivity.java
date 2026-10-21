@@ -14,7 +14,7 @@ import java.util.List;
 /** 脚本模板（同 Web pageScripts）：创建实例时可选用，以 root 在首次开机执行。 */
 public class ScriptsActivity extends BaseActivity {
     static final String[][] PRESETS = {
-            {getString(R.string.s1086), "#!/bin/bash\necho 'net.core.default_qdisc=fq' >> /etc/sysctl.conf\necho 'net.ipv4.tcp_congestion_control=bbr' >> /etc/sysctl.conf\nsysctl -p"},
+            {L10n.s(R.string.s1086), "#!/bin/bash\necho 'net.core.default_qdisc=fq' >> /etc/sysctl.conf\necho 'net.ipv4.tcp_congestion_control=bbr' >> /etc/sysctl.conf\nsysctl -p"},
             {"2GB Swap", "#!/bin/bash\nfallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile\necho '/swapfile none swap sw 0 0' >> /etc/fstab"},
             {"关闭 OCI 系统防火墙", "#!/bin/bash\niptables -P INPUT ACCEPT; iptables -P FORWARD ACCEPT; iptables -P OUTPUT ACCEPT; iptables -F\nnetfilter-persistent save 2>/dev/null || true\nsystemctl disable --now firewalld 2>/dev/null || true"},
             {"时区上海 + 常用工具", "#!/bin/bash\ntimedatectl set-timezone Asia/Shanghai\n(apt-get update && apt-get install -y curl wget unzip htop) || (dnf install -y curl wget unzip htop)"}};

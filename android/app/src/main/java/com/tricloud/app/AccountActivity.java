@@ -22,10 +22,10 @@ public class AccountActivity extends BaseActivity {
 
     static String[][] tabs(String p) {
         switch (p) {
-            case "oci": return new String[][]{{"instances", getString(R.string.s0001)}, {"create", getString(R.string.s0002)}, {"snatch", getString(R.string.s0003)}, {"secgroup", getString(R.string.s0004)}, {"storage", getString(R.string.s0005)},
-                    {"objects", getString(R.string.s0006)}, {"traffic", getString(R.string.s0007)}, {"limits", getString(R.string.s0008)}, {"billing", getString(R.string.s0009)}};   // 区域订阅收在「配额/网络」页底部（防误点）
-            case "aws": return new String[][]{{"ec2", "EC2"}, {"lightsail", "Lightsail"}, {"regions", getString(R.string.s0010)}, {"cloudfront", "CloudFront"}, {"quota", getString(R.string.s0011)}, {"recycle", getString(R.string.s0012)}, {"billing", getString(R.string.s0009)}, {"credit", getString(R.string.s0013)}};
-            default: return new String[][]{{"vms", getString(R.string.s0014)}, {"azcreate", getString(R.string.s0015)}, {"rgs", getString(R.string.s0016)}, {"azquota", getString(R.string.s0011)}, {"foundry", "Foundry"}, {"subscription", getString(R.string.s0017)}, {"billing", getString(R.string.s0009)}};
+            case "oci": return new String[][]{{"instances", L10n.s(R.string.s0001)}, {"create", L10n.s(R.string.s0002)}, {"snatch", L10n.s(R.string.s0003)}, {"secgroup", L10n.s(R.string.s0004)}, {"storage", L10n.s(R.string.s0005)},
+                    {"objects", L10n.s(R.string.s0006)}, {"traffic", L10n.s(R.string.s0007)}, {"limits", L10n.s(R.string.s0008)}, {"billing", L10n.s(R.string.s0009)}};   // 区域订阅收在「配额/网络」页底部（防误点）
+            case "aws": return new String[][]{{"ec2", "EC2"}, {"lightsail", "Lightsail"}, {"regions", L10n.s(R.string.s0010)}, {"cloudfront", "CloudFront"}, {"quota", L10n.s(R.string.s0011)}, {"recycle", L10n.s(R.string.s0012)}, {"billing", L10n.s(R.string.s0009)}, {"credit", L10n.s(R.string.s0013)}};
+            default: return new String[][]{{"vms", L10n.s(R.string.s0014)}, {"azcreate", L10n.s(R.string.s0015)}, {"rgs", L10n.s(R.string.s0016)}, {"azquota", L10n.s(R.string.s0011)}, {"foundry", "Foundry"}, {"subscription", L10n.s(R.string.s0017)}, {"billing", L10n.s(R.string.s0009)}};
         }
     }
 
@@ -621,7 +621,7 @@ public class AccountActivity extends BaseActivity {
     static Field osImageField(String os, String ver) {
         List<String> opts = new ArrayList<>(), labels = new ArrayList<>();
         for (String[] o : OCI_OS)
-            for (int i = 2; i < o.length; i++) { opts.add(o[0] + "|" + o[i]); labels.add(o[1] + " " + (o[i].isEmpty() ? getString(R.string.s0061) : o[i])); }
+            for (int i = 2; i < o.length; i++) { opts.add(o[0] + "|" + o[i]); labels.add(o[1] + " " + (o[i].isEmpty() ? L10n.s(R.string.s0061) : o[i])); }
         String def = os + "|" + (ver == null ? "" : ver);
         if (!opts.contains(def)) {
             boolean known = false;
@@ -629,7 +629,7 @@ public class AccountActivity extends BaseActivity {
             if (known) { opts.add(def); labels.add(os + " " + ver); }   // 默认值里的版本不在列表里：临时加一个选项
             else def = opts.get(0);                                       // 已移除的系统（如 CentOS）回落到 Ubuntu 最新
         }
-        return Field.select("os_image", getString(R.string.s0184), def, opts.toArray(new String[0]), labels.toArray(new String[0]));
+        return Field.select("os_image", L10n.s(R.string.s0184), def, opts.toArray(new String[0]), labels.toArray(new String[0]));
     }
 
     static JSONObject splitOsImage(JSONObject c) throws Exception {
@@ -660,7 +660,7 @@ public class AccountActivity extends BaseActivity {
     static final String[] CF_TIER_NAMES = {"按量付费", "Free $0/月", "Pro $15/月", "Business $200/月", "Premium $1000/月起"};
 
     static String cfPlanName(JSONObject d) {
-        if (d.isNull("plan") || !d.has("plan")) return getString(R.string.s0189);
+        if (d.isNull("plan") || !d.has("plan")) return L10n.s(R.string.s0189);
         int i = Arrays.asList(CF_TIERS).indexOf(d.optString("plan"));
         return i >= 0 ? CF_TIER_NAMES[i] : d.optString("plan");
     }
@@ -754,9 +754,9 @@ public class AccountActivity extends BaseActivity {
         int n = ins == null ? 0 : ins.length();
         StringBuilder names = new StringBuilder();
         for (int i = 0; i < Math.min(n, 4); i++) { if (i > 0) names.append("、"); names.append(str(ins.optJSONObject(i), "name", "?")); }
-        String tail = n == 0 ? getString(R.string.s0237) : names + (n > 4 ? getString(R.string.s0238, n) : "");
+        String tail = n == 0 ? L10n.s(R.string.s0237) : names + (n > 4 ? L10n.s(R.string.s0238, n) : "");
         String vcn = str(s, "vcn_name", "");
-        return (vcn.isEmpty() ? "" : vcn + " / ") + str(s, "name", getString(R.string.s0239)) + " " + str(s, "cidr", "") + " · " + tail;
+        return (vcn.isEmpty() ? "" : vcn + " / ") + str(s, "name", L10n.s(R.string.s0239)) + " " + str(s, "cidr", "") + " · " + tail;
     }
 
     private void secgroup() {
@@ -1036,12 +1036,12 @@ public class AccountActivity extends BaseActivity {
 
     private static String crStep(String st) {
         switch (st) {
-            case "executed": return getString(R.string.s0311);
-            case "failed": return getString(R.string.s0312);
-            case "stopped": return getString(R.string.s0313);
-            case "skipped": return getString(R.string.s0314);
-            case "running": return getString(R.string.s0315);
-            default: return getString(R.string.s0316);
+            case "executed": return L10n.s(R.string.s0311);
+            case "failed": return L10n.s(R.string.s0312);
+            case "stopped": return L10n.s(R.string.s0313);
+            case "skipped": return L10n.s(R.string.s0314);
+            case "running": return L10n.s(R.string.s0315);
+            default: return L10n.s(R.string.s0316);
         }
     }
 
@@ -1918,9 +1918,9 @@ public class AccountActivity extends BaseActivity {
             t = "Archive".equals(st) ? "archive" : "Standard".equals(st) ? (!"Disabled".equals(at) ? "autotier" : "standard") : "unknown";
         }
         switch (t) {
-            case "standard": return getString(R.string.s0611);
-            case "autotier": return getString(R.string.s0612);
-            case "archive": return getString(R.string.s0613);
+            case "standard": return L10n.s(R.string.s0611);
+            case "autotier": return L10n.s(R.string.s0612);
+            case "archive": return L10n.s(R.string.s0613);
             default: return "—";
         }
     }

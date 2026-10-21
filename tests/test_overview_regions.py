@@ -17,6 +17,7 @@ os.environ.update(TRICLOUD_DATA=D, PANEL_PASSWORD="devpassword123")
 for k in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "FERNET_KEY"):
     os.environ.pop(k, None)
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+import sys as _s; _s.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _l10n_src  # noqa: E402
 sys.path.insert(0, ROOT)
 from unittest import mock
 
@@ -439,7 +440,7 @@ with TestClient(main.app) as c:
        core.q("SELECT name FROM sqlite_master WHERE name='audit_log'") else True)
 
 # ================= 4. 三端显示 =================
-SRC = {p: open(os.path.join(ROOT, p), encoding="utf-8").read() for p in (
+SRC = {p: _l10n_src.read(os.path.join(ROOT, p)) for p in (
     "web/js/core.js", "web/js/home.js", "android/app/src/main/java/com/tricloud/app/MainActivity.java",
     "android/app/src/main/java/com/tricloud/app/Regions.java", "ios/TriCloud/HomePages.swift", "ios/TriCloud/Regions.swift")}
 home, core_js = SRC["web/js/home.js"], SRC["web/js/core.js"]

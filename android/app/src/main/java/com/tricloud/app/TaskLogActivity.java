@@ -110,7 +110,7 @@ public class TaskLogActivity extends BaseActivity {
     }
 
     static String stName(String s) {
-        switch (s) { case "running": return getString(R.string.s1210); case "done": return getString(R.string.s0465); case "failed": return getString(R.string.s0728); case "stopped": return getString(R.string.s0313); case "interrupted": return getString(R.string.s1211); default: return s; }
+        switch (s) { case "running": return L10n.s(R.string.s1210); case "done": return L10n.s(R.string.s0465); case "failed": return L10n.s(R.string.s0728); case "stopped": return L10n.s(R.string.s0313); case "interrupted": return L10n.s(R.string.s1211); default: return s; }
     }
 
     static int colorOf(String level) {

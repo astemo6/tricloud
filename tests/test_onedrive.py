@@ -20,6 +20,7 @@ os.environ.update(TRICLOUD_DATA=D, PANEL_PASSWORD="devpassword123", TRICLOUD_RES
 for k in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
     os.environ.pop(k, None)
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+import sys as _s; _s.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _l10n_src  # noqa: E402
 sys.path.insert(0, ROOT)
 from unittest import mock
 
@@ -586,10 +587,10 @@ ok("tenant common uses /common endpoint", any("/common/oauth2/v2.0/devicecode" i
 ok("password clear", "password_clear" in post("/api/onedrive/config", {"password_clear": True}).json()["changed"] and not onedrive.password())
 
 # ================= 15. 静态检查：Web / mock / 文档 / App =================
-W = open(os.path.join(ROOT, "web", "js", "onedrive.js"), encoding="utf-8").read()
-SJ = open(os.path.join(ROOT, "web", "js", "settings.js"), encoding="utf-8").read()
-CO = open(os.path.join(ROOT, "web", "js", "core.js"), encoding="utf-8").read()
-RT = open(os.path.join(ROOT, "web", "js", "router.js"), encoding="utf-8").read()
+W = _l10n_src.read(os.path.join(ROOT, "web", "js", "onedrive.js"))
+SJ = _l10n_src.read(os.path.join(ROOT, "web", "js", "settings.js"))
+CO = _l10n_src.read(os.path.join(ROOT, "web", "js", "core.js"))
+RT = _l10n_src.read(os.path.join(ROOT, "web", "js", "router.js"))
 M = open(os.path.join(ROOT, "demo", "mock.js"), encoding="utf-8").read()
 DOC = open(os.path.join(ROOT, "docs", "api-credentials.md"), encoding="utf-8").read()
 ok("web: OneDrive page + settings card + route", "export async function pageOneDrive" in W and 'id="odCard"' in W and "odSettingsCard()" in SJ
@@ -603,11 +604,11 @@ ok("docs: step 2 says click blue bind button after save; password no length rule
 ok("web: polling stops when leaving page", 'if (!document.getElementById("odPend")) return;' in W)
 ok("web: device code + devicelogin link + polling", "/onedrive/bind/poll" in W and "microsoft.com/devicelogin" in W)
 ok("web: restore double confirm + password", "/onedrive/restore" in W and W.count("confirmBox(") >= 1 and "备份密码" in W)
-ok("web: task type name", "onedrive_backup" in CO or "onedrive_backup" in open(os.path.join(ROOT, "web", "js", "tasks.js"), encoding="utf-8").read())
+ok("web: task type name", "onedrive_backup" in CO or "onedrive_backup" in _l10n_src.read(os.path.join(ROOT, "web", "js", "tasks.js")))
 ok("demo mock: onedrive routes", "/onedrive/bind/poll" in M and "/onedrive/restore" in M and "/onedrive/backups" in M)
 ok("docs: Azure app registration tutorial (public client, personal accounts, AppFolder)", "OneDrive 备份" in DOC and "允许公共客户端流" in DOC
    and "个人 Microsoft 帐户" in DOC and "Files.ReadWrite.AppFolder" in DOC)
-AJ = open(os.path.join(ROOT, "android", "app", "src", "main", "java", "com", "tricloud", "app", "OneDriveActivity.java"), encoding="utf-8").read()
+AJ = _l10n_src.read(os.path.join(ROOT, "android", "app", "src", "main", "java", "com", "tricloud", "app", "OneDriveActivity.java"))
 IS = open(os.path.join(ROOT, "ios", "TriCloud", "OneDrivePage.swift"), encoding="utf-8").read()
 for nm, src_ in (("android", AJ), ("ios", IS)):
     ok(f"{nm}: status / bind poll / config / backup / list / restore / unbind endpoints",

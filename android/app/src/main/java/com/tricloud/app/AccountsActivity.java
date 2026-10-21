@@ -39,7 +39,7 @@ public class AccountsActivity extends BaseActivity {
     /** {key, 标签, 占位提示, 类型(text/password/multi)}，与 Web CRED_FIELDS 一致。 */
     static final Map<String, String[][]> CRED = new LinkedHashMap<>();
     static {
-        CRED.put("oci", new String[][]{{"user", getString(R.string.s0707), "", "text"}, {"tenancy", "租户 OCID", "", "text"}, {"fingerprint", "API Key 指纹", "", "text"},
+        CRED.put("oci", new String[][]{{"user", L10n.s(R.string.s0707), "", "text"}, {"tenancy", "租户 OCID", "", "text"}, {"fingerprint", "API Key 指纹", "", "text"},
                 {"region", "区域", "ap-tokyo-1", "text"}, {"key_content", "私钥 (PEM)", "-----BEGIN PRIVATE KEY-----", "multi"}, {"pass_phrase", "私钥密码（可选）", "", "password"},
                 {"compartment", "区间 OCID（可选，默认根区间）", "", "text"}, {"home_region", "主区域（账单用，可选）", "", "text"},
                 {"proxy", "出口代理（可选）", "http://host:port", "text"}, {"proxy_user", "代理用户名（可选）", "", "text"}, {"proxy_pass", "代理密码（可选）", "", "password"}});
@@ -59,7 +59,7 @@ public class AccountsActivity extends BaseActivity {
     }
 
     static String credLabel(String k) {
-        for (String[][] fs : CRED.values()) for (String[] f : fs) if (f[0].equals(k)) return f[1].replace(getString(R.string.s0708), "").replaceAll(getString(R.string.s0709), "");
+        for (String[][] fs : CRED.values()) for (String[] f : fs) if (f[0].equals(k)) return f[1].replace(L10n.s(R.string.s0708), "").replaceAll(L10n.s(R.string.s0709), "");
         return k;
     }
 

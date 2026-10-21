@@ -11,6 +11,7 @@ os.environ.update(TRICLOUD_DATA=D, PANEL_PASSWORD="devpassword123")
 for k in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "FERNET_KEY"):
     os.environ.pop(k, None)
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+import sys as _s; _s.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _l10n_src  # noqa: E402
 sys.path.insert(0, ROOT)
 from unittest import mock
 
@@ -672,11 +673,11 @@ with TestClient(main.app) as c:
         ok("telegram /credits: AWS free plan line from cache only", lines and "FREE 计划，剩余 $118.42" in lines[1] and "1/5 已完成" in lines[1])
 
 # ================= 10. Web / demo / App 静态检查 =================
-A = open(os.path.join(ROOT, "web", "js", "aws.js"), encoding="utf-8").read()
-C = open(os.path.join(ROOT, "web", "js", "core.js"), encoding="utf-8").read()
-I = open(os.path.join(ROOT, "web", "js", "instances.js"), encoding="utf-8").read()
+A = _l10n_src.read(os.path.join(ROOT, "web", "js", "aws.js"))
+C = _l10n_src.read(os.path.join(ROOT, "web", "js", "core.js"))
+I = _l10n_src.read(os.path.join(ROOT, "web", "js", "instances.js"))
 M = open(os.path.join(ROOT, "demo", "mock.js"), encoding="utf-8").read()
-AJ = open(os.path.join(ROOT, "android", "app", "src", "main", "java", "com", "tricloud", "app", "AccountActivity.java"), encoding="utf-8").read()
+AJ = _l10n_src.read(os.path.join(ROOT, "android", "app", "src", "main", "java", "com", "tricloud", "app", "AccountActivity.java"))
 IS = open(os.path.join(ROOT, "ios", "TriCloud", "AwsCredit.swift"), encoding="utf-8").read()
 IP = open(os.path.join(ROOT, "ios", "TriCloud", "AccountPage.swift"), encoding="utf-8").read()
 ok("web: AWS tab 新号 Credit registered", '["credit", "新号 Credit"]' in C and "credit: tabAwsCredit" in I)

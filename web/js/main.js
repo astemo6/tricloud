@@ -23,7 +23,8 @@ const applyAll = () => { applyI18n(document); syncAria(); };
   // 手机（≤600px）顶栏配色下拉只显示图标，避免「🖥 跟」被截断
   const thMq = window.matchMedia ? window.matchMedia("(max-width: 600px)") : null;
   const thLabels = () => [...th.options].forEach((o) => {
-    if (!o.dataset.full) o.dataset.full = o.textContent;
+    // applyI18n 只写入文字（如「跟随系统」），图标单独放在 data-icon 里，这里拼回「🖥 跟随系统」
+    if (!o.dataset.full) o.dataset.full = o.dataset.icon && !o.textContent.startsWith(o.dataset.icon) ? `${o.dataset.icon} ${o.textContent}` : o.textContent;
     o.textContent = thMq && thMq.matches ? o.dataset.full.split(" ")[0] : o.dataset.full;
   });
   thLabels();

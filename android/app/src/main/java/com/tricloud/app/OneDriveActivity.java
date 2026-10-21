@@ -40,8 +40,8 @@ public class OneDriveActivity extends BaseActivity {
     /** build 23：计划描述用后端的 desc（每 N 小时 / 多时间点 / 每周多选 / 每月 / Cron）；旧后端没有 desc 时退回 freq/time。 */
     static String plan(JSONObject s, JSONObject c) {
         String d = s.optString("desc", "");
-        if (d.isEmpty()) d = ("weekly".equals(c.optString("freq")) ? getString(R.string.s0986, WD[Math.max(0, Math.min(6, c.optInt("weekday")))]) : getString(R.string.s0987)) + c.optString("time", "03:30");
-        return getString(R.string.s0988, d, c.optInt("keep", 30));
+        if (d.isEmpty()) d = ("weekly".equals(c.optString("freq")) ? L10n.s(R.string.s0986, WD[Math.max(0, Math.min(6, c.optInt("weekday")))]) : L10n.s(R.string.s0987)) + c.optString("time", "03:30");
+        return L10n.s(R.string.s0988, d, c.optInt("keep", 30));
     }
 
     @Override

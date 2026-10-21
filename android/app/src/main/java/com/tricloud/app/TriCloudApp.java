@@ -9,6 +9,7 @@ public class TriCloudApp extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        L10n.init(this);
         DynamicColors.applyToActivitiesIfAvailable(this);
     }
 }

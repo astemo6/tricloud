@@ -41,9 +41,9 @@ public class GuardAgentActivity extends BaseActivity {
 
     static String agentLine(JSONObject a, boolean throttleAction, boolean throttled) {
         if (a == null) return "";
-        String st = !a.optBoolean("installed") ? getString(R.string.s0881) : a.optBoolean("online") ? getString(R.string.s0882) : getString(R.string.s0883);
-        String seen = a.isNull("last_seen_text") ? "" : getString(R.string.s0884, a.optString("last_seen_text"));
-        String thr = !throttleAction ? "" : a.optBoolean("applied") ? getString(R.string.s0885) : throttled ? getString(R.string.s0886) : getString(R.string.s0887);
+        String st = !a.optBoolean("installed") ? L10n.s(R.string.s0881) : a.optBoolean("online") ? L10n.s(R.string.s0882) : L10n.s(R.string.s0883);
+        String seen = a.isNull("last_seen_text") ? "" : L10n.s(R.string.s0884, a.optString("last_seen_text"));
+        String thr = !throttleAction ? "" : a.optBoolean("applied") ? L10n.s(R.string.s0885) : throttled ? L10n.s(R.string.s0886) : L10n.s(R.string.s0887);
         return st + seen + thr;
     }
 

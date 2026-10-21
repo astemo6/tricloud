@@ -22,17 +22,17 @@ public class TasksActivity extends BaseActivity {
 
     static String tn(String t) {
         switch (t) {
-            case "snatch": return getString(R.string.s1213); case "change_ip": return getString(R.string.s0035); case "resize": return getString(R.string.s0042); case "ipv6": return "IPv6";
-            case "azure_create": return getString(R.string.s0015); case "ensure_network": return getString(R.string.s1214); case "snapshot": return getString(R.string.s1215); case "migrate": return getString(R.string.s0051); case "cf_delete": return getString(R.string.s1216);
-            case "reinstall": return getString(R.string.s0056); case "net500m": return getString(R.string.s1217); case "foundry": return getString(R.string.s1218); case "billing_keep": return getString(R.string.s1219);
-            case "aws_credit": return getString(R.string.s0013); case "onedrive_backup": return getString(R.string.s0985);
+            case "snatch": return L10n.s(R.string.s1213); case "change_ip": return L10n.s(R.string.s0035); case "resize": return L10n.s(R.string.s0042); case "ipv6": return "IPv6";
+            case "azure_create": return L10n.s(R.string.s0015); case "ensure_network": return L10n.s(R.string.s1214); case "snapshot": return L10n.s(R.string.s1215); case "migrate": return L10n.s(R.string.s0051); case "cf_delete": return L10n.s(R.string.s1216);
+            case "reinstall": return L10n.s(R.string.s0056); case "net500m": return L10n.s(R.string.s1217); case "foundry": return L10n.s(R.string.s1218); case "billing_keep": return L10n.s(R.string.s1219);
+            case "aws_credit": return L10n.s(R.string.s0013); case "onedrive_backup": return L10n.s(R.string.s0985);
             default: return t;
         }
     }
 
     static String st(String s) {
         switch (s) {
-            case "running": return getString(R.string.s1210); case "done": return getString(R.string.s0465); case "failed": return getString(R.string.s0728); case "stopped": return getString(R.string.s0313); case "interrupted": return getString(R.string.s1220);
+            case "running": return L10n.s(R.string.s1210); case "done": return L10n.s(R.string.s0465); case "failed": return L10n.s(R.string.s0728); case "stopped": return L10n.s(R.string.s0313); case "interrupted": return L10n.s(R.string.s1220);
             default: return s;
         }
     }

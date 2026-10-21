@@ -129,12 +129,12 @@ public class MainActivity extends BaseActivity {
         if (d.isEmpty()) return "";
         try {
             long days = (System.currentTimeMillis() - new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(d).getTime()) / 86400000L;
-            return getString(R.string.s0967, d, days);
+            return L10n.s(R.string.s0967, d, days);
         } catch (Exception e) { return ""; }
     }
 
     static String testOf(JSONObject acc) {
         if (!acc.has("last_test_ok") || acc.isNull("last_test_ok")) return "";
-        return acc.optInt("last_test_ok") == 1 ? getString(R.string.s0968, acc.optInt("last_test_ms")) : getString(R.string.s0969, str(acc, "last_test_error", ""));
+        return acc.optInt("last_test_ok") == 1 ? L10n.s(R.string.s0968, acc.optInt("last_test_ms")) : L10n.s(R.string.s0969, str(acc, "last_test_error", ""));
     }
 }

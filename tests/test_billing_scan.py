@@ -11,6 +11,7 @@ os.environ.update(TRICLOUD_DATA=D, PANEL_PASSWORD="devpassword123")
 for k in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "FERNET_KEY"):
     os.environ.pop(k, None)
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+import sys as _s; _s.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _l10n_src  # noqa: E402
 sys.path.insert(0, ROOT)
 from unittest import mock
 
@@ -251,7 +252,7 @@ with TestClient(main.app) as c:
 ok("constants: target 11, free 10", oci_more.BK_TARGET_GB == 11 and oci_more.PAYG_STD_FREE_GB == 10)
 
 # ================= 4. Web / demo 静态检查 =================
-web = open(os.path.join(ROOT, "web", "js", "oci.js"), encoding="utf-8").read()
+web = _l10n_src.read(os.path.join(ROOT, "web", "js", "oci.js"))
 mockjs = open(os.path.join(ROOT, "demo", "mock.js"), encoding="utf-8").read()
 demo = open(os.path.join(ROOT, "demo", "index.html"), encoding="utf-8").read()
 ok("web: bucket list has size / count / tier columns with — fallback", "<th>大小</th><th>对象数</th><th>存储层</th>" in web and '"—"' in web)

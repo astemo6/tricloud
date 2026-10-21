@@ -13,6 +13,7 @@ os.environ.update(TRICLOUD_DATA=D, PANEL_PASSWORD="devpassword123",
 for k in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "FERNET_KEY"):
     os.environ.pop(k, None)
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+import sys as _s; _s.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _l10n_src  # noqa: E402
 sys.path.insert(0, ROOT)
 from unittest import mock
 
@@ -534,15 +535,15 @@ with TestClient(main.app, raise_server_exceptions=False) as c:
         ok("cloud permission error -> 403 with missing action", r.status_code == 403 and "ec2:DescribeRegions" in r.json()["detail"])
 
 # ================= 14. 前端 / 演示 / 约束 =================
-web = "".join(open(os.path.join(ROOT, "web", "js", f), encoding="utf-8").read() for f in sorted(os.listdir(os.path.join(ROOT, "web", "js"))) if f.endswith(".js"))
+web = "".join(_l10n_src.read(os.path.join(ROOT, "web", "js", f)) for f in sorted(os.listdir(os.path.join(ROOT, "web", "js"))) if f.endswith(".js"))
 ok("web: new ops + tabs wired", all(s in web for s in ('["reinstall", "重装系统"]', '["ips", "附加 IP"]', '["net500", "500M 下行"]', '["disks", "磁盘"]',
                                                      '["lsports", "防火墙"]', '["quality", "IP 质量"]', '["storage", "存储"]', '["objects", "对象存储"]',
-                                                     "tabOciRegionSub", "pageFreeCheck", "QUALITY_FIELDS", "data-off", "proxycheck_key")))
+                                                     "tabOciRegionSub", "pageFreeCheck", "qualityFields", "data-off", "proxycheck_key")))
 ok("web: 区域订阅 not in OCI tab bar, folded at bottom of 配额/网络", '["regionsub", "区域订阅"]' not in web and "regionSubSection(acc)" in web
    and '高级 · 区域订阅（不可撤销）' in web and 'document.createElement("details")' in web and 'addEventListener("toggle"' in web)
 ok("web: 区域订阅 subscribe requires typing region name (ap-osaka-1) after confirm", "typeKeyConfirm(b.dataset.n, b.dataset.sub)" in web and 'inp.value.trim() !== name' in web and "ok.disabled = true" in web)
 ok("web: old #/oci/<id>/regionsub route maps to limits", 'TAB_ALIAS = { oci: { regionsub: "limits" } }' in web and "TAB_ALIAS[p[0]]" in web)
-_aj = open(os.path.join(ROOT, "android", "app", "src", "main", "java", "com", "tricloud", "app", "AccountActivity.java"), encoding="utf-8").read()
+_aj = _l10n_src.read(os.path.join(ROOT, "android", "app", "src", "main", "java", "com", "tricloud", "app", "AccountActivity.java"))
 ok("android: 区域订阅 tab removed, folded section + typed key confirm", '{"regionsub", "区域订阅"}' not in _aj and "ociRegionSubSection()" in _aj
    and "typeKeyConfirm(" in _aj and "pos.setEnabled(name.equals(" in _aj and '"regionsub".equals(tab)) tab = "limits"' in _aj)
 _is = "".join(open(os.path.join(ROOT, "ios", "TriCloud", f), encoding="utf-8").read() for f in ("AccountPage.swift", "AccountPage+V16.swift"))

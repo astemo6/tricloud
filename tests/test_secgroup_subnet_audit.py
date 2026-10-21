@@ -10,6 +10,7 @@ os.environ.update(TRICLOUD_DATA=D, PANEL_PASSWORD="devpassword123")
 for k in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "FERNET_KEY"):
     os.environ.pop(k, None)
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+import sys as _s; _s.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _l10n_src  # noqa: E402
 sys.path.insert(0, ROOT)
 from unittest import mock
 
@@ -221,8 +222,8 @@ with TestClient(main.app) as c:
        and any(x["action"] == "DELETE /api/audit" and "400" in x["detail"] for x in core.q("SELECT * FROM audit")))
 
 # ================= 4. Web / demo 静态检查 =================
-W = open(os.path.join(ROOT, "web", "js", "oci.js"), encoding="utf-8").read()
-S = open(os.path.join(ROOT, "web", "js", "settings.js"), encoding="utf-8").read()
+W = _l10n_src.read(os.path.join(ROOT, "web", "js", "oci.js"))
+S = _l10n_src.read(os.path.join(ROOT, "web", "js", "settings.js"))
 M = open(os.path.join(ROOT, "demo", "mock.js"), encoding="utf-8").read()
 ok("web: secgroup uses subnet dropdown + security-subnets, no instance dropdown", 'id="sgSub"' in W and "/oci/security-subnets?" in W and 'id="sgInst"' not in W)
 ok("web: rules / add / delete use subnet_id", "security-rules?subnet_id=" in W and W.count("subnet_id: sid") == 2)

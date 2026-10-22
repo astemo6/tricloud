@@ -353,6 +353,24 @@ class OCIMore:
             if s.time_start:
                 st = s.time_start if isinstance(s.time_start, dt.datetime) else dt.datetime.fromisoformat(str(s.time_start)[:19])
                 res["age_days"] = (dt.datetime.now(dt.timezone.utc) - st.replace(tzinfo=st.tzinfo or dt.timezone.utc)).days
+        if not res.get("plan_type"):
+            try:
+                tc = self._c(oci.tenant_manager_control_plane.SubscriptionClient, dict(self.cfg, region=home))
+                items = tc.list_subscriptions(compartment_id=self.cfg["tenancy"]).data.items or []
+                cm = next((x for x in items if x.service_name == "CLOUDCM"), None)
+                if cm:
+                    mapped = {"PAYG": "PAYG", "FREE_TRIAL": "FREE_TIER"}.get(_v(cm.payment_model))
+                    if mapped:
+                        res["plan_type"] = mapped
+                        res["label"] = {"FREE_TIER": "免费试用 / 免费号", "PAYG": "升级号（按量付费）"}.get(mapped)
+                        sd = getattr(cm, "start_date", None)
+                        res["time_start"] = str(sd)[:10] if sd else None
+                        if sd:
+                            st = sd if isinstance(sd, dt.datetime) else dt.datetime.fromisoformat(str(sd)[:19])
+                            res["age_days"] = (dt.datetime.now(dt.timezone.utc) - st.replace(tzinfo=st.tzinfo or dt.timezone.utc)).days
+            except Exception as e:
+                if "error" not in res:
+                    res["error"] = f"新接口查询订阅失败：{str(getattr(e, 'message', e))[:160]}"
         return res
 
     # ================= 15. 免费 AMD 下行 500Mbps =================

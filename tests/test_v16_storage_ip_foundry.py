@@ -263,6 +263,69 @@ ok("oci account_type: PAYG -> 升级号, age_days computed", r["label"].startswi
    and r["time_start"] == "2025-01-01")
 
 
+# 7b. 账号类型兜底：老接口订阅记录为空 → 查新接口（tenant_manager_control_plane 的 CLOUDCM.payment_model）
+class OSPEmpty:
+    def list_subscriptions(self, osp_home_region, compartment_id):
+        return Obj(data=Obj(items=[Obj(plan_type=None, account_type=None, upgrade_state=None, time_start=None,
+                                       time_plan_upgrade=None, currency_code=None)]))
+
+
+class TMC:
+    def __init__(self, items):
+        self.items = items
+
+    def list_subscriptions(self, compartment_id):
+        return Obj(data=Obj(items=self.items))
+
+
+class TMCBoom:
+    def list_subscriptions(self, compartment_id):
+        raise RuntimeError("boom")
+
+
+def _c2(osp_client, tmc_client, calls):
+    def _c(cls, cfg=None):
+        if cls is oci.tenant_manager_control_plane.SubscriptionClient:
+            calls.append("tmc")
+            return tmc_client
+        return osp_client
+    return _c
+
+
+def _ident(region):
+    return Obj(list_region_subscriptions=lambda t: Obj(data=[Obj(region_name=region, is_home_region=True)]),
+               get_tenancy=lambda t: Obj(data=Obj(name="ten")))
+
+
+p = bare_oci()
+p.identity = _ident("eu-frankfurt-1")
+calls = []
+p._c = _c2(OSPEmpty(), TMC([Obj(service_name="IDCS", payment_model=None, start_date=None),
+                            Obj(service_name="CLOUDCM", payment_model="PAYG", start_date="2024-12-14T09:39:35+00:00")]), calls)
+r = p.account_type()
+ok("oci account_type fallback: empty OSP + CLOUDCM PAYG -> 升级号, time_start from start_date",
+   r["plan_type"] == "PAYG" and r["label"].startswith("升级号") and r["time_start"] == "2024-12-14" and calls == ["tmc"])
+
+p = bare_oci()
+p.identity = _ident("ap-sydney-1")
+p._c = _c2(OSPEmpty(), TMC([Obj(service_name="CLOUDCM", payment_model="FREE_TRIAL", start_date="2020-02-29T00:00:00+00:00")]), [])
+r = p.account_type()
+ok("oci account_type fallback: CLOUDCM FREE_TRIAL -> 免费号", r["plan_type"] == "FREE_TIER" and r["label"].startswith("免费"))
+
+p = bare_oci()
+p.identity = _ident("eu-frankfurt-1")
+p._c = _c2(OSPEmpty(), TMCBoom(), [])
+r = p.account_type()
+ok("oci account_type fallback: new API failure keeps 未知, no raise", r["label"] == "未知" and "error" in r)
+
+p = bare_oci()
+p.identity = _ident("ap-tokyo-1")
+calls = []
+p._c = _c2(OSP(), TMCBoom(), calls)
+r = p.account_type()
+ok("oci account_type: valid OSP -> new API never called", r["plan_type"] == "PAYG" and calls == [] and "error" not in r)
+
+
 # ================= 8. 500Mbps =================
 p = bare_oci()
 p.compute = Obj(get_instance=lambda iid: Obj(data=Obj(shape="VM.Standard.A1.Flex", display_name="a1")))

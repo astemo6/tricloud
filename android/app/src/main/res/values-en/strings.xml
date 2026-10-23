@@ -87,7 +87,7 @@
     <string name="s0083">\nAzure will deallocate and release the compute resources.</string>
     <string name="s0084">Really %1$s “%2$s”?%3$s</string>
     <string name="s0085">Rename instance</string>
-    <string name="s0086">The panel only changes the cloud display name and never runs commands inside the OS. After saving, you'll get the command to change the OS hostname yourself over SSH.</string>
+    <string name="s0086">The panel only changes the cloud display name and never runs commands inside the OS. After saving, you will get the command to change the OS hostname yourself over SSH.</string>
     <string name="s0087">New name</string>
     <string name="s0089">Save</string>
     <string name="s0090">Name can\'t be empty</string>

@@ -1,9 +1,7 @@
-### 1.6.0 build 27 更新内容
+### 1.6.1 build 29 更新内容
 
-- **绑定域名只填前缀**：选好域名后只需输入 `node1` 这样的前缀，自动补成 `node1.你的域名`；`@` 表示根域名，填完整名也照旧可用。
-- **切换语言立即生效**：Android / iOS 在设置里切换中文 / English 后马上换语言，不用重启 App；补齐了几处原来只有中文的选项（凭证字段、规格说明、CloudFront 套餐、OneDrive 星期和频率等）。
-- 包含 build 26 的中英双语。
-- 版本：Android versionCode 27 / iOS build 27（版本号仍 1.6.0），需同时更新面板到最新版。
+- **改名不再勾选同步主机名**：实例改名对话框去掉「同步修改系统主机名」勾选——面板只修改云端显示名，不进系统执行命令（后端已关停 OCI Run Command / Azure Run Command / AWS SSM 自动同步链）。保存后会给出修改系统主机名的命令，复制后 SSH 登录手动执行即可。
+- 版本：Android versionCode 29 / iOS build 29（versionName 1.6.1），需同时更新面板到最新版。
 
 **Android**：下载 `TriCloud-*.apk` 直接安装（需允许安装未知来源应用），可覆盖升级。
 

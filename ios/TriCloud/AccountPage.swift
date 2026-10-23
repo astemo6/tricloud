@@ -367,15 +367,14 @@ final class AccountPage: Page {
         }
     }
 
-    // v1.5 改名 + 同步系统主机名（通过云厂商 Run Command 执行固定命令，不走 SSH）
+    // 改名只改云端显示名；系统主机名在改名结果里给手动命令（面板不进系统执行命令，v1.6 关停自动同步）
     func rename(_ inst: JObj, _ kind: String) {
-        form("实例改名", "Azure 直接生效；OCI 需开启 Oracle Cloud Agent 的 Run Command 插件；AWS 需 SSM 托管；重新登录 SSH 后可见。",
-             [Field.text("new_name", "新名称", inst.optString("name")), Field.check("sync_hostname", "同步修改系统主机名（SSH 显示）", true)], "保存") { v in
+        form("实例改名", "面板只修改云端显示名，不会进系统执行命令；保存后会给出修改系统主机名的命令，可自行 SSH 登录执行。",
+             [Field.text("new_name", "新名称", inst.optString("name"))], "保存") { v in
             let name = v.optString("new_name").trimmingCharacters(in: .whitespacesAndNewlines)
             if name.isEmpty { self.toast("名称不能为空"); return }
             var b = self.base(inst, kind)
             b["new_name"] = name
-            b["sync_hostname"] = v.optBoolean("sync_hostname", true)
             self.post("/accounts/\(self.id)/instances/rename", b) { x in self.renameResult(jobj(x)); self.refresh() }
         }
     }

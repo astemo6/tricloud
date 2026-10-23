@@ -87,9 +87,8 @@
     <string name="s0083">\nAzure 将 deallocate 释放计算资源。</string>
     <string name="s0084">确定%1$s「%2$s」？%3$s</string>
     <string name="s0085">实例改名</string>
-    <string name="s0086">Azure 直接生效；OCI 需开启 Oracle Cloud Agent 的 Run Command 插件；AWS 需 SSM 托管；重新登录 SSH 后可见。</string>
+    <string name="s0086">面板只修改云端显示名，不会进系统执行命令；保存后会给出修改系统主机名的命令，可自行 SSH 登录执行。</string>
     <string name="s0087">新名称</string>
-    <string name="s0088">同步修改系统主机名（SSH 显示）</string>
     <string name="s0089">保存</string>
     <string name="s0090">名称不能为空</string>
     <string name="s0091">已改名</string>

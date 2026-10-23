@@ -334,15 +334,14 @@ public class AccountActivity extends BaseActivity {
         });
     }
 
-    // v1.5 改名 + 同步系统主机名（通过云厂商 Run Command 执行固定命令，不走 SSH）
+    // 改名只改云端显示名；系统主机名在改名结果里给手动命令（面板不进系统执行命令，v1.6 关停自动同步）
     private void rename(JSONObject inst, String kind) {
         form(getString(R.string.s0085), getString(R.string.s0086),
-                Arrays.asList(Field.text("new_name", getString(R.string.s0087), inst.optString("name")),
-                        Field.check("sync_hostname", getString(R.string.s0088), true)), getString(R.string.s0089), v -> {
+                Arrays.asList(Field.text("new_name", getString(R.string.s0087), inst.optString("name"))), getString(R.string.s0089), v -> {
             String name = v.optString("new_name").trim();
             if (name.isEmpty()) { toast(getString(R.string.s0090)); return; }
             try {
-                JSONObject b = base(inst, kind).put("new_name", name).put("sync_hostname", v.optBoolean("sync_hostname", true));
+                JSONObject b = base(inst, kind).put("new_name", name);
                 Api.post(this, "/accounts/" + id + "/instances/rename", b, x -> { renameResult(Api.obj(x)); refresh(); });
             } catch (Exception ignored) { }
         });

@@ -57,7 +57,7 @@
 "API Token 只能查看状态，不显示安装命令。" = "API Token 只能查看状态，不显示安装命令。";
 "AWS / Azure 没有免费接口能读到账号创建日期，请按控制台或注册邮件填写。" = "AWS / Azure 没有免费接口能读到账号创建日期，请按控制台或注册邮件填写。";
 "Azure 应用" = "Azure 应用";
-"Azure 直接生效；OCI 需开启 Oracle Cloud Agent 的 Run Command 插件；AWS 需 SSM 托管；重新登录 SSH 后可见。" = "Azure 直接生效；OCI 需开启 Oracle Cloud Agent 的 Run Command 插件；AWS 需 SSM 托管；重新登录 SSH 后可见。";
+"面板只修改云端显示名，不会进系统执行命令；保存后会给出修改系统主机名的命令，可自行 SSH 登录执行。" = "面板只修改云端显示名，不会进系统执行命令；保存后会给出修改系统主机名的命令，可自行 SSH 登录执行。";
 "Business $200/月" = "Business $200/月";
 "CloudFront 分发数上限" = "CloudFront 分发数上限";
 "Cloudflare DNS 联动" = "Cloudflare DNS 联动";
@@ -354,7 +354,6 @@
 "吊销哪个 Token" = "吊销哪个 Token";
 "同时分配公网 IPv6" = "同时分配公网 IPv6";
 "同时删除预算 tricloud-credit-budget（预算免费，一般不用删）" = "同时删除预算 tricloud-credit-budget（预算免费，一般不用删）";
-"同步修改系统主机名（SSH 显示）" = "同步修改系统主机名（SSH 显示）";
 "名称" = "名称";
 "名称不一致" = "名称不一致";
 "名称不能为空" = "名称不能为空";

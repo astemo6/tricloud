@@ -536,7 +536,7 @@ export const STR = {
     "common.yes": "是", "common.no": "否", "common.understood": "知道了",
     // ---- 实例页 ----
     "inst.locating": "正在定位有机器的区域…",
-    "inst.renameTip": "Azure 直接生效；OCI 需开启 Oracle Cloud Agent 的 Run Command 插件；AWS 需 SSM 托管；重新登录 SSH 后可见。",
+    "inst.renameTip": "面板只修改云端显示名，不会进系统执行命令；保存后会给出修改系统主机名的命令，可自行 SSH 登录执行。",
     "inst.renamedSynced": "已改名，系统主机名已同步", "inst.renamed": "已改名",
     "inst.hostnameDispatched": "主机名同步已下发", "inst.renamedMsg": "已改名。{msg}", "inst.renamedNotSynced": "已改名。主机名未同步：{msg}",
     "inst.renameFailTitle": "已改名，主机名同步失败", "inst.renameManualTitle": "已改名，主机名未自动同步",
@@ -1316,7 +1316,7 @@ export const STR = {
     "common.yes": "Yes", "common.no": "No", "common.understood": "Got it",
     // ---- instance pages ----
     "inst.locating": "Locating a region with instances…",
-    "inst.renameTip": "Azure: takes effect directly. OCI: requires the Oracle Cloud Agent Run Command plugin. AWS: requires SSM management. Visible after re-login via SSH.",
+    "inst.renameTip": "The panel only changes the cloud display name and never runs commands inside the OS. After saving, you'll get the command to change the OS hostname yourself over SSH.",
     "inst.renamedSynced": "Renamed; hostname synced", "inst.renamed": "Renamed",
     "inst.hostnameDispatched": "Hostname sync dispatched", "inst.renamedMsg": "Renamed. {msg}", "inst.renamedNotSynced": "Renamed. Hostname not synced: {msg}",
     "inst.renameFailTitle": "Renamed — hostname sync failed", "inst.renameManualTitle": "Renamed — hostname not auto-synced",

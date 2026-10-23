@@ -236,19 +236,6 @@ class OCIProvider(OCIMore):
             self._agent = self._c(oci.compute_instance_agent.ComputeInstanceAgentClient)
         return self._agent
 
-    def _set_hostname_label(self, inst_id, h):
-        """主 VNIC 的 hostname_label（内网 DNS 名）。冲突 / 子网未开 DNS 等只记录，不抛出。"""
-        try:
-            v = self._primary_vnic(inst_id)
-            if not v:
-                return "内网 DNS 名未更新：找不到主 VNIC"
-            if getattr(v, "hostname_label", None) == h:
-                return "内网 DNS 名已是 " + h
-            self.vnet.update_vnic(v.id, oci.core.models.UpdateVnicDetails(hostname_label=h))
-            return "内网 DNS 名已更新为 " + h
-        except Exception as e:
-            return f"内网 DNS 名未更新（{hostname.err_text(e)}）"
-
     def _run_cmd_plugin_state(self, inst_id):
         """Run Command 插件状态：RUNNING / STOPPED / NOT_SUPPORTED / INVALID；查不到（权限等）返回 None。"""
         try:
@@ -256,46 +243,6 @@ class OCIProvider(OCIMore):
             return (pc.get_instance_agent_plugin(inst_id, self.compartment, self.RUN_CMD_PLUGIN).data.status or "").upper()
         except Exception:
             return None
-
-    def sync_hostname(self, inst_id, h, wait=10):
-        M = oci.compute_instance_agent.models
-        dns = self._set_hostname_label(inst_id, h)
-        st = self._run_cmd_plugin_state(inst_id)
-        if st and st != "RUNNING":
-            return {"status": "failed", "message": f"{dns}；Oracle Cloud Agent 的「{self.RUN_CMD_PLUGIN}」插件未运行（{st}），"
-                    "请在实例详情 → Oracle Cloud Agent 中启用后重试，或 SSH 登录手动执行下面的命令"}
-        det = M.CreateInstanceAgentCommandDetails(
-            compartment_id=self.compartment, execution_time_out_in_seconds=120, display_name="tricloud-hostname",
-            target=M.InstanceAgentCommandTarget(instance_id=inst_id),
-            content=M.InstanceAgentCommandContent(source=M.InstanceAgentCommandSourceViaTextDetails(
-                source_type="TEXT", text=hostname.root_wrap(h))))
-        try:
-            cmd = self.agent.create_instance_agent_command(det).data
-        except Exception as e:
-            code = getattr(e, "status", None)
-            why = ("权限不足：需要 IAM 策略允许管理 instance-agent-command-family（及 instance-agent-plugins 读取）"
-                   if code in (401, 403, 404) or "NotAuthorized" in str(e) else hostname.err_text(e))
-            return {"status": "failed", "message": f"{dns}；Run Command 下发失败：{why}"}
-        status, msg = "pending", f"{dns}；已通过 Oracle Cloud Agent 下发改主机名命令（需插件已开启），稍后重新登录 SSH 可见"
-        end = time.time() + max(0, wait or 0)
-        while time.time() < end:
-            time.sleep(3)
-            try:
-                ex = self.agent.get_instance_agent_command_execution(cmd.id, inst_id).data
-            except Exception:
-                continue
-            ls = (ex.lifecycle_state or "").upper()
-            if ls == "SUCCEEDED":
-                code = getattr(getattr(ex, "content", None), "exit_code", 0)
-                if code in (0, None):
-                    status, msg = "ok", f"{dns}；系统主机名已改为 {h}，重新登录 SSH 可见"
-                else:
-                    status, msg = "failed", f"{dns}；命令执行返回 {code}。{hostname.OCI_SUDO_HINT}"
-                break
-            if ls in ("FAILED", "TIMED_OUT", "CANCELED"):
-                status, msg = "failed", f"{dns}；命令执行{ls}（插件未开启或 ocarun 无 sudo 权限）。{hostname.OCI_SUDO_HINT}"
-                break
-        return {"status": status, "message": msg, "command_id": cmd.id}
 
     def boot_volume(self, inst_id):
         inst = self.compute.get_instance(inst_id).data

@@ -3,9 +3,9 @@ import re
 
 from fastapi import APIRouter, Body, HTTPException
 
-from .. import core, dns, hostname, net, overview, security, services, tasks
+from .. import core, dns, hostname, net, overview, services, tasks
 from ..i18n import msg
-from .common import _public_guard, _req, _truthy, call, guarded, need_acc, run
+from .common import _public_guard, _req, call, guarded, need_acc, run
 
 router = APIRouter()
 
@@ -131,17 +131,6 @@ async def inst_open_port(acc_id: int, iid: str, body: dict = Body(...)):
     return res
 
 
-def rename_sync(acc, prov, inst_id, name, kind="vm"):
-    """改名后同步系统主机名（尽力而为，绝不让改名失败），并写一条审计。"""
-    r = hostname.sync(acc, prov, inst_id, name, kind)
-    try:
-        security.audit("-", "hostname-sync", f"hostname-sync {acc['provider']}",
-                     f"{inst_id} -> {r.get('hostname') or '-'}: {r['status']} {r.get('message', '')}")
-    except Exception:
-        pass
-    return r
-
-
 async def do_rename(acc_id, body, provider=None):
     acc = need_acc(acc_id, provider)
     name = (body.get("new_name") or "").strip()
@@ -158,9 +147,9 @@ async def do_rename(acc_id, body, provider=None):
     if not hasattr(prov, "rename"):
         raise HTTPException(400, msg("err.no_rename"))
     res = dict(await run(prov.rename, body["instance_id"], name) or {}, ok=True)
-    # v1.5：sync_hostname 默认 true —— 通过云厂商 Run Command 执行固定命令改系统主机名
-    res["hostname"] = await run(rename_sync, acc, prov, body["instance_id"], name, kind) \
-        if _truthy(body.get("sync_hostname"), True) else None
+    # v1.6 关停自动同步主机名（Run Command / SSM 通道风险过高）：只改云端显示名，
+    # 系统主机名返回手动命令给用户 SSH 自行执行；body 里的 sync_hostname 参数不再理会
+    res["hostname"] = hostname.manual_result(name)
     return res
 
 

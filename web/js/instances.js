@@ -60,7 +60,7 @@ export function instOps(acc, kind) {
   ops.push(["dns", t("op.dns")], ["monitor", t("op.monitor")], ["terminate", acc.provider === "azure" || kind === "lightsail" ? t("op.delete") : t("op.terminate")]);
   return v16Ops(acc, kind, ops);   // v1.6：附加 IP / 500M / 磁盘 / 防火墙 / IP 质量 / 重装系统
 }
-// v1.5：改名同步主机名 —— 只通过云厂商 Run Command 执行固定命令，不走 SSH
+// 改名只改云端显示名；系统主机名在改名结果里给手动命令（面板不进系统执行命令，v1.6 关停自动同步）
 export const RENAME_HOSTNAME_TIP = "inst.renameTip";
 export function renameResult(r) {
   const h = r && r.hostname;
@@ -178,7 +178,6 @@ export async function instOp(acc, inst, op, kind, btn, reload) {
     if (await act(btn, () => post(`/accounts/${acc.id}/oci/ipv6/delete`, { ...base, confirm: true }), (r) => t("inst.deletedList", { list: r.deleted.join(", ") }))) setTimeout(reload, 1500);
   } else if (op === "rename") {
     const r = await modal(t("inst.renameTitle"), `<input name="new_name" value="${esc(inst.name)}">
-      <label><input type="checkbox" name="sync_hostname" style="width:auto" checked> ${t("inst.syncHostname")}</label>
       <p class="muted">${t(RENAME_HOSTNAME_TIP)}</p>`, (bg) => post(`/accounts/${acc.id}/instances/rename`, { ...base, ...form(bg) }), t("common.save"));
     if (r) { renameResult(r); reload(); }
   } else if (op === "bootvol") {

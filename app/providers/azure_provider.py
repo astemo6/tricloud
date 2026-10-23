@@ -231,31 +231,6 @@ class AzureProvider(AzureMore, AzureFoundry):
         self.compute.virtual_machines.begin_update(rg, n, {"tags": tags}).result()
         return {"ok": True}
 
-    def sync_hostname(self, inst_id, h, wait=10):
-        rg, n = self._vm_id(inst_id)
-        vm = self.compute.virtual_machines.get(rg, n)
-        sp = getattr(vm, "storage_profile", None)
-        os_type = str(getattr(getattr(sp, "os_disk", None), "os_type", "") or "")
-        if "windows" in os_type.lower() or getattr(getattr(vm, "os_profile", None), "windows_configuration", None):
-            return {"status": "unsupported", "message": "Windows 虚拟机不支持自动同步主机名（修改计算机名需要重启），已跳过", "_manual": False}
-        try:
-            poller = self.compute.virtual_machines.begin_run_command(
-                rg, n, {"command_id": "RunShellScript", "script": [hostname.build_cmd(h)]})
-        except Exception as e:
-            return {"status": "failed", "message": f"Run Command 下发失败（虚拟机需处于运行状态）：{hostname.err_text(e)}"}
-        if wait:
-            try:
-                poller.wait(wait)
-            except Exception:
-                pass
-        if poller.done():
-            try:
-                poller.result()
-                return {"status": "ok", "message": f"系统主机名已改为 {h}，重新登录 SSH 可见"}
-            except Exception as e:
-                return {"status": "failed", "message": f"Run Command 执行失败：{hostname.err_text(e)}"}
-        return {"status": "pending", "message": f"已通过 Azure Run Command 下发，通常 1 分钟内生效（主机名 {h}），重新登录 SSH 可见"}
-
     # ---------- 实例操作「开放端口」 ----------
     @staticmethod
     def _parse_ref(rid):

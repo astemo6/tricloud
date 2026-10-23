@@ -1111,12 +1111,11 @@
     if (p.match(/\/(oci|instances)\/rename$/) && method === "POST") { var ra = accOf(p) || {};
       Object.keys(inst).forEach(function (k) { inst[k].forEach(function (i) { if (i.id === body.instance_id) i.name = body.new_name; }); });
       var hn = String(body.new_name || "").toLowerCase().replace(/[\s_.]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "").slice(0, 63).replace(/-+$/, "");
-      audit1("POST /instances/rename", body.new_name + (body.sync_hostname === false ? "" : " · hostname " + (hn || "-")));
-      if (body.sync_hostname === false) return { ok: true, hostname: null };
-      if (!hn) return { ok: true, hostname: { status: "unsupported", message: "名称规范化后为空（只保留 a-z 0-9 -），已跳过主机名同步（演示）" } };
-      // 演示：Azure（Run Command）与 OCI（Oracle Cloud Agent）均同步成功
-      return { ok: true, hostname: { status: "ok", hostname: hn, message: (ra.provider === "azure" ? "Azure Run Command" : ra.provider === "aws" ? "SSM" : "Oracle Cloud Agent")
-        + "：系统主机名已改为 " + hn + "，重新登录 SSH 可见（演示）" } }; }
+      audit1("POST /instances/rename", body.new_name + " · hostname manual " + (hn || "-"));
+      if (!hn) return { ok: true, hostname: { status: "unsupported", message: "名称规范化后为空（只保留 a-z 0-9 -），无法生成主机名命令（演示）" } };
+      // 演示：面板只改显示名，系统主机名返回手动命令（不下发任何命令）
+      return { ok: true, hostname: { status: "manual", hostname: hn, message: "已修改显示名。面板不自动同步系统主机名——SSH 登录实例后执行下面的命令（演示）",
+        manual_cmd: "sudo sh -c 'hostnamectl set-hostname " + hn + "'" } }; }
     if (p.match(/\/oci\/network$/)) return { ok: true, task_id: addTask("network", (accOf(p) || {}).id, "自动创建 VCN + IPv6") };
     // AWS
     if (p.match(/\/aws\/ec2-options$/)) return { types: ["t3.micro", "t3.small", "t3.medium", "t4g.micro", "t4g.small", "c7i.large"], os: ["debian-12", "ubuntu-24.04", "ubuntu-22.04", "amazon-linux-2023"] };

@@ -171,38 +171,6 @@ class AWSProvider(AWSMore, AWSCredit):
         self.c("ec2").create_tags(Resources=[inst_id], Tags=[{"Key": "Name", "Value": name}])
         return {"ok": True}
 
-    def sync_hostname(self, inst_id, h, wait=10):
-        ssm = self.c("ssm")
-        try:
-            info = ssm.describe_instance_information(
-                Filters=[{"Key": "InstanceIds", "Values": [inst_id]}])["InstanceInformationList"]
-        except Exception as e:
-            return {"status": "failed", "message": f"查询 SSM 托管状态失败（需 ssm:DescribeInstanceInformation 权限）：{hostname.err_text(e)}"}
-        if not info:
-            return {"status": "failed", "message": "实例未被 SSM 托管（需安装并运行 SSM Agent，且实例角色带 AmazonSSMManagedInstanceCore 策略），"
-                    "无法自动同步；可 SSH 登录手动执行下面的命令"}
-        if (info[0].get("PlatformType") or "").lower() == "windows":
-            return {"status": "unsupported", "message": "Windows 实例不支持自动同步主机名，已跳过", "_manual": False}
-        if info[0].get("PingStatus") not in (None, "Online"):
-            return {"status": "failed", "message": f"SSM Agent 当前不在线（{info[0].get('PingStatus')}），无法下发命令"}
-        try:
-            cid = ssm.send_command(InstanceIds=[inst_id], DocumentName="AWS-RunShellScript", Comment="tricloud hostname",
-                                   Parameters={"commands": [hostname.build_cmd(h)]}, TimeoutSeconds=60)["Command"]["CommandId"]
-        except Exception as e:
-            return {"status": "failed", "message": f"SSM 下发命令失败：{hostname.err_text(e)}"}
-        end = time.time() + max(0, wait or 0)
-        while time.time() < end:
-            time.sleep(2)
-            try:
-                st = ssm.get_command_invocation(CommandId=cid, InstanceId=inst_id)["Status"]
-            except Exception:
-                continue
-            if st == "Success":
-                return {"status": "ok", "message": f"系统主机名已改为 {h}，重新登录 SSH 可见", "command_id": cid}
-            if st in ("Failed", "Cancelled", "TimedOut", "Undeliverable", "Terminated"):
-                return {"status": "failed", "message": f"SSM 命令执行状态：{st}", "command_id": cid}
-        return {"status": "pending", "message": f"已通过 SSM 下发改主机名命令（{h}），稍后重新登录 SSH 可见", "command_id": cid}
-
     def get_state(self, inst_id):
         r = self.c("ec2").describe_instances(InstanceIds=[inst_id])
         return r["Reservations"][0]["Instances"][0]["State"]["Name"]

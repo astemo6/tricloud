@@ -25,12 +25,9 @@ jobs:
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          mkdir -p "$HOME/.android"
-          echo "$KS_B64" | base64 -d > "$HOME/.android/debug.keystore"
-          ls -la "$HOME/.android/"
-          sha256sum "$HOME/.android/debug.keystore"
-          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android | grep -E "SHA256" || true
-          echo "HOME=$HOME user.home check:"; java -XshowSettings:properties -version 2>&1 | grep "user.home"
+          echo "$KS_B64" | base64 -d > android/debug.keystore
+          sha256sum android/debug.keystore
+          keytool -list -v -keystore android/debug.keystore -storepass android | grep -E "SHA256" || true
       - name: Ensure Android SDK 34
         run: |
           if [ ! -d "$ANDROID_HOME/platforms/android-34" ]; then

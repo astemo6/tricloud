@@ -23,8 +23,19 @@ android {
                 keyPassword ksProps['keyPassword']
             }
         }
+        // CI 固定签名：android/debug.keystore 存在时 debug 包用它签（指纹 2308e396…，与历史包一致）；
+        // 文件不存在（本地开发）时不启用，仍走 AGP 默认 debug 签名。
+        debugFixed {
+            storeFile rootProject.file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
     }
     buildTypes {
+        debug {
+            if (rootProject.file('debug.keystore').exists()) signingConfig signingConfigs.debugFixed
+        }
         release {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'

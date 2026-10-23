@@ -70,6 +70,17 @@ export function modal(title, bodyHtml, onOk, okText = t("common.ok"), danger = f
     };
   });
 }
+// ESC 关闭最顶层弹窗：点它自己的 [data-x]，与鼠标点「取消/关闭」完全同一条路径（只会取消、绝不误确认）；
+// 一次按键只关一层（弹窗可叠开）。给事件打 _escHandled 标记，让 main.js 里任务抽屉的 ESC 跳过同一次按键。
+// 输入法组词中的 ESC 是输入法自己的取消操作，不关弹窗。
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || e.isComposing) return;
+  const top = lastModal();
+  if (!top) return;
+  e._escHandled = true;
+  const x = top.querySelector("[data-x]");
+  if (x) x.click(); else top.remove();
+});
 // v1.4：<div data-show-when="mode=rolling"> 按同一弹窗里字段的值显示 / 隐藏（多个条件用 & 连接，值可用 | 表示或）
 export function applyShowWhen(root) {
   root.querySelectorAll("[data-show-when]").forEach((el) => {

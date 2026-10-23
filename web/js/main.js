@@ -59,7 +59,7 @@ const applyAll = () => { applyI18n(document); syncAria(); };
   $("#taskBtn").onclick = () => (TaskDrawer.isOpen() ? TaskDrawer.close() : TaskDrawer.open());
   $("#tdClose").onclick = () => TaskDrawer.close();
   $("#tdScrim").onclick = () => TaskDrawer.close();
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && TaskDrawer.isOpen() && !document.querySelector(".modal-bg")) TaskDrawer.close(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !e._escHandled && TaskDrawer.isOpen() && !document.querySelector(".modal-bg")) TaskDrawer.close(); });
   const badge = () => { if (!document.hidden && !TaskDrawer.isOpen()) api("/tasks?limit=20").then(updateTaskBadge).catch(() => {}); };
   setInterval(badge, 15000);
   await loadAccounts();

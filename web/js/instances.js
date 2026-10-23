@@ -93,6 +93,7 @@ export function instCard(acc, i, kind) {
     <span>${t("inst.private")}</span><span class="mono">${esc(i.private_ip || "-")}</span>
     ${extra.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join("")}
     <span>${t("inst.zone")}</span><span>${esc(i.zone ? regionLabel(i.zone) : "-")}</span>
+    ${(i._dns || []).length ? `<span>${t("op.dns")}</span><span class="mono wide">${i._dns.map((x) => "🌐 " + esc(x)).join("<br>")}</span>` : ""}
     ${ip6 !== "-" ? `<span>IPv6</span><span class="mono wide">${ip6}</span>` : ""}</div>
     <div class="ops">${inl.map(([o, l]) => opBtn(o, l, i)).join("")}${more ? `<button class="btn sm" data-more aria-label="${t("inst.moreOps")}">${t("inst.more")} ▾</button>` : ""}</div></div>`;
 }
@@ -114,6 +115,12 @@ export async function tabInstances(acc, box, kind = "vm") {
   try { list = await api(`/accounts/${acc.id}/instances?kind=${kind}&${rq(acc)}`); }
   catch (e) { $("#list", box).innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
   $("#info", box).textContent = t("inst.count", { n: list.length });
+  // DNS 绑定标记：已绑定的实例在卡片/表格里直接带子域名，不用点进对话框才分得清（拉不到就静默不显示）
+  try {
+    const byInst = {};
+    (await api("/dns-bindings")).filter((d) => +d.account_id === +acc.id).forEach((d) => { (byInst[d.instance_id] = byInst[d.instance_id] || []).push(d.record); });
+    list.forEach((i) => { i._dns = byInst[i.id] || []; });
+  } catch (_) { /* ignore */ }
   const useTable = instView() === "table" && isDesktop() && list.length;
   const lb = $("#list", box);
   lb.className = useTable ? "card itable" : "grid";
@@ -410,7 +417,7 @@ export function instTable(acc, list, kind) {
   const when = (c) => { if (!c || c === "None") return "-"; const t = String(c).replace("T", " "); return esc(t.slice(0, 16)); };
   const ops = instOps(acc, kind);
   return `<table class="inst-table"><tr><th>${t("acc.colName")}</th><th>${t("common.status")}</th><th>${t("inst.spec")}</th><th>${t("inst.colPublic")}</th><th>${t("inst.colPrivate")}</th><th>${t("inst.colRegion")}</th><th>${t("inst.colCreated")}</th><th>${t("inst.colOps")}</th></tr>
-    ${list.map((i) => `<tr data-id="${esc(i.id)}"><td><b title="${esc(i.id)}">${esc(i.name)}</b>${(i.ipv6 || []).length ? `<div class="muted mono" title="${esc(i.ipv6.join("\n"))}">${esc(i.ipv6[i.ipv6.length - 1])}${i.ipv6.length > 1 ? ` +${i.ipv6.length - 1}` : ""}</div>` : ""}</td>
+    ${list.map((i) => `<tr data-id="${esc(i.id)}"><td><b title="${esc(i.id)}">${esc(i.name)}</b>${(i.ipv6 || []).length ? `<div class="muted mono" title="${esc(i.ipv6.join("\n"))}">${esc(i.ipv6[i.ipv6.length - 1])}${i.ipv6.length > 1 ? ` +${i.ipv6.length - 1}` : ""}</div>` : ""}${(i._dns || []).length ? `<div class="muted mono" title="${esc(i._dns.join("\n"))}">🌐 ${esc(i._dns[0])}${i._dns.length > 1 ? ` +${i._dns.length - 1}` : ""}</div>` : ""}</td>
     <td><span class="badge ${esc(i.state)}">${esc(i.state)}</span></td><td>${spec(i)}</td><td class="mono nowrap">${esc(i.public_ip || "-")}</td><td class="mono nowrap">${esc(i.private_ip || "-")}</td>
     <td class="nowrap">${esc(i.zone || i.region ? regionLabel(i.zone || i.region) : "-")}</td><td class="mono nowrap">${when(i.created)}</td>
     <td class="row-ops"><div class="row-ops-in">${ops.map(([o, l]) => opBtn(o, l, i, o === "terminate" ? "danger" : "")).join("")}</div></td></tr>`).join("")}</table>`;

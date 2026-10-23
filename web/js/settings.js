@@ -62,7 +62,13 @@ export async function pageSettings() {
 export async function bindDns(acc, inst) {
   let zones;
   try { zones = await api("/cf/zones"); } catch (e) { return toast(e.message + t("set.dnsNeedToken"), true); }
-  const r = await modal(t("op.dns"), `<p class="muted">${t("set.dnsNote")}</p>
+  // 回显本实例已有的绑定（此前对话框只摆空表单，绑没绑过分不清）；列表拉不到也不挡新增
+  let mine = [];
+  try { mine = (await api("/dns-bindings")).filter((d) => +d.account_id === +acc.id && d.instance_id === inst.id); } catch (_) { /* ignore */ }
+  const boundHtml = mine.length
+    ? `<label>${t("set.dnsBound")}</label>${mine.map((d) => `<div style="display:flex;align-items:center;gap:8px;margin:2px 0 6px"><span class="mono" style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(d.record)}</span><span class="muted">${[d.v4 ? "A" : "", d.v6 ? "AAAA" : ""].filter(Boolean).join(" · ")}${d.proxied ? t("set.dnsProxySuffix") : ""}</span><button class="btn sm danger" type="button" data-unbind="${d.id}">${t("inst.unbind")}</button></div>`).join("")}`
+    : `<p class="muted">${t("set.dnsNoneBound")}</p>`;
+  const r = await modal(t("op.dns"), `${boundHtml}<p class="muted">${t("set.dnsNote")}</p>
     <label>${t("set.dnsDomain")}</label><select name="zone">${zones.map((z) => `<option value="${esc(z.id)}|${esc(z.name)}">${esc(z.name)}</option>`).join("")}</select>
     <label>${t("set.dnsRecord")}</label><div style="display:flex;align-items:center;gap:6px"><input name="record" placeholder="node1" style="flex:1;min-width:0"><span class="mono muted" id="dnsSuffix" style="white-space:nowrap">.${esc((zones[0] || {}).name || "")}</span></div><p class="muted" style="margin:2px 0 6px">${t("set.dnsRecordHint")}</p>
     <label><input type="checkbox" name="v4" style="width:auto" checked> ${t("set.dnsA")}</label>
@@ -75,6 +81,13 @@ export async function bindDns(acc, inst) {
   }, t("aws.lsBind"), false, (bg) => {
     const sel = bg.querySelector("[name=zone]"), suf = bg.querySelector("#dnsSuffix");
     if (sel && suf) sel.onchange = () => (suf.textContent = "." + (sel.value.split("|")[1] || ""));
+    bg.querySelectorAll("[data-unbind]").forEach((b) => (b.onclick = async () => {
+      if (!(await confirmBox(t("set.dnsUnbindTitle"), t("set.dnsUnbindMsg"), true))) return;
+      if (await act(b, () => del(`/dns-bindings/${b.dataset.unbind}`), t("set.unbound"))) {
+        bg.querySelector("[data-x]").click();   // 关掉当前弹窗（以 null 结束，不会误弹成功提示）
+        bindDns(acc, inst);   // 重新打开，刷新已绑定列表
+      }
+    }));
   });
   if (r) toast(r.dns && r.dns.length ? r.dns.join("；") : t("set.dnsBound"));
 }

@@ -323,7 +323,7 @@ ok("no ssh: no paramiko / asyncssh / ssh client", "import paramiko" not in src a
 web = "".join(open(os.path.join(ROOT, "web", "js", f), encoding="utf-8").read() for f in sorted(os.listdir(os.path.join(ROOT, "web", "js"))) if f.endswith(".js"))
 ok("web: rename dialog has NO sync checkbox (feature off)", 'name="sync_hostname"' not in web and "面板只修改云端显示名" in web)
 andr = open(os.path.join(ROOT, "android", "app", "src", "main", "java", "com", "tricloud", "app", "AccountActivity.java"), encoding="utf-8").read()
-ok("android: rename dialog has sync_hostname checkbox + manual_cmd", 'Field.check("sync_hostname"' in andr and "manual_cmd" in andr)
+ok("android: rename dialog has NO sync_hostname checkbox (removed in v1.6.1), keeps manual_cmd", 'Field.check("sync_hostname"' not in andr and "manual_cmd" in andr)
 mockjs = open(os.path.join(ROOT, "demo", "mock.js"), encoding="utf-8").read()
 ok("demo: mock rename returns hostname status manual", 'hostname: { status: "manual"' in mockjs)
 

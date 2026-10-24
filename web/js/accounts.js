@@ -28,7 +28,7 @@ export async function pageAccounts() {
     <div class="card"><table><tr><th>${t("acc.colName")}</th><th>${t("acc.colCloud")}</th><th>${t("core.region.title")}</th><th>${t("acc.colCreated")}</th><th>${t("acc.colConn")}</th><th>${t("acc.colProxy")}</th><th>${t("acc.colAdded")}</th><th></th></tr>
     ${ACCOUNTS.map((a) => `<tr data-acc="${a.id}" class="${a.disabled ? "acc-off" : ""}"><td><a href="#/${a.provider}/${a.id}">${esc(a.name)}</a>${a.disabled ? ` <span class="badge failed" title="${esc(a.disabled_reason || "")}">${t("acc.disabledBadge")}</span>` : ""}${acctTypeTag(a)}</td><td><span class="dot ${a.provider}"></span> ${PNAME[a.provider]}</td>
     <td id="mr${a.id}">${accRegionCell(a)}</td><td>${ageText(a)}</td><td class="tcell">${testCell(a)}</td><td class="mono">${esc(a.proxy || t("acc.direct"))}${a.proxy_user ? `<div class="muted">${esc(a.proxy_user)}${a.proxy_pass_set ? " · ●●●" : ""}</div>` : ""}</td><td>${new Date(a.created * 1000).toLocaleString()}</td>
-    <td><button class="btn sm" data-test="${a.id}">${t("acc.test")}</button> <button class="btn sm" data-info="${a.id}">${t("acc.info")}</button> <button class="btn sm" data-type="${a.id}">${t("acc.typeBtn")}</button>${a.disabled ? ` <button class="btn sm" data-off="${a.id}">${t("common.enable")}</button>` : ""} <button class="btn sm" data-edit="${a.id}">${t("common.edit")}</button> <button class="btn sm" data-px="${a.id}">${t("acc.proxyBtn")}</button> <button class="btn sm danger" data-del="${a.id}">${t("common.delete")}</button></td></tr>`).join("") || `<tr><td colspan=8 class="muted">${t("common.none")}</td></tr>`}</table></div>`;
+    <td><button class="btn sm" data-up="${a.id}" title="${t("acc.moveUp")}">↑</button> <button class="btn sm" data-dn="${a.id}" title="${t("acc.moveDown")}">↓</button> <button class="btn sm" data-test="${a.id}">${t("acc.test")}</button> <button class="btn sm" data-info="${a.id}">${t("acc.info")}</button> <button class="btn sm" data-type="${a.id}">${t("acc.typeBtn")}</button>${a.disabled ? ` <button class="btn sm" data-off="${a.id}">${t("common.enable")}</button>` : ""} <button class="btn sm" data-edit="${a.id}">${t("common.edit")}</button> <button class="btn sm" data-px="${a.id}">${t("acc.proxyBtn")}</button> <button class="btn sm danger" data-del="${a.id}">${t("common.delete")}</button></td></tr>`).join("") || `<tr><td colspan=8 class="muted">${t("common.none")}</td></tr>`}</table></div>`;
   $("#add").onclick = addAccount;
   $("#batch").onclick = batchAddAccounts;
   refreshMachineRegions(ACCOUNTS, (a) => { const td = document.getElementById("mr" + a.id); if (td) td.innerHTML = accRegionCell(a); });
@@ -41,6 +41,18 @@ export async function pageAccounts() {
     await loadAccounts();
     r.results.forEach((x) => { const tr = view.querySelector(`tr[data-acc="${x.account_id}"]`); if (tr) tr.querySelector(".tcell").innerHTML = testCell(ACCOUNTS.find((a) => a.id === x.account_id) || {}, x); });
   };
+  const moveAcc = async (id, dir) => {
+    const ids = ACCOUNTS.map((a) => a.id);
+    const i = ids.indexOf(id); if (i < 0) return;
+    const prov = ACCOUNTS[i].provider;
+    let j = i + dir;
+    while (j >= 0 && j < ids.length && ACCOUNTS[j].provider !== prov) j += dir;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    if (await post("/accounts/reorder", { ids })) { await loadAccounts(); route(); }
+  };
+  view.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => moveAcc(+b.dataset.up, -1)));
+  view.querySelectorAll("[data-dn]").forEach((b) => (b.onclick = () => moveAcc(+b.dataset.dn, 1)));
   view.querySelectorAll("[data-test]").forEach((b) => (b.onclick = async () => {
     const tr = b.closest("tr"); tr.querySelector(".tcell").innerHTML = `<span class="spin"></span>`;
     const r = await act(b, () => post(`/accounts/${b.dataset.test}/test`));

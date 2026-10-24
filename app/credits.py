@@ -147,7 +147,7 @@ def expiry_alerts(within=ALERT_DAYS):
     """所有账号 30 天内到期的 Credit / 教育优惠（只读数据库，不调云 API）。"""
     out = []
     t = today()
-    for acc in core.q("SELECT * FROM accounts ORDER BY provider, id"):
+    for acc in core.q("SELECT * FROM accounts ORDER BY provider, COALESCE(sort_order, id * 10000), id"):
         acc.pop("cred_enc", None)
         items = []
         for c in core.q("SELECT * FROM aws_credits WHERE account_id=? AND expire_date IS NOT NULL", (acc["id"],)):

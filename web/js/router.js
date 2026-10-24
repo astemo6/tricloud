@@ -1,5 +1,5 @@
 // TriCloud 前端 v1.6.0 · Hash 路由（#/aws/3/billing）、侧栏、顶栏账号快速切换器
-import { $, accountRegionText, ACCOUNTS, esc, isDesktop, PLOGO, PNAME, PROVS, TAB_ALIAS, TABS, view } from "./core.js";
+import { $, accountRegionText, ACCOUNTS, esc, isDesktop, loadAccounts, PLOGO, PNAME, post, PROVS, TAB_ALIAS, TABS, view } from "./core.js";
 import { t } from "./i18n.js";
 import { pageHome } from "./home.js";
 import { pageAccounts, pageDeletedAccounts } from "./accounts.js";
@@ -56,17 +56,51 @@ export function renderSide(p) {
     const list = ACCOUNTS.filter((a) => a.provider === prov);
     if (!list.length) continue;
     html += `<div class="grp prov">${PLOGO[prov]}${PNAME[prov]}</div>`;
-    for (const a of list) html += link(`#/${prov}/${a.id}`, esc(a.name), `<span class="dot ${prov}"></span>`);
+    for (const a of list) html += `<a href="#/${prov}/${a.id}" data-acc="${a.id}" draggable="true" class="${cur === `#/${prov}/${a.id}` ? "on" : ""}"><span class="dot ${prov}"></span>${esc(a.name)}</a>`;
   }
   html += `<div class="grp">${t("nav.manage")}</div>` + link("#/accounts", `🔑 ${t("nav.accounts")}`) + link("#/health", `🩺 ${t("nav.health")}`) + link("#/freecheck", `🆓 ${t("nav.freecheck")}`) + link("#/traffic", `📈 ${t("nav.traffic")}`) + link("#/tasks", `⏱ ${t("nav.tasks")}`) +
     link("#/monitors", `📡 ${t("nav.monitors")}`) + link("#/secrets", `🔐 ${t("nav.secrets")}`) + link("#/scripts", `📜 ${t("nav.scripts")}`) +
     link("#/dns", `🌐 ${t("nav.dns")}`) + link("#/security", `🛡 ${t("nav.security")}`) + link("#/onedrive", `☁️ ${t("nav.onedrive")}`) + link("#/settings", `⚙️ ${t("nav.settings")}`);
   $("#side").innerHTML = html;
+  wireSideDrag();
   const acc = TABS[p[0]] && ACCOUNTS.find((a) => a.id == p[1]);
   renderAccSwitch(acc);
   $("#title").textContent = acc ? `${PNAME[acc.provider]} · ${acc.name}` :
     ({ accounts: t("nav.accounts"), tasks: t("nav.tasks"), monitors: t("nav.monitors"), settings: t("nav.settings"), secrets: t("nav.secrets"), scripts: t("nav.scripts"),
       dns: t("title.dns"), security: t("nav.security"), onedrive: t("nav.onedrive"), health: t("nav.health"), traffic: t("nav.traffic"), deleted: t("nav.deleted"), freecheck: t("nav.freecheck") }[p[0]] || t("nav.home"));
+}
+
+// ---------- 左侧账号手动排序（同云组内拖动，松手存后端 sort_order） ----------
+function wireSideDrag() {
+  const side = $("#side");
+  let dragId = null;
+  const items = () => [...side.querySelectorAll("a[data-acc]")];
+  const provOf = (id) => (ACCOUNTS.find((a) => a.id == id) || {}).provider;
+  items().forEach((el) => {
+    el.addEventListener("dragstart", (e) => {
+      dragId = el.dataset.acc; el.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      try { e.dataTransfer.setData("text/plain", dragId); } catch {}
+    });
+    el.addEventListener("dragend", () => { dragId = null; items().forEach((x) => x.classList.remove("dragging", "drop-before", "drop-after")); });
+    el.addEventListener("dragover", (e) => {
+      if (dragId == null || el.dataset.acc === dragId || provOf(el.dataset.acc) !== provOf(dragId)) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = "move";
+      const r = el.getBoundingClientRect(), after = e.clientY > r.top + r.height / 2;
+      el.classList.toggle("drop-after", after); el.classList.toggle("drop-before", !after);
+      el.dataset.after = after ? "1" : "";
+    });
+    el.addEventListener("dragleave", () => el.classList.remove("drop-before", "drop-after"));
+    el.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      if (dragId == null || el.dataset.acc === dragId) return;
+      const dragEl = side.querySelector(`a[data-acc="${dragId}"]`);
+      if (!dragEl || provOf(el.dataset.acc) !== provOf(dragId)) return;
+      el.parentNode.insertBefore(dragEl, el.dataset.after ? el.nextSibling : el);
+      await post("/accounts/reorder", { ids: items().map((x) => +x.dataset.acc) });
+      await loadAccounts(); renderSide(parseHash());
+    });
+  });
 }
 
 // ---------- 顶栏账号快速切换器 ----------

@@ -23,6 +23,18 @@ def accounts():
     return rows
 
 
+@router.post("/api/accounts/reorder")
+def reorder_accounts(body: dict = Body(...)):
+    """账号手动排序：ids 必须是全部账号 id 的一个排列，按给定顺序写入 sort_order（组内顺序由列表顺序决定）。"""
+    ids = body.get("ids") or []
+    all_ids = {r["id"] for r in core.q("SELECT id FROM accounts")}
+    if not ids or len(ids) != len(all_ids) or set(ids) != all_ids:
+        raise HTTPException(400, msg("err.params_invalid"))
+    for i, aid in enumerate(ids):
+        core.ex("UPDATE accounts SET sort_order=? WHERE id=?", (i * 10, aid))
+    return {"ok": True}
+
+
 def _clean_cred(prov, cred):
     cred = {k: (v.strip() if isinstance(v, str) and k != "key_content" else v) for k, v in (cred or {}).items() if v}
     miss = [k for k in REQUIRED[prov] if not cred.get(k)]

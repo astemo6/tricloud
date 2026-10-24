@@ -618,7 +618,7 @@ export const STR = {
     "cred.tenantId": "Tenant ID", "cred.clientId": "Client (App) ID", "cred.clientSecret": "Client Secret", "cred.subscriptionId": "Subscription ID",
     // ---- 云账号 ----
     "acc.addBtn": "添加云账号", "acc.batchBtn": "批量添加", "acc.testScope": "测活范围", "acc.allAccounts": "全部账号",
-    "acc.testAll": "⚡ 一键测活", "acc.deletedLink": "🗑 已删账号",
+    "acc.testAll": "⚡ 一键测活", "acc.deletedLink": "🗑 已删账号", "acc.moveUp": "上移（调整左侧顺序）", "acc.moveDown": "下移（调整左侧顺序）",
     "acc.encNote": "凭证经 Fernet 加密保存在本机 SQLite，不经过任何第三方",
     "acc.colName": "名称", "acc.colCloud": "云", "acc.colCreated": "云上创建 / 存活", "acc.colConn": "连通", "acc.colProxy": "出口代理", "acc.colAdded": "添加时间",
     "acc.disabledBadge": "已停用", "acc.direct": "直连",
@@ -1398,7 +1398,7 @@ export const STR = {
     "cred.tenantId": "Tenant ID", "cred.clientId": "Client (App) ID", "cred.clientSecret": "Client Secret", "cred.subscriptionId": "Subscription ID",
     // ---- cloud accounts ----
     "acc.addBtn": "Add cloud account", "acc.batchBtn": "Batch add", "acc.testScope": "Test scope", "acc.allAccounts": "All accounts",
-    "acc.testAll": "⚡ Test all", "acc.deletedLink": "🗑 Deleted accounts",
+    "acc.testAll": "⚡ Test all", "acc.deletedLink": "🗑 Deleted accounts", "acc.moveUp": "Move up (sidebar order)", "acc.moveDown": "Move down (sidebar order)",
     "acc.encNote": "Credentials are Fernet-encrypted in local SQLite; never sent to third parties",
     "acc.colName": "Name", "acc.colCloud": "Cloud", "acc.colCreated": "Created / Age", "acc.colConn": "Connectivity", "acc.colProxy": "Egress proxy", "acc.colAdded": "Added",
     "acc.disabledBadge": "Disabled", "acc.direct": "Direct",

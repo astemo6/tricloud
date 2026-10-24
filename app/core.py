@@ -111,6 +111,8 @@ MIGRATIONS = [
     "ALTER TABLE accounts ADD COLUMN disabled INTEGER DEFAULT 0",
     "ALTER TABLE accounts ADD COLUMN disabled_reason TEXT",
     "ALTER TABLE accounts ADD COLUMN acct_type TEXT",
+    # 账号手动排序（左侧列表拖动 / 账号页上移下移）；NULL 时按 id*10000 兜底（未排序前与旧顺序一致，排序后新账号落组尾）
+    "ALTER TABLE accounts ADD COLUMN sort_order INTEGER",
     # ---- build 22：流量守护「推送并限速」（实例上自装 tc agent，按守护独立 token 只读拉取状态）----
     "ALTER TABLE traffic_guards ADD COLUMN throttle_mbps REAL DEFAULT 1",
     "ALTER TABLE traffic_guards ADD COLUMN throttled INTEGER DEFAULT 0",
@@ -371,8 +373,8 @@ def proxy_view(cred):
 
 def list_accounts():
     rows = q("SELECT id, provider, name, region, created, cloud_created_at, credit_total, edu_expires_at, "
-             "last_test_ok, last_test_ms, last_test_at, last_test_error, COALESCE(disabled,0) AS disabled, disabled_reason, acct_type "
-             "FROM accounts ORDER BY provider, id")
+             "last_test_ok, last_test_ms, last_test_at, last_test_error, COALESCE(disabled,0) AS disabled, disabled_reason, acct_type, sort_order "
+             "FROM accounts ORDER BY provider, COALESCE(sort_order, id * 10000), id")
     return rows
 
 

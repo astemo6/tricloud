@@ -87,6 +87,10 @@ label:has(input[type=checkbox]) { display: flex; align-items: center; font-size:
   color: var(--muted); font-weight: 500; transition: background .15s; }
 .side a:hover { background: var(--s-high); }
 .side a.on { background: var(--secondary-c); color: var(--on-secondary-c); }
+.side a[data-acc] { cursor: grab; }
+.side a.dragging { opacity: .45; }
+.side a.drop-before { box-shadow: inset 0 2px 0 var(--primary); }
+.side a.drop-after { box-shadow: inset 0 -2px 0 var(--primary); }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .dot.oci { background: var(--oci); } .dot.aws { background: var(--aws); } .dot.azure { background: var(--azure); }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }

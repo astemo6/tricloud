@@ -44,7 +44,8 @@ final class MainPage: Page {
                 let aid = acc.optInt("id")
                 let c = self.card(acc.optString("name") + (acc.optInt("disabled") == 1 ? "  [已停用]" : ""))
                 let proxy = str(acc, "proxy", "").isEmpty ? "" : "\n代理 " + acc.optString("proxy") + (str(acc, "proxy_user", "").isEmpty ? "" : " · " + acc.optString("proxy_user"))
-                c.muted(MainPage.pname(acc.optString("provider")) + MainPage.regionText(acc) + MainPage.typeOf(acc) + MainPage.ageOf(acc) + MainPage.testOf(acc) + proxy)
+                c.muted(MainPage.pname(acc.optString("provider")) + MainPage.regionText(acc) + MainPage.typeOf(acc) + MainPage.ageOf(acc) + MainPage.testOf(acc) + proxy
+                        + (acc.optBoolean("restricted") ? "\n🔒 " + L("受限 API") : ""))
                 let row = c.row()
                 row.button("管理") { self.push(AccountPage(acc)) }
                 row.button("测活") {
@@ -58,6 +59,9 @@ final class MainPage: Page {
                 // v1.6：账号类型 / 被封号一键停用（不测活、不监控、停止任务；凭证保留，可再启用）
                 row.button("信息") { self.editAccountInfo(acc) { self.accountsChanged() } }
                 row.button("类型") { self.showAccountType(aid, acc.optString("name"), false) }
+                if acc.optString("provider") == "oci" {   // build 30：一键切换受限 API
+                    row.button(acc.optBoolean("restricted") ? "🔒 受限" : "受限 API") { self.restrictFlow(acc) }
+                }
                 let off = acc.optInt("disabled") == 1
                 row.button(off ? "启用" : "停用") {
                     if off {

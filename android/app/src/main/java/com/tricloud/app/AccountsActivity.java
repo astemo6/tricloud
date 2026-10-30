@@ -120,7 +120,8 @@ public class AccountsActivity extends BaseActivity {
         } catch (Exception ignored) { }
         String rt = Regions.accountText(acc), m = Regions.machineRegion(acc), def = str(acc, "region", "");
         String note = !m.isEmpty() && !def.isEmpty() && !m.equals(def) ? getString(R.string.s0720, Regions.label(def)) : "";
-        return getString(R.string.s0723, MainActivity.pname(acc.optString("provider")), (rt.isEmpty() ? "" : " · " + rt + note), (type.isEmpty() ? "" : " · " + type), MainActivity.ageOf(acc), MainActivity.testOf(acc), str(acc, "proxy", getString(R.string.s0721)), (str(acc, "proxy_user", "").isEmpty() ? "" : " · " + acc.optString("proxy_user") + (acc.optBoolean("proxy_pass_set") ? " · ●●●" : "")), (off && !str(acc, "disabled_reason", "").isEmpty() ? getString(R.string.s0722, acc.optString("disabled_reason")) : ""), fmtTime(acc.optLong("created")));
+        String rapiMark = acc.optBoolean("restricted") ? "\n🔒 " + getString(R.string.rapi_badge) : "";   // build 30：受限 API
+        return getString(R.string.s0723, MainActivity.pname(acc.optString("provider")), (rt.isEmpty() ? "" : " · " + rt + note), (type.isEmpty() ? "" : " · " + type), MainActivity.ageOf(acc), MainActivity.testOf(acc), str(acc, "proxy", getString(R.string.s0721)), (str(acc, "proxy_user", "").isEmpty() ? "" : " · " + acc.optString("proxy_user") + (acc.optBoolean("proxy_pass_set") ? " · ●●●" : "")), (off && !str(acc, "disabled_reason", "").isEmpty() ? getString(R.string.s0722, acc.optString("disabled_reason")) : ""), fmtTime(acc.optLong("created"))) + rapiMark;
     }
 
     private void accCard(JSONObject acc) {
@@ -137,6 +138,8 @@ public class AccountsActivity extends BaseActivity {
         }));
         button(row, getString(R.string.s0729), v -> infoDialog(acc));
         button(row, getString(R.string.s0510), v -> typeDialog(acc, false));
+        if ("oci".equals(acc.optString("provider")))   // build 30：一键切换受限 API
+            button(row, acc.optBoolean("restricted") ? getString(R.string.rapi_btn_info) : getString(R.string.rapi_btn), v -> restrictFlow(acc));
         button(row, getString(R.string.s0211), v -> editAccount(acc));
         button(row, getString(R.string.s0730), v -> proxyDialog(acc));
         button(row, off ? getString(R.string.s0213) : getString(R.string.s0212), v -> toggleDisable(acc));
@@ -454,6 +457,58 @@ public class AccountsActivity extends BaseActivity {
             new MaterialAlertDialogBuilder(this).setTitle(getString(R.string.s0791, a.optString("name"))).setMessage(sb.toString())
                     .setPositiveButton(getString(R.string.s0310), (d, w) -> typeDialog(a, true)).setNegativeButton(getString(R.string.s0074), (d, w) -> refresh()).show();
         });
+    }
+
+    // ---------------- build 30：OCI 一键切换受限 API ----------------
+    private void restrictFlow(JSONObject acc) {
+        int aid = acc.optInt("id");
+        Api.get(this, "/accounts/" + aid + "/oci/restrict", r -> {
+            JSONObject s = Api.obj(r);
+            JSONObject info = s.optJSONObject("restricted");
+            if (info != null) {
+                long at = info.optLong("at");
+                new MaterialAlertDialogBuilder(this).setTitle(getString(R.string.rapi_info_title))
+                        .setMessage(getString(R.string.rapi_info, str(info, "user_name", "-"), str(info, "group_name", "-"), str(info, "policy_name", "-"),
+                                str(info, "fingerprint", "-"), at > 0 ? fmtTime(at) : "-"))
+                        .setPositiveButton(getString(R.string.rapi_ok), null).show();
+                return;
+            }
+            JSONObject t = s.optJSONObject("task");
+            if (t != null && "running".equals(t.optString("status"))) { toast(getString(R.string.rapi_running, t.optInt("id"))); openTask(t.optInt("id")); return; }
+            if (!s.optBoolean("tg_bound")) {
+                new MaterialAlertDialogBuilder(this).setTitle(getString(R.string.rapi_title)).setMessage(getString(R.string.rapi_need_tg))
+                        .setPositiveButton(getString(R.string.rapi_ok), null).show();
+                return;
+            }
+            StringBuilder stm = new StringBuilder();
+            JSONArray st = s.optJSONArray("statements");
+            if (st != null) for (int i = 0; i < st.length(); i++) stm.append(st.optString(i)).append('\n');
+            String last = t != null && !"done".equals(t.optString("status")) ? "\n" + getString(R.string.rapi_last, t.optInt("id"), t.optString("message")) + "\n" : "";
+            String msg = getString(R.string.rapi_intro) + "\n\n• " + getString(R.string.rapi_w1) + "\n• " + getString(R.string.rapi_w2, s.optInt("wait_minutes", 10))
+                    + "\n• " + getString(R.string.rapi_w3) + "\n• " + getString(R.string.rapi_w4) + "\n" + last + "\n" + getString(R.string.rapi_stmts) + "\n" + stm;
+            AlertDialog dlg = new MaterialAlertDialogBuilder(this).setTitle(getString(R.string.rapi_title)).setMessage(msg)
+                    .setNegativeButton(getString(R.string.s0614), null).setPositiveButton(getString(R.string.rapi_send_code), (d, w) -> restrictSendCode(aid)).show();
+            android.widget.Button pb = dlg.getButton(DialogInterface.BUTTON_POSITIVE);
+            if (pb != null) pb.setTextColor(attr(com.google.android.material.R.attr.colorError));
+        });
+    }
+
+    private void restrictSendCode(int aid) {
+        Api.post(this, "/accounts/" + aid + "/oci/restrict/code", new JSONObject(), x ->
+                form(getString(R.string.rapi_code_title), getString(R.string.rapi_code_sent),
+                        Arrays.asList(Field.check("kept", getString(R.string.rapi_kept), false), Field.num("code", getString(R.string.rapi_code_label), "")),
+                        getString(R.string.rapi_start), v -> {
+                    String code = v.optString("code").trim();
+                    if (!v.optBoolean("kept")) { toast(getString(R.string.rapi_kept_first)); return; }
+                    if (!code.matches("\\d{6}")) { toast(getString(R.string.rapi_code_first)); return; }
+                    try {
+                        Api.post(this, "/accounts/" + aid + "/oci/restrict", new JSONObject().put("code", code).put("confirm", true), y -> {
+                            toast(getString(R.string.rapi_started));
+                            refresh();
+                            openTask(Api.obj(y).optInt("task_id"));
+                        });
+                    } catch (Exception ignored) { }
+                }));
     }
 
     private void toggleDisable(JSONObject a) {

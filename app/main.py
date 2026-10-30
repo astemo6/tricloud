@@ -13,8 +13,8 @@ log = logging.getLogger("tricloud")
 
 from . import core, i18n, security, tasks, telegram
 from .i18n import msg as _imsg
-from .routers import (accounts, auth, aws, aws_credit, azure, billing, cloudflare, guard_agent, guard_health, instances, oci, onedrive, pages,
-                      settings, tasks_monitors)
+from .routers import (accounts, auth, aws, aws_credit, azure, billing, cloudflare, guard_agent, guard_health, instances, oci, oci_restrict,
+                      onedrive, pages, settings, tasks_monitors)
 from .routers import security as security_routes
 from .routers.common import VERSION, _token, client_ip
 from .routers.pages import WEB_DIR, StaticWithModules
@@ -41,6 +41,7 @@ AUDIT_SKIP = {"/api/logout", "/api/onedrive/bind/poll",   # 设备码轮询每�
               "/api/onedrive/schedule/preview",          # build 23：编辑计划时实时预览，只读不保存
               "/api/guard-agent/state"}                  # build 22：agent 每 5 分钟 POST 心跳 + 流量明细，不进审计
 AGENT_RESET_RE = re.compile(r"^/api/traffic-guards/\d+/agent/reset$")
+RESTRICT_RE = re.compile(r"^/api/accounts/\d+/oci/restrict(/|$)")   # build 30：切换受限 API（含发验证码）Token 一律 403
 AUDIT_SKIP_OK = {("DELETE", "/api/audit")}   # 清空审计成功时路由自己写了 audit-clear，中间件不再追加一条
 
 
@@ -60,7 +61,7 @@ async def auth_mw(req: Request, call_next):
             if path.startswith(("/api/2fa", "/api/tokens", "/api/password", "/api/backup", "/api/restore", "/api/secrets")) \
                     or (path == "/api/audit" and req.method == "DELETE") \
                     or (path.startswith("/api/onedrive") and req.method != "GET" and path != "/api/onedrive/backup") \
-                    or (req.method != "GET" and AGENT_RESET_RE.match(path)):
+                    or (req.method != "GET" and AGENT_RESET_RE.match(path)) or RESTRICT_RE.match(path):
                 # Token 不能抹掉审计痕迹；OneDrive 只能看状态 / 列表和「立即备份」，不能绑定（防止绑到别人的网盘）、改密码、恢复、解绑；
                 # build 22：Token 不能重置流量守护 agent token（GET /agent 也不返回带 token 的安装命令）
                 return JSONResponse({"detail": _imsg("err.token_forbidden")}, status_code=403)
@@ -110,7 +111,7 @@ async def err(req, exc):
 
 
 # 注册顺序 = 匹配顺序。各模块内部的路径互不冲突；静态页与 /static 挂载放最后。
-ROUTERS = (auth, accounts, instances, oci, aws, aws_credit, azure, billing, tasks_monitors, settings, security_routes, onedrive, guard_agent,
+ROUTERS = (auth, accounts, instances, oci, oci_restrict, aws, aws_credit, azure, billing, tasks_monitors, settings, security_routes, onedrive, guard_agent,
            cloudflare, guard_health, pages)
 for _m in ROUTERS:
     app.include_router(_m.router)

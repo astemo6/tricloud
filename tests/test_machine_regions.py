@@ -252,7 +252,7 @@ with TestClient(main.app) as c:
         ok("delete: hint removed", str(a4) not in core.get_setting(overview.HINT_KEY))
 
     ok("route: /accounts unauthenticated -> 401", anon.get("/api/accounts").status_code == 401)
-    ok("route: no new /api routes (hint rides on GET /accounts)", sum(1 for r in main.app.routes if getattr(r, "path", "").startswith("/api")) == 178)
+    ok("route: no new /api routes (hint rides on GET /accounts)", sum(1 for r in main.app.routes if getattr(r, "path", "").startswith("/api")) == 182)   # build 30：+ 账号排序 1 + 受限 API 3
 
 # ================= 三端：源码 =================
 P = {k: os.path.join(ROOT, v) for k, v in {
@@ -289,7 +289,7 @@ ok("hints reset when /accounts reloads (android/ios)", "Regions.HINTS.clear()" i
 ok("same texts on three ends", all(all(t in S[k] for t in ("无机器 · 默认 ", "（默认区域）", "\"无机器\"")) for k in ("core", "rj", "rs")))
 ok("demo /accounts carries machine_regions", "machine_regions: o.regions" in S["mock"] and "function ovOf(id)" in S["mock"])
 vc = re.search(r"versionCode (\d+)", S["gradle"]).group(1)
-ok("version: Android versionCode 27 == iOS build 27", vc == "27" and 'CURRENT_PROJECT_VERSION: "27"' in S["pyml"])
+ok("version: Android versionCode == iOS build (>= 27)", int(vc) >= 27 and f'CURRENT_PROJECT_VERSION: "{vc}"' in S["pyml"])
 
 # ================= JS 助手实际输出 =================
 node = shutil.which("node")

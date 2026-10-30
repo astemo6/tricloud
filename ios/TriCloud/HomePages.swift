@@ -207,6 +207,7 @@ final class AccountsPage: Page {
     /// 账号行副标题：有机器的区域（没有机器 / 还没扫描时注明默认区域）· 连通 / 已停用。
     static func detail(_ acc: JObj) -> String {
         var d = Regions.accountText(acc)
+        if acc.optBoolean("restricted") { d += (d.isEmpty ? "" : " · ") + "🔒 " + L("受限 API") }   // build 30
         if acc.optInt("disabled") == 1 { d += (d.isEmpty ? "" : " · ") + "已停用" }
         else if !acc.isNull("last_test_ok") {
             d += (d.isEmpty ? "" : " · ") + (acc.optInt("last_test_ok") == 1 ? "连通 \(acc.optInt("last_test_ms")) ms" : "测活失败")

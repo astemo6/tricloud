@@ -360,6 +360,8 @@ async def oci_region_subscribe(acc_id: int, body: dict = Body(...)):
     need_acc(acc_id, "oci")
     if not body.get("confirm"):
         raise HTTPException(400, msg("err.sub_region_confirm"))
+    if core.q("SELECT 1 FROM accounts WHERE id=? AND restricted_api IS NOT NULL AND restricted_api!=''", (acc_id,), one=True):
+        raise HTTPException(400, msg("err.rapi_need_iam"))   # build 30：受限 API 没有 manage tenancies，订阅区域请在控制台操作
     r = await call(P(acc_id).subscribe_region, body.get("region_key"))
     services.drop_provider_cache(acc_id)
     return r

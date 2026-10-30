@@ -26,9 +26,9 @@ export async function pageAccounts() {
     <select id="tprov" title="${t("acc.testScope")}"><option value="">${t("acc.allAccounts")}</option>${PROVS.filter(prov).map((p) => `<option value="${p}">${PNAME[p]}</option>`).join("")}</select>
     <button class="btn" id="testAll">${t("acc.testAll")}</button><a class="btn" href="#/deleted">${t("acc.deletedLink")}</a><span class="grow"></span><span class="muted" id="tsum">${t("acc.encNote")}</span></div>
     <div class="card"><table><tr><th>${t("acc.colName")}</th><th>${t("acc.colCloud")}</th><th>${t("core.region.title")}</th><th>${t("acc.colCreated")}</th><th>${t("acc.colConn")}</th><th>${t("acc.colProxy")}</th><th>${t("acc.colAdded")}</th><th></th></tr>
-    ${ACCOUNTS.map((a) => `<tr data-acc="${a.id}" class="${a.disabled ? "acc-off" : ""}"><td><a href="#/${a.provider}/${a.id}">${esc(a.name)}</a>${a.disabled ? ` <span class="badge failed" title="${esc(a.disabled_reason || "")}">${t("acc.disabledBadge")}</span>` : ""}${acctTypeTag(a)}</td><td><span class="dot ${a.provider}"></span> ${PNAME[a.provider]}</td>
+    ${ACCOUNTS.map((a) => `<tr data-acc="${a.id}" class="${a.disabled ? "acc-off" : ""}"><td><a href="#/${a.provider}/${a.id}">${esc(a.name)}</a>${a.disabled ? ` <span class="badge failed" title="${esc(a.disabled_reason || "")}">${t("acc.disabledBadge")}</span>` : ""}${restrictedTag(a)}${acctTypeTag(a)}</td><td><span class="dot ${a.provider}"></span> ${PNAME[a.provider]}</td>
     <td id="mr${a.id}">${accRegionCell(a)}</td><td>${ageText(a)}</td><td class="tcell">${testCell(a)}</td><td class="mono">${esc(a.proxy || t("acc.direct"))}${a.proxy_user ? `<div class="muted">${esc(a.proxy_user)}${a.proxy_pass_set ? " · ●●●" : ""}</div>` : ""}</td><td>${new Date(a.created * 1000).toLocaleString()}</td>
-    <td><button class="btn sm" data-up="${a.id}" title="${t("acc.moveUp")}">↑</button> <button class="btn sm" data-dn="${a.id}" title="${t("acc.moveDown")}">↓</button> <button class="btn sm" data-test="${a.id}">${t("acc.test")}</button> <button class="btn sm" data-info="${a.id}">${t("acc.info")}</button> <button class="btn sm" data-type="${a.id}">${t("acc.typeBtn")}</button>${a.disabled ? ` <button class="btn sm" data-off="${a.id}">${t("common.enable")}</button>` : ""} <button class="btn sm" data-edit="${a.id}">${t("common.edit")}</button> <button class="btn sm" data-px="${a.id}">${t("acc.proxyBtn")}</button> <button class="btn sm danger" data-del="${a.id}">${t("common.delete")}</button></td></tr>`).join("") || `<tr><td colspan=8 class="muted">${t("common.none")}</td></tr>`}</table></div>`;
+    <td><button class="btn sm" data-up="${a.id}" title="${t("acc.moveUp")}">↑</button> <button class="btn sm" data-dn="${a.id}" title="${t("acc.moveDown")}">↓</button> <button class="btn sm" data-test="${a.id}">${t("acc.test")}</button> <button class="btn sm" data-info="${a.id}">${t("acc.info")}</button> <button class="btn sm" data-type="${a.id}">${t("acc.typeBtn")}</button>${a.provider === "oci" ? ` <button class="btn sm" data-rapi="${a.id}">${a.restricted ? t("rapi.btnInfo") : t("rapi.btn")}</button>` : ""}${a.disabled ? ` <button class="btn sm" data-off="${a.id}">${t("common.enable")}</button>` : ""} <button class="btn sm" data-edit="${a.id}">${t("common.edit")}</button> <button class="btn sm" data-px="${a.id}">${t("acc.proxyBtn")}</button> <button class="btn sm danger" data-del="${a.id}">${t("common.delete")}</button></td></tr>`).join("") || `<tr><td colspan=8 class="muted">${t("common.none")}</td></tr>`}</table></div>`;
   $("#add").onclick = addAccount;
   $("#batch").onclick = batchAddAccounts;
   refreshMachineRegions(ACCOUNTS, (a) => { const td = document.getElementById("mr" + a.id); if (td) td.innerHTML = accRegionCell(a); });
@@ -61,6 +61,7 @@ export async function pageAccounts() {
   }));
   view.querySelectorAll("[data-info]").forEach((b) => (b.onclick = () => accountInfoDialog(ACCOUNTS.find((x) => x.id == b.dataset.info))));
   view.querySelectorAll("[data-type]").forEach((b) => (b.onclick = () => accountTypeDialog(ACCOUNTS.find((x) => x.id == b.dataset.type))));
+  view.querySelectorAll("[data-rapi]").forEach((b) => (b.onclick = () => restrictDialog(ACCOUNTS.find((x) => x.id == b.dataset.rapi))));
   view.querySelectorAll("[data-off]").forEach((b) => (b.onclick = () => toggleDisable(ACCOUNTS.find((x) => x.id == b.dataset.off))));
   view.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => {
     if (!(await confirmBox(t("acc.delTitle"), t("acc.delConfirm"), true))) return;
@@ -115,6 +116,56 @@ document.addEventListener("change", (e) => {
 });
 
 // ---------- 账号：存活天数、测活、信息、批量添加 ----------
+// ---------- build 30：OCI 一键切换受限 API ----------
+export function restrictedTag(a) {
+  return a.restricted ? ` <span class="badge running" title="${esc(t("rapi.badgeTip"))}">🔒 ${t("rapi.badge")}</span>` : "";
+}
+export async function restrictDialog(a) {
+  let s;
+  try { s = await api(`/accounts/${a.id}/oci/restrict`); } catch (e) { return toast(e.message, true); }
+  const stm = `<details><summary>${t("rapi.stmts", { n: s.statements.length })}</summary><pre class="mono" style="white-space:pre-wrap;font-size:12px;margin:6px 0">${s.statements.map(esc).join("\n")}</pre></details>`;
+  if (s.restricted) {
+    const r = s.restricted;
+    await modal(t("rapi.infoTitle", { name: a.name }), `<div class="kv"><span>${t("common.status")}</span><span>🔒 <b>${t("rapi.badge")}</b></span>
+      <span>${t("rapi.user")}</span><span class="mono">${esc(r.user_name || "-")}</span><span>${t("rapi.group")}</span><span class="mono">${esc(r.group_name || "-")}</span>
+      <span>${t("rapi.policy")}</span><span class="mono">${esc(r.policy_name || "-")}</span><span>${t("rapi.fp")}</span><span class="mono">${esc(r.fingerprint || "-")}</span>
+      <span>${t("rapi.at")}</span><span>${r.at ? new Date(r.at * 1000).toLocaleString() : "-"}</span></div><p class="muted">${t("rapi.infoNote")}</p>${stm}`, null, t("common.gotIt"));
+    return;
+  }
+  if (s.task && s.task.status === "running") {
+    toast(t("rapi.running", { id: s.task.id }));
+    if (window.TaskDrawer) window.TaskDrawer.open(s.task.id);
+    return;
+  }
+  if (!s.tg_bound) {
+    if (await modal(t("rapi.title", { name: a.name }), `<p>${t("rapi.needTg")}</p>`, null, t("rapi.goSettings"))) location.hash = "#/settings";
+    return;
+  }
+  const last = s.task && s.task.status !== "done" ? `<p class="muted">${t("rapi.lastTask", { id: s.task.id, msg: esc(s.task.message || "") })}</p>` : "";
+  const body = `<p>${t("rapi.intro", { name: esc(a.name) })}</p>
+    <ul class="guard"><li>${t("rapi.w1")}</li><li>${t("rapi.w2", { m: s.wait_minutes })}</li><li>${t("rapi.w3")}</li><li>${t("rapi.w4")}</li></ul>${stm}${last}
+    <label><input type="checkbox" name="kept" style="width:auto"> ${t("rapi.kept")}</label>
+    <div style="margin:8px 0"><button type="button" class="btn sm" id="rapiCode">${t("rapi.sendCode")}</button> <span class="muted" id="rapiMsg"></span></div>
+    <label>${t("rapi.codeLabel")}</label><input name="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456">`;
+  const r = await modal(t("rapi.title", { name: a.name }), body, async (bg) => {
+    const f = form(bg);
+    if (!f.kept) throw new Error(t("rapi.keptFirst"));
+    if (!/^\d{6}$/.test(f.code || "")) throw new Error(t("rapi.codeFirst"));
+    return post(`/accounts/${a.id}/oci/restrict`, { code: f.code, confirm: true });
+  }, t("rapi.start"), true, (bg) => {
+    const b = bg.querySelector("#rapiCode"), m = bg.querySelector("#rapiMsg");
+    b.onclick = async () => {
+      b.disabled = true; m.innerHTML = `<span class="spin"></span>`;
+      try {
+        await post(`/accounts/${a.id}/oci/restrict/code`, {});
+        m.textContent = t("rapi.codeSent", { m: Math.round((s.code_ttl || 300) / 60) });
+        let n = 60; const tick = () => { if (!b.isConnected) return; if (--n <= 0) { b.disabled = false; b.textContent = t("rapi.sendCode"); } else { b.textContent = t("rapi.resendIn", { n }); setTimeout(tick, 1000); } };
+        tick();
+      } catch (e) { m.textContent = `❌ ${e.message}`; b.disabled = false; }
+    };
+  });
+  if (r) { toast(t("rapi.started", { id: r.task_id })); await loadAccounts(); route(); }
+}
 export function acctTypeTag(a) {   // v1.6：缓存的账号类型（点「类型」查询后显示）
   try { const ty = a.acct_type ? JSON.parse(a.acct_type) : null; return ty && ty.label ? ` <span class="badge" title="${esc(ty.plan_type || "")}">${esc(ty.label)}${ty.age_days != null ? t("acc.ageDaysSuffix", { n: ty.age_days }) : ""}</span>` : ""; } catch (_) { return ""; }
 }

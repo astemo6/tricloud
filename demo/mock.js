@@ -951,9 +951,33 @@
     return undefined;
   }
 
+  // ---------- build 30：OCI 一键切换受限 API（演示：验证码固定 123456；账号 2 首尔备用演示已切换）----------
+  var RAPI_STM = ["Allow group TriCloud-Restricted-xxxxxx to manage instance-family in tenancy", "Allow group TriCloud-Restricted-xxxxxx to manage volume-family in tenancy", "Allow group TriCloud-Restricted-xxxxxx to manage virtual-network-family in tenancy", "Allow group TriCloud-Restricted-xxxxxx to manage object-family in tenancy", "Allow group TriCloud-Restricted-xxxxxx to manage network-load-balancers in tenancy", "Allow group TriCloud-Restricted-xxxxxx to read instance-agent-plugins in tenancy", "Allow group TriCloud-Restricted-xxxxxx to use instance-agent-command-family in tenancy", "Allow group TriCloud-Restricted-xxxxxx to read metrics in tenancy", "Allow group TriCloud-Restricted-xxxxxx to read resource-availability in tenancy", "Allow group TriCloud-Restricted-xxxxxx to read usage-report in tenancy", "Allow group TriCloud-Restricted-xxxxxx to read accountmanagement-family in tenancy", "Allow group TriCloud-Restricted-xxxxxx to read organizations-subscription in tenancy", "Allow group TriCloud-Restricted-xxxxxx to inspect compartments in tenancy", "Allow group TriCloud-Restricted-xxxxxx to inspect tenancies in tenancy"], rapiCodes = {};
+  accounts[1].restricted = true; accounts[1].restricted_api = JSON.stringify({ at: now - 86400, user_name: "TriCloud-API-a1b2c3", group_name: "TriCloud-Restricted-a1b2c3", policy_name: "TriCloud-Restricted-a1b2c3", fingerprint: "12:34:56:78:9a:bc:de:f0:12:34:56:78:9a:bc:de:f0" });
+  function route30(method, p, q, body) {
+    var m = p.match(/^\/accounts\/(\d+)\/oci\/restrict(\/code)?$/); if (!m) return undefined;
+    var a = accounts.find(function (x) { return x.id == m[1]; }); if (!a || a.provider !== "oci") return { __status: 400, detail: "仅支持 OCI" };
+    var info = a.restricted_api ? JSON.parse(a.restricted_api) : null, lt = tasks.find(function (t) { return t.type === "oci_restrict" && t.account_id == a.id; });
+    var bound = !!(settings.tg_token_set && settings.tg_chat_id);
+    if (method === "GET" && !m[2]) return { restricted: info, tg_bound: bound, task: lt ? { id: lt.id, status: lt.status, message: lt.message } : null, statements: RAPI_STM, wait_minutes: 10, code_ttl: 300 };
+    if (info) return { __status: 400, detail: "该账号已是受限 API，无需重复切换" };
+    if (!bound) return { __status: 400, detail: "需要先在「设置 → Telegram 通知」绑定 Bot 和 Chat ID，验证码通过 Telegram 发送" };
+    if (m[2]) { rapiCodes[a.id] = "123456"; return { sent: true, ttl: 300 }; }
+    if (lt && lt.status === "running") return { __status: 409, detail: "切换任务 #" + lt.id + " 正在进行中" };
+    if (!body.confirm) return { __status: 400, detail: "切换受限 API 需要确认" };
+    if (!rapiCodes[a.id]) return { __status: 400, detail: "请先获取 Telegram 验证码" };
+    if (String(body.code) !== rapiCodes[a.id]) return { __status: 400, detail: "验证码错误" };
+    delete rapiCodes[a.id];
+    var tid = addTask("oci_restrict", a.id, "切换受限 API · " + a.name, { extra: ["预检：主区域、Default 域、IAM 权限…", "创建组 TriCloud-Restricted-d3m0aa…", "创建策略 TriCloud-Restricted-d3m0aa（租户根区间，14 条语句）…", "创建用户 TriCloud-API-d3m0aa…", "把用户加入组…", "生成 RSA 2048 密钥并上传公钥…", "等待新 Key 与策略生效，第 1 次自检…", "自检通过，替换面板里保存的凭证…"],
+      done: "已切换为受限 API：用户 TriCloud-API-d3m0aa，组 TriCloud-Restricted-d3m0aa，策略 TriCloud-Restricted-d3m0aa。云端原 API Key 保留，本次不会删除或撤销，请自己妥善保管",
+      onDone: function () { a.restricted = true; a.restricted_api = JSON.stringify({ at: Math.floor(Date.now() / 1000), user_name: "TriCloud-API-d3m0aa", group_name: "TriCloud-Restricted-d3m0aa", policy_name: "TriCloud-Restricted-d3m0aa", fingerprint: "ab:cd:ef:01:23:45:67:89:ab:cd:ef:01:23:45:67:89" }); } });
+    audit1("POST /accounts/oci/restrict", a.name + " 任务 #" + tid);
+    return { ok: true, task_id: tid };
+  }
   function route(method, path, body) {
     var u = new URL(path, "http://x"); var p = u.pathname.replace(/^\/api/, ""); var q = u.searchParams; var m;
     if (p === "/meta") return { providers: ["oci", "aws", "azure"] };
+    var r30 = route30(method, p, q, body); if (r30 !== undefined) return r30;
     var r21 = route21(method, p, q, body); if (r21 !== undefined) return r21;
     var r20 = route20(method, p, q, body); if (r20 !== undefined) return r20;
     var r16 = route16(method, p, q, body); if (r16 !== undefined) return r16;

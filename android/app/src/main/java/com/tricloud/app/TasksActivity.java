@@ -26,6 +26,7 @@ public class TasksActivity extends BaseActivity {
             case "azure_create": return L10n.s(R.string.s0015); case "ensure_network": return L10n.s(R.string.s1214); case "snapshot": return L10n.s(R.string.s1215); case "migrate": return L10n.s(R.string.s0051); case "cf_delete": return L10n.s(R.string.s1216);
             case "reinstall": return L10n.s(R.string.s0056); case "net500m": return L10n.s(R.string.s1217); case "foundry": return L10n.s(R.string.s1218); case "billing_keep": return L10n.s(R.string.s1219);
             case "aws_credit": return L10n.s(R.string.s0013); case "onedrive_backup": return L10n.s(R.string.s0985);
+            case "oci_restrict": return L10n.s(R.string.rapi_task_name);
             default: return t;
         }
     }

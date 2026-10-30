@@ -159,7 +159,8 @@ def _acc_kb(acc, chat_id=None):
 def _acc_text(acc, chat_id=None):
     g = (lambda k: Lc(k, chat_id)) if chat_id else L
     st = g("tg.acc.untested") if acc.get("last_test_ok") is None else (g("tg.acc.ok") if acc["last_test_ok"] else g("tg.acc.failed"))
-    return f"<b>{esc(acc['name'])}</b>\n{PROV_NAME[acc['provider']]} · {esc(acc.get('region') or '-')} · {st}"
+    rapi = (" · " + g("tg.acc.restricted")) if acc.get("restricted_api") else ""   # build 30
+    return f"<b>{esc(acc['name'])}</b>\n{PROV_NAME[acc['provider']]} · {esc(acc.get('region') or '-')} · {st}{rapi}"
 
 
 def _inst_ops(provider, kind):
@@ -227,7 +228,7 @@ async def handle_callback(bot, chat_id, cq):
         await _edit(bot, chat_id, msg_id, Lc("tg.lang.done", chat_id) + "\n\n" + Lc(HOME_TEXT_KEY, chat_id), _home_kb(chat_id))
     elif t == "prov":
         accs = [a for a in core.list_accounts() if a["provider"] == data["p"]]
-        rows = [[(("✅ " if a.get("last_test_ok") else "❌ " if a.get("last_test_ok") == 0 else "") + a["name"],
+        rows = [[(("✅ " if a.get("last_test_ok") else "❌ " if a.get("last_test_ok") == 0 else "") + ("🔒 " if a.get("restricted_api") else "") + a["name"],
                   {"t": "acc", "a": a["id"]})] for a in accs]
         rows.append([_home_btn(chat_id)])
         txt = Lc("tg.prov.accounts", chat_id, prov=PROV_NAME[data["p"]], n=len(accs)) if accs else Lc("tg.prov.none", chat_id, prov=PROV_NAME[data["p"]])

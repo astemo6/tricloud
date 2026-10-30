@@ -20,6 +20,7 @@ def accounts():
     for r in rows:   # 只回显代理主机、用户名、是否设置了密码，不回显代理密码
         r.update(core.proxy_view(core.get_account(r["id"], with_cred=True)["cred"]))
         r.update(overview.hint_fields(r["id"], hints))
+        r["restricted"] = bool(r.get("restricted_api"))   # build 30：OCI 已切换为受限 API
     return rows
 
 
@@ -332,6 +333,8 @@ def _apply_cred_patch(acc_id, patch):
     except Exception as e:
         raise HTTPException(400, msg("err.cred_check_failed", e=e))
     core.ex("UPDATE accounts SET cred_enc=?, region=? WHERE id=?", (core.encrypt(cred), cred.get("region"), acc_id))
+    if prov == "oci" and any(k in patch and patch[k] for k in ("user", "key_content", "fingerprint")):
+        core.ex("UPDATE accounts SET restricted_api=NULL WHERE id=?", (acc_id,))   # 手动换了 API Key：不再标记受限
     services.drop_provider_cache(acc_id)
     return True
 

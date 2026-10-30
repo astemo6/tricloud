@@ -27,6 +27,7 @@ final class TasksPage: Page {
         case "billing_keep": return "保号账单"
         case "aws_credit": return "新号 Credit"
         case "onedrive_backup": return "OneDrive 备份"
+        case "oci_restrict": return "切换受限 API"
         default: return t
         }
     }

@@ -29,7 +29,7 @@ export async function pageAccount(acc, tab) {
   const tabs = `<div class="tabs">${TABS[acc.provider].map(([k, l]) =>
     `<a href="#/${acc.provider}/${acc.id}/${k}" class="${k === tab ? "on" : ""}">${t(l)}</a>`).join("")}</div>`;
   const prevScroll = TAB_SCROLL[acc.provider] || 0;
-  view.innerHTML = tabs + `<div id="tab"></div>`;
+  view.innerHTML = tabs + (acc.restricted ? `<p class="muted" id="rapiNote" style="margin:4px 2px">🔒 ${t("rapi.badge")} · ${t("rapi.badgeTip")}</p>` : "") + `<div id="tab"></div>`;   // build 30
   keepTabVisible(view.querySelector(".tabs"), acc.provider, prevScroll);
   const box = $("#tab");
   // build 25：默认选中有机器的区域 —— 还没有区域记录时先查一次总览（有缓存，最多等 8 秒）

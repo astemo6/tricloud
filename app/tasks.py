@@ -11,7 +11,8 @@ LOG_KEEP = 500          # 每个任务最多保留的日志行数（抢机任务
 TYPE_NAME = {"snatch": "抢机", "change_ip": "换 IP", "resize": "改配置", "ipv6": "IPv6", "azure_create": "创建 VM",
              "ensure_network": "自动建网", "snapshot": "快照（已移除）", "migrate": "迁移", "cf_delete": "删除 CDN 分发",
              "reinstall": "重装系统", "net500m": "下行 500Mbps", "foundry": "部署 AI 模型",
-             "billing_keep": "保号账单", "aws_credit": "新号 Credit", "onedrive_backup": "OneDrive 备份"}
+             "billing_keep": "保号账单", "aws_credit": "新号 Credit", "onedrive_backup": "OneDrive 备份",
+             "oci_restrict": "切换受限 API"}
 NO_ACCOUNT_TYPES = {"onedrive_backup"}   # 面板级任务：account_id=0，不取云账号 / provider
 CF_POLL_SECONDS = 30          # 删除 CloudFront 分发：等待停用部署完成的轮询间隔
 CF_WAIT_SECONDS = 45 * 60     # 最长等待
@@ -373,6 +374,122 @@ async def _do_onedrive_backup(c):
         await telegram.send(telegram.L("tg.push.odOk", name=telegram.esc(r["name"]), kb=f"{kb:.1f}"))
 
 
+RESTRICT_STEPS = 9   # 预检、组、策略、用户、入组、密钥、自检、替换凭证、完成
+
+
+def _restrict_leftovers(acc_id, cred, tlog):
+    """之前被服务重启打断（interrupted）的切换任务：用当前全权限 Key 清理它当时已创建的组 / 策略 / 用户 / 新 Key。"""
+    from .providers import oci_restrict as R
+    rows = core.q("SELECT id, result FROM tasks WHERE type='oci_restrict' AND account_id=? AND status IN ('interrupted','failed','stopped')",
+                  (acc_id,))
+    for r in rows:
+        try:
+            res = json.loads(r["result"] or "{}")
+        except ValueError:
+            continue
+        cr = res.get("created") or {}
+        if res.get("cleaned") or not any(cr.get(k) for k in ("group_id", "policy_id", "user_id")):
+            continue
+        tlog(f"发现任务 #{r['id']} 中断时留下的云端资源，先清理…", "warn")
+        cfg = R.full_config(cred, cr.get("home_region") or cred.get("region"))
+        idh = R._client(__import__("oci").identity.IdentityClient, cfg, cred.get("proxy"))
+        out = R.cleanup(idh, cr, tlog)
+        res["cleaned"] = all(ok for _, ok, _ in out)
+        res["cleanup"] = R.cleanup_text(out)
+        _update(r["id"], quiet=True, result=res)
+
+
+def apply_restricted_cred(acc_id, r):
+    """自检通过后才调用：替换账号保存的 OCI 凭证（user / fingerprint / key_content，Fernet 加密入库），去掉旧口令，
+    标记受限 API。secure_delete 让 SQLite 覆写旧页里的旧密文；内存里的旧 provider 缓存一起丢弃。云端原 Key 不动。"""
+    acc = core.get_account(acc_id, with_cred=True)
+    cred = dict(acc["cred"])
+    cred.pop("pass_phrase", None)
+    cred.update(user=r["user"], fingerprint=r["fingerprint"], key_content=r["key_content"])
+    if not cred.get("home_region"):
+        cred["home_region"] = r["home_region"]
+    cr = r["created"]
+    info = {"at": int(time.time()), "user_id": cr.get("user_id"), "user_name": cr.get("user_name"), "group_id": cr.get("group_id"),
+            "group_name": cr.get("group_name"), "policy_id": cr.get("policy_id"), "policy_name": cr.get("policy_name"),
+            "fingerprint": r["fingerprint"], "home_region": r["home_region"]}
+    with core.db() as c:
+        c.execute("PRAGMA secure_delete=ON")
+        c.execute("UPDATE accounts SET cred_enc=?, restricted_api=? WHERE id=?", (core.encrypt(cred), json.dumps(info), acc_id))
+    try:
+        with core.db() as c:
+            c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception:   # noqa: BLE001
+        pass
+    cred.clear()
+    acc["cred"].clear()
+    services.drop_provider_cache(acc_id)
+    return info
+
+
+async def _do_oci_restrict(c):
+    """build 30：OCI 一键切换受限 API（见 providers/oci_restrict.py）。失败 / 停止：已创建的云端资源回滚，面板旧凭证不变。"""
+    from . import security
+    from .providers import oci_restrict as R
+    t, tlog = c.t, c.tlog
+    acc_id = t["account_id"]
+    st = {"stage": "precheck", "step": 1, "steps": RESTRICT_STEPS, "created": {}}
+    stage_of = (("预检", "precheck", 1), ("创建组", "group", 2), ("创建策略", "policy", 3), ("创建用户", "user", 4), ("把用户加入组", "member", 5),
+                ("生成", "key", 6), ("等待新 Key", "verify", 7))
+
+    def save(m=None):
+        kw = {"result": {k: v for k, v in st.items()}, "quiet": True}
+        if m:
+            kw["message"] = m
+        _update(t["id"], **kw)
+
+    def step(m):
+        for p, s, n in stage_of:
+            if m.startswith(p):
+                st.update(stage=s, step=n)
+        c.checkpoint(m)
+        save(m)
+
+    def on_created(cr):
+        st["created"] = cr
+        save()
+    row = core.q("SELECT restricted_api FROM accounts WHERE id=?", (acc_id,), one=True)
+    if row and row.get("restricted_api"):
+        _update(t["id"], status="failed", message="该账号已是受限 API，无需重复切换")
+        return
+    acc = core.get_account(acc_id, with_cred=True)
+    cred = core.runtime_cred(acc["cred"])
+    save("执行中…")
+    await asyncio.to_thread(_restrict_leftovers, acc_id, cred, tlog)
+    try:
+        r = await asyncio.to_thread(R.run_switch, cred, tlog, step, on_created)
+    except TaskStopped as e:
+        txt = R.cleanup_text(getattr(e, "cleanup", []))
+        st.update(stage="stopped", cleaned=True, cleanup=txt)
+        _update(t["id"], result=st, quiet=True)
+        tlog("任务已停止：" + txt + "；面板里的凭证未改动，云端原 API Key 未改动", "warn")
+        raise
+    except R.RestrictError as e:
+        txt = R.cleanup_text(e.cleanup)
+        st.update(stage="failed", cleaned=all(ok for _, ok, _ in e.cleanup), cleanup=txt)
+        _update(t["id"], status="failed", result=st, message=f"{e}；{txt}；面板凭证未改动")
+        await telegram.send(telegram.L("tg.push.rapiFail", acc=telegram.esc(acc["name"]), err=telegram.esc(f"{e}；{txt}")[:600]))
+        return
+    finally:
+        cred.clear()
+        acc["cred"].clear()
+    st.update(stage="apply", step=8)
+    save("自检通过，替换面板里保存的凭证…")
+    info = apply_restricted_cred(acc_id, r)
+    r["key_content"] = ""
+    tlog("已替换面板里的 OCI 凭证，旧私钥已从数据库删除（未写过任何磁盘临时文件）；OCI 云端原 API Key 保留，未删除也未撤销", "ok")
+    st.update(stage="done", step=RESTRICT_STEPS, info=info)
+    _update(t["id"], status="done", result=st,
+            message=f"已切换为受限 API：用户 {info['user_name']}，组 {info['group_name']}，策略 {info['policy_name']}。"
+                    "云端原 API Key 保留，本次不会删除或撤销，请自己妥善保管")
+    security.audit("-", "session", "oci-restrict", f"账号 {acc_id} {acc['name']} → 受限 API {info['user_name']}（指纹 {info['fingerprint']}）")
+    await telegram.send(telegram.L("tg.push.rapiOk", acc=telegram.esc(acc["name"]), user=telegram.esc(info["user_name"])))
+
+
 # 一次性长任务：任务类型 → 处理函数（c 为 _TaskCtx）。新增任务类型在这里登记即可。
 ONCE_HANDLERS = {
     "change_ip": _do_change_ip,
@@ -388,6 +505,7 @@ ONCE_HANDLERS = {
     "billing_keep": _do_billing_keep,
     "aws_credit": _do_aws_credit,
     "onedrive_backup": _do_onedrive_backup,
+    "oci_restrict": _do_oci_restrict,
 }
 
 

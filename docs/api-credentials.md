@@ -40,6 +40,84 @@ API 密钥继承该 IAM 用户的权限。建议给专用 IAM 用户最小权限
 allow group <你的组> to read usage-reports in tenancy
 ```
 
+### 一键切换受限 API（build 30，仅 OCI）
+
+为防盗号：面板用你当前的**全权限** API Key，在租户根区间自动创建一个**只能管实例 / 存储 / 网络 / 对象存储、只读账单**的新用户，并把面板里保存的 Key 换成这个新用户的 Key。即使面板所在 VPS 被攻破，拿到的也只是受限 Key，改不了用户、组、策略和身份域，号拿不走。
+
+- 入口：云账号页 OCI 账号的「受限 API」按钮（Web / Android / iOS），需要 Telegram 验证码（先在「设置 → Telegram 通知」绑定 Bot），API Token 不能调用。
+- **云端原 API Key 不会被删除或撤销**，其他程序仍可使用，请自己妥善保存；新 Key 生效可能要几分钟，期间可以关闭窗口（后台任务）。
+- 只适用于 Default 域、有 IAM 管理权限的用户（0 权号 / 非 Default 域会直接拒绝）。
+- 流程：预检 → 创建组 / 策略 / 用户（名字 `TriCloud-Restricted-xxxxxx` / `TriCloud-API-xxxxxx`，描述 Created by TriCloud）→ 用户只允许 API Key（不能控制台登录）→ 内存生成 RSA 2048 并上传公钥 → 最多约 10 分钟反复自检：实例列表、VCN 列表、对象存储、Usage API 账单可用，**IAM 用户列表不可读** → 全部通过才替换面板凭证（Fernet 加密入库，旧私钥从数据库删除，不写任何临时文件，不留本地明文备份）。
+- 任一步失败或手动停止：面板旧凭证不变，用全权限 Key 尽力删除本次创建的 Key / 成员关系 / 用户 / 策略 / 组，结果写在任务日志里。
+- 切换后：账号显示「🔒 受限 API」；订阅新区域、管理 IAM / 身份域等需要在 OCI 控制台用全权限账号操作。如果之后手动把凭证改回全权限 Key，受限标记自动去掉。
+- 注意：切换前做过的本地加密备份 / OneDrive 备份里仍是旧的全权限 Key（加密保存），如介意请切换后重新备份并删除旧备份。
+
+策略语句（代码里集中定义在 `app/providers/oci_restrict.py` 的 `POLICY_RULES`，组名随机）：
+
+```
+Allow group TriCloud-Restricted-xxxxxx to manage instance-family in tenancy
+Allow group TriCloud-Restricted-xxxxxx to manage volume-family in tenancy
+Allow group TriCloud-Restricted-xxxxxx to manage virtual-network-family in tenancy
+Allow group TriCloud-Restricted-xxxxxx to manage object-family in tenancy
+Allow group TriCloud-Restricted-xxxxxx to manage network-load-balancers in tenancy
+Allow group TriCloud-Restricted-xxxxxx to read instance-agent-plugins in tenancy
+Allow group TriCloud-Restricted-xxxxxx to use instance-agent-command-family in tenancy
+Allow group TriCloud-Restricted-xxxxxx to read metrics in tenancy
+Allow group TriCloud-Restricted-xxxxxx to read resource-availability in tenancy
+Allow group TriCloud-Restricted-xxxxxx to read usage-report in tenancy
+Allow group TriCloud-Restricted-xxxxxx to read accountmanagement-family in tenancy
+Allow group TriCloud-Restricted-xxxxxx to read organizations-subscription in tenancy
+Allow group TriCloud-Restricted-xxxxxx to inspect compartments in tenancy
+Allow group TriCloud-Restricted-xxxxxx to inspect tenancies in tenancy
+```
+
+| 语句 | 用途 |
+| --- | --- |
+| `manage instance-family` | 实例：列表 / 创建 / 抢机 / 开关机 / 改名 / 改配置 / 重装 / 删除、镜像、挂卷 |
+| `manage volume-family` | 引导卷 / 块存储卷：查看、扩容、改性能、创建 / 挂载 / 删除 |
+| `manage virtual-network-family` | 网络：VCN / 子网 / 安全列表 / 安全组 / 公网 IP（换 IP、预留 IP）/ IPv6 / 路由表 / 网关 |
+| `manage object-family` | 对象存储：Bucket / 对象 / 保号账单分片上传 / 预认证下载链接 |
+| `manage network-load-balancers` | 免费 AMD 下行 500Mbps（网络负载均衡器） |
+| `read instance-agent-plugins` | 读取 Oracle Cloud Agent 插件状态（Run Command 是否可用） |
+| `use instance-agent-command-family` | 扩容后扩展根分区（Run Command 固定脚本） |
+| `read metrics` | 实例流量统计（Monitoring，只读） |
+| `read resource-availability` | 配额 / 免费额度剩余（Limits，只读） |
+| `read usage-report` | 本月账单（Usage API，只读） |
+| `read accountmanagement-family` | 账号类型 / 开户时间（osp-gateway 订阅，只读） |
+| `read organizations-subscription` | 账号类型兜底（Tenant Manager 订阅，只读） |
+| `inspect compartments` | 子区间列表（对象存储扫描等，只读） |
+| `inspect tenancies` | 租户信息 / 区域订阅列表（只读；不能订阅新区域） |
+
+明确**不授予**：`users`、`groups`、`policies`、`domains`、`dynamic-groups`、`all-resources`，以及账单 / 订阅的任何写权限。
+
+#### One-click restricted API (build 30, OCI only) — English
+
+To limit the damage of a stolen panel, TriCloud uses your current **full-permission** API key to create (in the tenancy root) a group, a policy and a user that can only manage instances / storage / networking / Object Storage and read billing, uploads a new RSA 2048 key generated in memory, waits (up to ~10 min) until the new key can list instances, VCNs, buckets and read the Usage API **and is denied IAM user listing**, and only then replaces the key stored in the panel. Requires a Telegram verification code; API tokens get 403.
+
+- The **original API key in OCI is not deleted or revoked**; keep it yourself. The window can be closed while the background task runs.
+- Default domain users with IAM admin rights only; zero-permission / non-default-domain users are refused.
+- On any failure or stop the stored credentials stay unchanged and everything created in this run is removed with the full key (best effort, reported in the task log). The old private key is removed from the database; no temp files or plaintext backups are written.
+- After switching, the account shows "🔒 Restricted API"; region subscriptions and IAM / identity domains must be managed in the OCI Console with a full-permission user. Older local / OneDrive backups still contain the old (encrypted) key.
+
+| Statement | Purpose |
+| --- | --- |
+| `manage instance-family` | Instances: list / create / snatch / power / rename / resize / reinstall / terminate, images, volume attach |
+| `manage volume-family` | Boot & block volumes: view, resize, performance, create / attach / delete |
+| `manage virtual-network-family` | Networking: VCN / subnets / security lists / NSGs / public IPs (change IP, reserved IP) / IPv6 / route tables / gateways |
+| `manage object-family` | Object Storage: buckets / objects / keep-alive multipart upload / pre-authenticated download links |
+| `manage network-load-balancers` | Free AMD 500 Mbps downlink (Network Load Balancer) |
+| `read instance-agent-plugins` | Read Oracle Cloud Agent plugin status (is Run Command available) |
+| `use instance-agent-command-family` | Grow the root filesystem after resizing (fixed Run Command script) |
+| `read metrics` | Instance traffic (Monitoring, read-only) |
+| `read resource-availability` | Quotas / free-tier remaining (Limits, read-only) |
+| `read usage-report` | This month's bill (Usage API, read-only) |
+| `read accountmanagement-family` | Account type / sign-up date (osp-gateway subscription, read-only) |
+| `read organizations-subscription` | Account type fallback (Tenant Manager subscription, read-only) |
+| `inspect compartments` | Compartment list (object storage scan etc., read-only) |
+| `inspect tenancies` | Tenancy info / region subscription list (read-only; cannot subscribe new regions) |
+
+Never granted: `users`, `groups`, `policies`, `domains`, `dynamic-groups`, `all-resources`, or any write permission on billing / subscriptions.
+
 ---
 
 ## 二、AWS

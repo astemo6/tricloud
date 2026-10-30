@@ -24,7 +24,7 @@ export async function pageTasks() {
 // ================= v1.4 新增 =================
 export const TASK_NAME = { snatch: "task.name.snatch", change_ip: "task.name.change_ip", resize: "task.name.resize", ipv6: "task.name.ipv6", azure_create: "task.name.azure_create", ensure_network: "task.name.ensure_network",
   snapshot: "task.name.snapshot", migrate: "task.name.migrate", cf_delete: "task.name.cf_delete", reinstall: "task.name.reinstall", net500m: "task.name.net500m", foundry: "task.name.foundry",
-  billing_keep: "task.name.billing_keep", aws_credit: "task.name.aws_credit", onedrive_backup: "task.name.onedrive_backup" };
+  billing_keep: "task.name.billing_keep", aws_credit: "task.name.aws_credit", onedrive_backup: "task.name.onedrive_backup", oci_restrict: "task.name.oci_restrict" };
 export const TST = { running: "task.st.running", done: "task.st.done", failed: "task.st.failed", stopped: "task.st.stopped", interrupted: "task.st.interrupted" };
 
 // ---------- 任务抽屉：提交任务后自动打开并跟踪，运行中每 2 秒刷新 ----------

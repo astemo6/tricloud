@@ -957,9 +957,33 @@
     return undefined;
   }
 
+  // ---------- build 30：OCI 一键切换受限 API（演示：验证码固定 123456；账号 2 首尔备用演示已切换）----------
+  var RAPI_STM = ["Allow group TriCloud-Restricted-xxxxxx to manage instance-family in tenancy", "Allow group TriCloud-Restricted-xxxxxx to manage volume-family in tenancy", "Allow group TriCloud-Restricted-xxxxxx to manage virtual-network-family in tenancy", "Allow group TriCloud-Restricted-xxxxxx to manage object-family in tenancy", "Allow group TriCloud-Restricted-xxxxxx to manage network-load-balancers in tenancy", "Allow group TriCloud-Restricted-xxxxxx to read instance-agent-plugins in tenancy", "Allow group TriCloud-Restricted-xxxxxx to use instance-agent-command-family in tenancy", "Allow group TriCloud-Restricted-xxxxxx to read metrics in tenancy", "Allow group TriCloud-Restricted-xxxxxx to read resource-availability in tenancy", "Allow group TriCloud-Restricted-xxxxxx to read usage-report in tenancy", "Allow group TriCloud-Restricted-xxxxxx to read accountmanagement-family in tenancy", "Allow group TriCloud-Restricted-xxxxxx to read organizations-subscription in tenancy", "Allow group TriCloud-Restricted-xxxxxx to inspect compartments in tenancy", "Allow group TriCloud-Restricted-xxxxxx to inspect tenancies in tenancy"], rapiCodes = {};
+  accounts[1].restricted = true; accounts[1].restricted_api = JSON.stringify({ at: now - 86400, user_name: "TriCloud-API-a1b2c3", group_name: "TriCloud-Restricted-a1b2c3", policy_name: "TriCloud-Restricted-a1b2c3", fingerprint: "12:34:56:78:9a:bc:de:f0:12:34:56:78:9a:bc:de:f0" });
+  function route30(method, p, q, body) {
+    var m = p.match(/^\/accounts\/(\d+)\/oci\/restrict(\/code)?$/); if (!m) return undefined;
+    var a = accounts.find(function (x) { return x.id == m[1]; }); if (!a || a.provider !== "oci") return { __status: 400, detail: "仅支持 OCI" };
+    var info = a.restricted_api ? JSON.parse(a.restricted_api) : null, lt = tasks.find(function (t) { return t.type === "oci_restrict" && t.account_id == a.id; });
+    var bound = !!(settings.tg_token_set && settings.tg_chat_id);
+    if (method === "GET" && !m[2]) return { restricted: info, tg_bound: bound, task: lt ? { id: lt.id, status: lt.status, message: lt.message } : null, statements: RAPI_STM, wait_minutes: 10, code_ttl: 300 };
+    if (info) return { __status: 400, detail: "该账号已是受限 API，无需重复切换" };
+    if (!bound) return { __status: 400, detail: "需要先在「设置 → Telegram 通知」绑定 Bot 和 Chat ID，验证码通过 Telegram 发送" };
+    if (m[2]) { rapiCodes[a.id] = "123456"; return { sent: true, ttl: 300 }; }
+    if (lt && lt.status === "running") return { __status: 409, detail: "切换任务 #" + lt.id + " 正在进行中" };
+    if (!body.confirm) return { __status: 400, detail: "切换受限 API 需要确认" };
+    if (!rapiCodes[a.id]) return { __status: 400, detail: "请先获取 Telegram 验证码" };
+    if (String(body.code) !== rapiCodes[a.id]) return { __status: 400, detail: "验证码错误" };
+    delete rapiCodes[a.id];
+    var tid = addTask("oci_restrict", a.id, "切换受限 API · " + a.name, { extra: ["预检：主区域、Default 域、IAM 权限…", "创建组 TriCloud-Restricted-d3m0aa…", "创建策略 TriCloud-Restricted-d3m0aa（租户根区间，14 条语句）…", "创建用户 TriCloud-API-d3m0aa…", "把用户加入组…", "生成 RSA 2048 密钥并上传公钥…", "等待新 Key 与策略生效，第 1 次自检…", "自检通过，替换面板里保存的凭证…"],
+      done: "已切换为受限 API：用户 TriCloud-API-d3m0aa，组 TriCloud-Restricted-d3m0aa，策略 TriCloud-Restricted-d3m0aa。云端原 API Key 保留，本次不会删除或撤销，请自己妥善保管",
+      onDone: function () { a.restricted = true; a.restricted_api = JSON.stringify({ at: Math.floor(Date.now() / 1000), user_name: "TriCloud-API-d3m0aa", group_name: "TriCloud-Restricted-d3m0aa", policy_name: "TriCloud-Restricted-d3m0aa", fingerprint: "ab:cd:ef:01:23:45:67:89:ab:cd:ef:01:23:45:67:89" }); } });
+    audit1("POST /accounts/oci/restrict", a.name + " 任务 #" + tid);
+    return { ok: true, task_id: tid };
+  }
   function route(method, path, body) {
     var u = new URL(path, "http://x"); var p = u.pathname.replace(/^\/api/, ""); var q = u.searchParams; var m;
     if (p === "/meta") return { providers: ["oci", "aws", "azure"] };
+    var r30 = route30(method, p, q, body); if (r30 !== undefined) return r30;
     var r21 = route21(method, p, q, body); if (r21 !== undefined) return r21;
     var r20 = route20(method, p, q, body); if (r20 !== undefined) return r20;
     var r16 = route16(method, p, q, body); if (r16 !== undefined) return r16;
@@ -1117,12 +1141,11 @@
     if (p.match(/\/(oci|instances)\/rename$/) && method === "POST") { var ra = accOf(p) || {};
       Object.keys(inst).forEach(function (k) { inst[k].forEach(function (i) { if (i.id === body.instance_id) i.name = body.new_name; }); });
       var hn = String(body.new_name || "").toLowerCase().replace(/[\s_.]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "").slice(0, 63).replace(/-+$/, "");
-      audit1("POST /instances/rename", body.new_name + (body.sync_hostname === false ? "" : " · hostname " + (hn || "-")));
-      if (body.sync_hostname === false) return { ok: true, hostname: null };
-      if (!hn) return { ok: true, hostname: { status: "unsupported", message: "名称规范化后为空（只保留 a-z 0-9 -），已跳过主机名同步（演示）" } };
-      // 演示：Azure（Run Command）与 OCI（Oracle Cloud Agent）均同步成功
-      return { ok: true, hostname: { status: "ok", hostname: hn, message: (ra.provider === "azure" ? "Azure Run Command" : ra.provider === "aws" ? "SSM" : "Oracle Cloud Agent")
-        + "：系统主机名已改为 " + hn + "，重新登录 SSH 可见（演示）" } }; }
+      audit1("POST /instances/rename", body.new_name + " · hostname manual " + (hn || "-"));
+      if (!hn) return { ok: true, hostname: { status: "unsupported", message: "名称规范化后为空（只保留 a-z 0-9 -），无法生成主机名命令（演示）" } };
+      // 演示：面板只改显示名，系统主机名返回手动命令（不下发任何命令）
+      return { ok: true, hostname: { status: "manual", hostname: hn, message: "已修改显示名。面板不自动同步系统主机名——SSH 登录实例后执行下面的命令（演示）",
+        manual_cmd: "sudo sh -c 'hostnamectl set-hostname " + hn + "'" } }; }
     if (p.match(/\/oci\/network$/)) return { ok: true, task_id: addTask("network", (accOf(p) || {}).id, "自动创建 VCN + IPv6") };
     // AWS
     if (p.match(/\/aws\/ec2-options$/)) return { types: ["t3.micro", "t3.small", "t3.medium", "t4g.micro", "t4g.small", "c7i.large"], os: ["debian-12", "ubuntu-24.04", "ubuntu-22.04", "amazon-linux-2023"] };
@@ -1320,6 +1343,10 @@ label:has(input[type=checkbox]) { display: flex; align-items: center; font-size:
   color: var(--muted); font-weight: 500; transition: background .15s; }
 .side a:hover { background: var(--s-high); }
 .side a.on { background: var(--secondary-c); color: var(--on-secondary-c); }
+.side a[data-acc] { cursor: grab; }
+.side a.dragging { opacity: .45; }
+.side a.drop-before { box-shadow: inset 0 2px 0 var(--primary); }
+.side a.drop-after { box-shadow: inset 0 -2px 0 var(--primary); }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .dot.oci { background: var(--oci); } .dot.aws { background: var(--aws); } .dot.azure { background: var(--azure); }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -1895,7 +1922,7 @@ const STR = {
     "set.dnsDomain": "域名", "set.dnsRecord": "记录名前缀", "set.dnsRecordHint": "只填前缀，自动加上面选的域名；填 @ 绑定根域名。",
     "set.dnsA": "更新 A 记录（IPv4）", "set.dnsAAAA": "更新 AAAA 记录（IPv6）",
     "set.dnsProxied": "开启 Cloudflare 代理（橙色云）", "set.dnsSync": "立即用当前 IP 同步一次",
-    "set.dnsNeedToken": "，请先在设置页填写 Cloudflare Token", "set.dnsBound": "已绑定",
+    "set.dnsNeedToken": "，请先在设置页填写 Cloudflare Token", "set.dnsBound": "已绑定", "set.dnsNoneBound": "这台实例还没有绑定域名，可在下面添加。",
     "set.dnsPageNote": "在实例卡片上点「绑定域名」添加。Token 在「设置 → Cloudflare」配置。",
     "set.dnsColRecord": "记录", "set.dnsProxySuffix": "· 代理",
     "set.dnsUnbindTitle": "解绑域名",
@@ -2272,7 +2299,7 @@ const STR = {
     "common.yes": "是", "common.no": "否", "common.understood": "知道了",
     // ---- 实例页 ----
     "inst.locating": "正在定位有机器的区域…",
-    "inst.renameTip": "Azure 直接生效；OCI 需开启 Oracle Cloud Agent 的 Run Command 插件；AWS 需 SSM 托管；重新登录 SSH 后可见。",
+    "inst.renameTip": "面板只修改云端显示名，不会进系统执行命令；保存后会给出修改系统主机名的命令，可自行 SSH 登录执行。",
     "inst.renamedSynced": "已改名，系统主机名已同步", "inst.renamed": "已改名",
     "inst.hostnameDispatched": "主机名同步已下发", "inst.renamedMsg": "已改名。{msg}", "inst.renamedNotSynced": "已改名。主机名未同步：{msg}",
     "inst.renameFailTitle": "已改名，主机名同步失败", "inst.renameManualTitle": "已改名，主机名未自动同步",
@@ -2354,10 +2381,32 @@ const STR = {
     "cred.tenantId": "Tenant ID", "cred.clientId": "Client (App) ID", "cred.clientSecret": "Client Secret", "cred.subscriptionId": "Subscription ID",
     // ---- 云账号 ----
     "acc.addBtn": "添加云账号", "acc.batchBtn": "批量添加", "acc.testScope": "测活范围", "acc.allAccounts": "全部账号",
-    "acc.testAll": "⚡ 一键测活", "acc.deletedLink": "🗑 已删账号",
+    "acc.testAll": "⚡ 一键测活", "acc.deletedLink": "🗑 已删账号", "acc.moveUp": "上移（调整左侧顺序）", "acc.moveDown": "下移（调整左侧顺序）",
     "acc.encNote": "凭证经 Fernet 加密保存在本机 SQLite，不经过任何第三方",
     "acc.colName": "名称", "acc.colCloud": "云", "acc.colCreated": "云上创建 / 存活", "acc.colConn": "连通", "acc.colProxy": "出口代理", "acc.colAdded": "添加时间",
     "acc.disabledBadge": "已停用", "acc.direct": "直连",
+    // build 30：OCI 一键切换受限 API
+    "rapi.btn": "受限 API", "rapi.btnInfo": "🔒 受限", "rapi.badge": "受限 API",
+    "rapi.badgeTip": "面板使用的是只能管理实例 / 存储 / 网络、只读账单的受限 API Key，不能管理 IAM / 身份域",
+    "rapi.title": "切换为受限 API · {name}",
+    "rapi.intro": "将用当前的全权限 API Key，在 OCI 租户根区间创建一个受限用户（组 + 策略 + 用户，名字带 TriCloud 前缀），生成新的 API Key，自检通过后把面板里「{name}」保存的 Key 换成受限 Key。即使面板所在服务器被攻破，拿到的也只是受限 Key。",
+    "rapi.w1": "<b>不会删除或撤销 OCI 云端原来的 API Key</b>，其他程序仍可使用；面板会删除本地保存的旧私钥，请务必<b>自己保存好原全权限 Key</b>。",
+    "rapi.w2": "新 Key 生效可能需要几分钟（最多约 {m} 分钟），后台任务执行，期间可以关闭窗口。",
+    "rapi.w3": "切换后面板<b>不能再管理 IAM / 身份域</b>（用户、组、策略），也不能订阅新区域；这些请在 OCI 控制台用全权限账号操作。",
+    "rapi.w4": "失败会自动回滚（删除本次创建的用户 / 组 / 策略 / 新 Key），面板里的凭证保持不变。仅支持 Default 域、有 IAM 管理权限的用户。",
+    "rapi.stmts": "将创建的策略（{n} 条语句）",
+    "rapi.kept": "我已自己保存好原来的全权限 API Key",
+    "rapi.sendCode": "发送 Telegram 验证码", "rapi.resendIn": "{n} 秒后可重发",
+    "rapi.codeSent": "已发送到 Telegram，{m} 分钟内有效，只能用一次",
+    "rapi.codeLabel": "Telegram 验证码（6 位数字）",
+    "rapi.keptFirst": "请先确认已保存原全权限 API Key", "rapi.codeFirst": "请输入 6 位 Telegram 验证码",
+    "rapi.start": "开始切换", "rapi.started": "已开始切换（任务 #{id}），可在任务抽屉查看进度，期间可以关闭窗口",
+    "rapi.running": "切换任务 #{id} 正在进行中",
+    "rapi.needTg": "切换受限 API 需要 Telegram 验证码。请先在「设置 → Telegram 通知」填写 Bot Token 和 Chat ID。",
+    "rapi.goSettings": "去设置",
+    "rapi.lastTask": "上次切换（任务 #{id}）：{msg}",
+    "rapi.infoTitle": "受限 API · {name}", "rapi.user": "用户", "rapi.group": "组", "rapi.policy": "策略", "rapi.fp": "指纹", "rapi.at": "切换时间",
+    "rapi.infoNote": "OCI 云端原 API Key 仍然保留（面板没有删除或撤销）。如需恢复全权限，在「编辑」里重新填入原 Key 即可（受限标记会自动去掉）。",
     "acc.test": "测活", "acc.info": "信息", "acc.typeBtn": "类型", "acc.proxyBtn": "代理",
     "acc.testDone": "测活完成：{ok}/{total} 连通，用时 {s} 秒",
     "acc.delTitle": "删除账号", "acc.delConfirm": "仅从面板删除凭证，不影响云上资源。确定？",
@@ -2483,7 +2532,7 @@ const STR = {
     "task.name.azure_create": "创建 VM", "task.name.ensure_network": "自动建网", "task.name.snapshot": "快照（已移除）",
     "task.name.migrate": "迁移", "task.name.cf_delete": "删除 CDN 分发", "task.name.reinstall": "重装系统",
     "task.name.net500m": "下行 500Mbps", "task.name.foundry": "部署 AI 模型", "task.name.billing_keep": "保号账单",
-    "task.name.aws_credit": "新号 Credit", "task.name.onedrive_backup": "OneDrive 备份",
+    "task.name.aws_credit": "新号 Credit", "task.name.onedrive_backup": "OneDrive 备份", "task.name.oci_restrict": "切换受限 API",
     "task.st.running": "运行中", "task.st.done": "完成", "task.st.failed": "失败", "task.st.stopped": "已停止", "task.st.interrupted": "已中断",
     "task.tgNote": "任务完成 / 失败 / 停止会自动推送 Telegram", "task.col.attempts": "次数", "task.col.info": "信息", "task.col.updated": "更新",
     "task.logBtn": "日志", "task.empty": "暂无任务",
@@ -2675,7 +2724,7 @@ const STR = {
     "set.dnsDomain": "Domain", "set.dnsRecord": "Record prefix", "set.dnsRecordHint": "Enter just the prefix; the domain above is added automatically. Use @ for the root domain.",
     "set.dnsA": "Update A record (IPv4)", "set.dnsAAAA": "Update AAAA record (IPv6)",
     "set.dnsProxied": "Enable Cloudflare proxy (orange cloud)", "set.dnsSync": "Sync once with the current IP now",
-    "set.dnsNeedToken": "; set a Cloudflare token in Settings first", "set.dnsBound": "Bound",
+    "set.dnsNeedToken": "; set a Cloudflare token in Settings first", "set.dnsBound": "Bound", "set.dnsNoneBound": "No domain is bound to this instance yet — add one below.",
     "set.dnsPageNote": "Add bindings via “Bind domain” on an instance card. The token is configured under Settings → Cloudflare.",
     "set.dnsColRecord": "Record", "set.dnsProxySuffix": "· proxied",
     "set.dnsUnbindTitle": "Unbind domain",
@@ -3052,7 +3101,7 @@ const STR = {
     "common.yes": "Yes", "common.no": "No", "common.understood": "Got it",
     // ---- instance pages ----
     "inst.locating": "Locating a region with instances…",
-    "inst.renameTip": "Azure: takes effect directly. OCI: requires the Oracle Cloud Agent Run Command plugin. AWS: requires SSM management. Visible after re-login via SSH.",
+    "inst.renameTip": "The panel only changes the cloud display name and never runs commands inside the OS. After saving, you'll get the command to change the OS hostname yourself over SSH.",
     "inst.renamedSynced": "Renamed; hostname synced", "inst.renamed": "Renamed",
     "inst.hostnameDispatched": "Hostname sync dispatched", "inst.renamedMsg": "Renamed. {msg}", "inst.renamedNotSynced": "Renamed. Hostname not synced: {msg}",
     "inst.renameFailTitle": "Renamed — hostname sync failed", "inst.renameManualTitle": "Renamed — hostname not auto-synced",
@@ -3134,10 +3183,32 @@ const STR = {
     "cred.tenantId": "Tenant ID", "cred.clientId": "Client (App) ID", "cred.clientSecret": "Client Secret", "cred.subscriptionId": "Subscription ID",
     // ---- cloud accounts ----
     "acc.addBtn": "Add cloud account", "acc.batchBtn": "Batch add", "acc.testScope": "Test scope", "acc.allAccounts": "All accounts",
-    "acc.testAll": "⚡ Test all", "acc.deletedLink": "🗑 Deleted accounts",
+    "acc.testAll": "⚡ Test all", "acc.deletedLink": "🗑 Deleted accounts", "acc.moveUp": "Move up (sidebar order)", "acc.moveDown": "Move down (sidebar order)",
     "acc.encNote": "Credentials are Fernet-encrypted in local SQLite; never sent to third parties",
     "acc.colName": "Name", "acc.colCloud": "Cloud", "acc.colCreated": "Created / Age", "acc.colConn": "Connectivity", "acc.colProxy": "Egress proxy", "acc.colAdded": "Added",
     "acc.disabledBadge": "Disabled", "acc.direct": "Direct",
+    // build 30: OCI one-click restricted API
+    "rapi.btn": "Restricted API", "rapi.btnInfo": "🔒 Restricted", "rapi.badge": "Restricted API",
+    "rapi.badgeTip": "The panel uses a restricted API key that can only manage instances / storage / networking and read billing; it cannot manage IAM / identity domains",
+    "rapi.title": "Switch to restricted API · {name}",
+    "rapi.intro": "Using the current full-permission API key, TriCloud creates a restricted user in the OCI tenancy root (group + policy + user, TriCloud-prefixed), generates a new API key, and after self-checks pass replaces the key stored for \"{name}\" with the restricted one. Even if the panel server is compromised, only the restricted key leaks.",
+    "rapi.w1": "<b>The original API key in OCI is NOT deleted or revoked</b> and other programs can still use it; the panel deletes its local copy of the old private key, so <b>keep the original full-permission key yourself</b>.",
+    "rapi.w2": "The new key may take a few minutes to take effect (up to about {m} min). It runs as a background task; you can close this window.",
+    "rapi.w3": "Afterwards the panel <b>cannot manage IAM / identity domains</b> (users, groups, policies) or subscribe new regions; do that in the OCI Console with a full-permission user.",
+    "rapi.w4": "On failure everything created in this run (user / group / policy / new key) is rolled back and the stored credentials stay unchanged. Default-domain users with IAM admin rights only.",
+    "rapi.stmts": "Policy to be created ({n} statements)",
+    "rapi.kept": "I have saved the original full-permission API key myself",
+    "rapi.sendCode": "Send Telegram code", "rapi.resendIn": "Resend in {n} s",
+    "rapi.codeSent": "Sent to Telegram; valid for {m} min, single use",
+    "rapi.codeLabel": "Telegram code (6 digits)",
+    "rapi.keptFirst": "Confirm that you saved the original full-permission key first", "rapi.codeFirst": "Enter the 6-digit Telegram code",
+    "rapi.start": "Start switch", "rapi.started": "Switch started (task #{id}); follow it in the task drawer. You can close this window.",
+    "rapi.running": "Switch task #{id} is running",
+    "rapi.needTg": "Switching to a restricted API needs a Telegram verification code. Fill in the bot token and chat ID under Settings → Telegram first.",
+    "rapi.goSettings": "Open settings",
+    "rapi.lastTask": "Last attempt (task #{id}): {msg}",
+    "rapi.infoTitle": "Restricted API · {name}", "rapi.user": "User", "rapi.group": "Group", "rapi.policy": "Policy", "rapi.fp": "Fingerprint", "rapi.at": "Switched at",
+    "rapi.infoNote": "The original API key in OCI is still there (the panel did not delete or revoke it). To go back to full permissions, enter the original key under Edit (the restricted mark is removed automatically).",
     "acc.test": "Test", "acc.info": "Info", "acc.typeBtn": "Type", "acc.proxyBtn": "Proxy",
     "acc.testDone": "Test done: {ok}/{total} reachable in {s}s",
     "acc.delTitle": "Delete account", "acc.delConfirm": "This only removes the credentials from the panel; cloud resources are unaffected. Continue?",
@@ -3263,7 +3334,7 @@ const STR = {
     "task.name.azure_create": "Create VM", "task.name.ensure_network": "Auto-network", "task.name.snapshot": "Snapshot (removed)",
     "task.name.migrate": "Migrate", "task.name.cf_delete": "Delete CDN distribution", "task.name.reinstall": "Reinstall OS",
     "task.name.net500m": "500 Mbps downlink", "task.name.foundry": "Deploy AI model", "task.name.billing_keep": "Keep-alive billing",
-    "task.name.aws_credit": "New-account credit", "task.name.onedrive_backup": "OneDrive backup",
+    "task.name.aws_credit": "New-account credit", "task.name.onedrive_backup": "OneDrive backup", "task.name.oci_restrict": "Switch to restricted API",
     "task.st.running": "Running", "task.st.done": "Done", "task.st.failed": "Failed", "task.st.stopped": "Stopped", "task.st.interrupted": "Interrupted",
     "task.tgNote": "Completions, failures and stops are pushed to Telegram", "task.col.attempts": "Attempts", "task.col.info": "Message", "task.col.updated": "Updated",
     "task.logBtn": "Logs", "task.empty": "No tasks",
@@ -3405,6 +3476,17 @@ function modal(title, bodyHtml, onOk, okText = t("common.ok"), danger = false, o
     };
   });
 }
+// ESC 关闭最顶层弹窗：点它自己的 [data-x]，与鼠标点「取消/关闭」完全同一条路径（只会取消、绝不误确认）；
+// 一次按键只关一层（弹窗可叠开）。给事件打 _escHandled 标记，让 main.js 里任务抽屉的 ESC 跳过同一次按键。
+// 输入法组词中的 ESC 是输入法自己的取消操作，不关弹窗。
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || e.isComposing) return;
+  const top = lastModal();
+  if (!top) return;
+  e._escHandled = true;
+  const x = top.querySelector("[data-x]");
+  if (x) x.click(); else top.remove();
+});
 // v1.4：<div data-show-when="mode=rolling"> 按同一弹窗里字段的值显示 / 隐藏（多个条件用 & 连接，值可用 | 表示或）
 function applyShowWhen(root) {
   root.querySelectorAll("[data-show-when]").forEach((el) => {
@@ -3688,9 +3770,9 @@ async function pageAccounts() {
     <select id="tprov" title="${t("acc.testScope")}"><option value="">${t("acc.allAccounts")}</option>${PROVS.filter(prov).map((p) => `<option value="${p}">${PNAME[p]}</option>`).join("")}</select>
     <button class="btn" id="testAll">${t("acc.testAll")}</button><a class="btn" href="#/deleted">${t("acc.deletedLink")}</a><span class="grow"></span><span class="muted" id="tsum">${t("acc.encNote")}</span></div>
     <div class="card"><table><tr><th>${t("acc.colName")}</th><th>${t("acc.colCloud")}</th><th>${t("core.region.title")}</th><th>${t("acc.colCreated")}</th><th>${t("acc.colConn")}</th><th>${t("acc.colProxy")}</th><th>${t("acc.colAdded")}</th><th></th></tr>
-    ${ACCOUNTS.map((a) => `<tr data-acc="${a.id}" class="${a.disabled ? "acc-off" : ""}"><td><a href="#/${a.provider}/${a.id}">${esc(a.name)}</a>${a.disabled ? ` <span class="badge failed" title="${esc(a.disabled_reason || "")}">${t("acc.disabledBadge")}</span>` : ""}${acctTypeTag(a)}</td><td><span class="dot ${a.provider}"></span> ${PNAME[a.provider]}</td>
+    ${ACCOUNTS.map((a) => `<tr data-acc="${a.id}" class="${a.disabled ? "acc-off" : ""}"><td><a href="#/${a.provider}/${a.id}">${esc(a.name)}</a>${a.disabled ? ` <span class="badge failed" title="${esc(a.disabled_reason || "")}">${t("acc.disabledBadge")}</span>` : ""}${restrictedTag(a)}${acctTypeTag(a)}</td><td><span class="dot ${a.provider}"></span> ${PNAME[a.provider]}</td>
     <td id="mr${a.id}">${accRegionCell(a)}</td><td>${ageText(a)}</td><td class="tcell">${testCell(a)}</td><td class="mono">${esc(a.proxy || t("acc.direct"))}${a.proxy_user ? `<div class="muted">${esc(a.proxy_user)}${a.proxy_pass_set ? " · ●●●" : ""}</div>` : ""}</td><td>${new Date(a.created * 1000).toLocaleString()}</td>
-    <td><button class="btn sm" data-test="${a.id}">${t("acc.test")}</button> <button class="btn sm" data-info="${a.id}">${t("acc.info")}</button> <button class="btn sm" data-type="${a.id}">${t("acc.typeBtn")}</button>${a.disabled ? ` <button class="btn sm" data-off="${a.id}">${t("common.enable")}</button>` : ""} <button class="btn sm" data-edit="${a.id}">${t("common.edit")}</button> <button class="btn sm" data-px="${a.id}">${t("acc.proxyBtn")}</button> <button class="btn sm danger" data-del="${a.id}">${t("common.delete")}</button></td></tr>`).join("") || `<tr><td colspan=8 class="muted">${t("common.none")}</td></tr>`}</table></div>`;
+    <td><button class="btn sm" data-up="${a.id}" title="${t("acc.moveUp")}">↑</button> <button class="btn sm" data-dn="${a.id}" title="${t("acc.moveDown")}">↓</button> <button class="btn sm" data-test="${a.id}">${t("acc.test")}</button> <button class="btn sm" data-info="${a.id}">${t("acc.info")}</button> <button class="btn sm" data-type="${a.id}">${t("acc.typeBtn")}</button>${a.provider === "oci" ? ` <button class="btn sm" data-rapi="${a.id}">${a.restricted ? t("rapi.btnInfo") : t("rapi.btn")}</button>` : ""}${a.disabled ? ` <button class="btn sm" data-off="${a.id}">${t("common.enable")}</button>` : ""} <button class="btn sm" data-edit="${a.id}">${t("common.edit")}</button> <button class="btn sm" data-px="${a.id}">${t("acc.proxyBtn")}</button> <button class="btn sm danger" data-del="${a.id}">${t("common.delete")}</button></td></tr>`).join("") || `<tr><td colspan=8 class="muted">${t("common.none")}</td></tr>`}</table></div>`;
   $("#add").onclick = addAccount;
   $("#batch").onclick = batchAddAccounts;
   refreshMachineRegions(ACCOUNTS, (a) => { const td = document.getElementById("mr" + a.id); if (td) td.innerHTML = accRegionCell(a); });
@@ -3703,6 +3785,18 @@ async function pageAccounts() {
     await loadAccounts();
     r.results.forEach((x) => { const tr = view.querySelector(`tr[data-acc="${x.account_id}"]`); if (tr) tr.querySelector(".tcell").innerHTML = testCell(ACCOUNTS.find((a) => a.id === x.account_id) || {}, x); });
   };
+  const moveAcc = async (id, dir) => {
+    const ids = ACCOUNTS.map((a) => a.id);
+    const i = ids.indexOf(id); if (i < 0) return;
+    const prov = ACCOUNTS[i].provider;
+    let j = i + dir;
+    while (j >= 0 && j < ids.length && ACCOUNTS[j].provider !== prov) j += dir;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    if (await post("/accounts/reorder", { ids })) { await loadAccounts(); route(); }
+  };
+  view.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => moveAcc(+b.dataset.up, -1)));
+  view.querySelectorAll("[data-dn]").forEach((b) => (b.onclick = () => moveAcc(+b.dataset.dn, 1)));
   view.querySelectorAll("[data-test]").forEach((b) => (b.onclick = async () => {
     const tr = b.closest("tr"); tr.querySelector(".tcell").innerHTML = `<span class="spin"></span>`;
     const r = await act(b, () => post(`/accounts/${b.dataset.test}/test`));
@@ -3711,6 +3805,7 @@ async function pageAccounts() {
   }));
   view.querySelectorAll("[data-info]").forEach((b) => (b.onclick = () => accountInfoDialog(ACCOUNTS.find((x) => x.id == b.dataset.info))));
   view.querySelectorAll("[data-type]").forEach((b) => (b.onclick = () => accountTypeDialog(ACCOUNTS.find((x) => x.id == b.dataset.type))));
+  view.querySelectorAll("[data-rapi]").forEach((b) => (b.onclick = () => restrictDialog(ACCOUNTS.find((x) => x.id == b.dataset.rapi))));
   view.querySelectorAll("[data-off]").forEach((b) => (b.onclick = () => toggleDisable(ACCOUNTS.find((x) => x.id == b.dataset.off))));
   view.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => {
     if (!(await confirmBox(t("acc.delTitle"), t("acc.delConfirm"), true))) return;
@@ -3765,6 +3860,56 @@ document.addEventListener("change", (e) => {
 });
 
 // ---------- 账号：存活天数、测活、信息、批量添加 ----------
+// ---------- build 30：OCI 一键切换受限 API ----------
+function restrictedTag(a) {
+  return a.restricted ? ` <span class="badge running" title="${esc(t("rapi.badgeTip"))}">🔒 ${t("rapi.badge")}</span>` : "";
+}
+async function restrictDialog(a) {
+  let s;
+  try { s = await api(`/accounts/${a.id}/oci/restrict`); } catch (e) { return toast(e.message, true); }
+  const stm = `<details><summary>${t("rapi.stmts", { n: s.statements.length })}</summary><pre class="mono" style="white-space:pre-wrap;font-size:12px;margin:6px 0">${s.statements.map(esc).join("\n")}</pre></details>`;
+  if (s.restricted) {
+    const r = s.restricted;
+    await modal(t("rapi.infoTitle", { name: a.name }), `<div class="kv"><span>${t("common.status")}</span><span>🔒 <b>${t("rapi.badge")}</b></span>
+      <span>${t("rapi.user")}</span><span class="mono">${esc(r.user_name || "-")}</span><span>${t("rapi.group")}</span><span class="mono">${esc(r.group_name || "-")}</span>
+      <span>${t("rapi.policy")}</span><span class="mono">${esc(r.policy_name || "-")}</span><span>${t("rapi.fp")}</span><span class="mono">${esc(r.fingerprint || "-")}</span>
+      <span>${t("rapi.at")}</span><span>${r.at ? new Date(r.at * 1000).toLocaleString() : "-"}</span></div><p class="muted">${t("rapi.infoNote")}</p>${stm}`, null, t("common.gotIt"));
+    return;
+  }
+  if (s.task && s.task.status === "running") {
+    toast(t("rapi.running", { id: s.task.id }));
+    if (window.TaskDrawer) window.TaskDrawer.open(s.task.id);
+    return;
+  }
+  if (!s.tg_bound) {
+    if (await modal(t("rapi.title", { name: a.name }), `<p>${t("rapi.needTg")}</p>`, null, t("rapi.goSettings"))) location.hash = "#/settings";
+    return;
+  }
+  const last = s.task && s.task.status !== "done" ? `<p class="muted">${t("rapi.lastTask", { id: s.task.id, msg: esc(s.task.message || "") })}</p>` : "";
+  const body = `<p>${t("rapi.intro", { name: esc(a.name) })}</p>
+    <ul class="guard"><li>${t("rapi.w1")}</li><li>${t("rapi.w2", { m: s.wait_minutes })}</li><li>${t("rapi.w3")}</li><li>${t("rapi.w4")}</li></ul>${stm}${last}
+    <label><input type="checkbox" name="kept" style="width:auto"> ${t("rapi.kept")}</label>
+    <div style="margin:8px 0"><button type="button" class="btn sm" id="rapiCode">${t("rapi.sendCode")}</button> <span class="muted" id="rapiMsg"></span></div>
+    <label>${t("rapi.codeLabel")}</label><input name="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456">`;
+  const r = await modal(t("rapi.title", { name: a.name }), body, async (bg) => {
+    const f = form(bg);
+    if (!f.kept) throw new Error(t("rapi.keptFirst"));
+    if (!/^\d{6}$/.test(f.code || "")) throw new Error(t("rapi.codeFirst"));
+    return post(`/accounts/${a.id}/oci/restrict`, { code: f.code, confirm: true });
+  }, t("rapi.start"), true, (bg) => {
+    const b = bg.querySelector("#rapiCode"), m = bg.querySelector("#rapiMsg");
+    b.onclick = async () => {
+      b.disabled = true; m.innerHTML = `<span class="spin"></span>`;
+      try {
+        await post(`/accounts/${a.id}/oci/restrict/code`, {});
+        m.textContent = t("rapi.codeSent", { m: Math.round((s.code_ttl || 300) / 60) });
+        let n = 60; const tick = () => { if (!b.isConnected) return; if (--n <= 0) { b.disabled = false; b.textContent = t("rapi.sendCode"); } else { b.textContent = t("rapi.resendIn", { n }); setTimeout(tick, 1000); } };
+        tick();
+      } catch (e) { m.textContent = `❌ ${e.message}`; b.disabled = false; }
+    };
+  });
+  if (r) { toast(t("rapi.started", { id: r.task_id })); await loadAccounts(); route(); }
+}
 function acctTypeTag(a) {   // v1.6：缓存的账号类型（点「类型」查询后显示）
   try { const ty = a.acct_type ? JSON.parse(a.acct_type) : null; return ty && ty.label ? ` <span class="badge" title="${esc(ty.plan_type || "")}">${esc(ty.label)}${ty.age_days != null ? t("acc.ageDaysSuffix", { n: ty.age_days }) : ""}</span>` : ""; } catch (_) { return ""; }
 }
@@ -4412,7 +4557,13 @@ async function pageSettings() {
 async function bindDns(acc, inst) {
   let zones;
   try { zones = await api("/cf/zones"); } catch (e) { return toast(e.message + t("set.dnsNeedToken"), true); }
-  const r = await modal(t("op.dns"), `<p class="muted">${t("set.dnsNote")}</p>
+  // 回显本实例已有的绑定（此前对话框只摆空表单，绑没绑过分不清）；列表拉不到也不挡新增
+  let mine = [];
+  try { mine = (await api("/dns-bindings")).filter((d) => +d.account_id === +acc.id && d.instance_id === inst.id); } catch (_) { /* ignore */ }
+  const boundHtml = mine.length
+    ? `<label>${t("set.dnsBound")}</label>${mine.map((d) => `<div style="display:flex;align-items:center;gap:8px;margin:2px 0 6px"><span class="mono" style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(d.record)}</span><span class="muted">${[d.v4 ? "A" : "", d.v6 ? "AAAA" : ""].filter(Boolean).join(" · ")}${d.proxied ? t("set.dnsProxySuffix") : ""}</span><button class="btn sm danger" type="button" data-unbind="${d.id}">${t("inst.unbind")}</button></div>`).join("")}`
+    : `<p class="muted">${t("set.dnsNoneBound")}</p>`;
+  const r = await modal(t("op.dns"), `${boundHtml}<p class="muted">${t("set.dnsNote")}</p>
     <label>${t("set.dnsDomain")}</label><select name="zone">${zones.map((z) => `<option value="${esc(z.id)}|${esc(z.name)}">${esc(z.name)}</option>`).join("")}</select>
     <label>${t("set.dnsRecord")}</label><div style="display:flex;align-items:center;gap:6px"><input name="record" placeholder="node1" style="flex:1;min-width:0"><span class="mono muted" id="dnsSuffix" style="white-space:nowrap">.${esc((zones[0] || {}).name || "")}</span></div><p class="muted" style="margin:2px 0 6px">${t("set.dnsRecordHint")}</p>
     <label><input type="checkbox" name="v4" style="width:auto" checked> ${t("set.dnsA")}</label>
@@ -4425,6 +4576,13 @@ async function bindDns(acc, inst) {
   }, t("aws.lsBind"), false, (bg) => {
     const sel = bg.querySelector("[name=zone]"), suf = bg.querySelector("#dnsSuffix");
     if (sel && suf) sel.onchange = () => (suf.textContent = "." + (sel.value.split("|")[1] || ""));
+    bg.querySelectorAll("[data-unbind]").forEach((b) => (b.onclick = async () => {
+      if (!(await confirmBox(t("set.dnsUnbindTitle"), t("set.dnsUnbindMsg"), true))) return;
+      if (await act(b, () => del(`/dns-bindings/${b.dataset.unbind}`), t("set.unbound"))) {
+        bg.querySelector("[data-x]").click();   // 关掉当前弹窗（以 null 结束，不会误弹成功提示）
+        bindDns(acc, inst);   // 重新打开，刷新已绑定列表
+      }
+    }));
   });
   if (r) toast(r.dns && r.dns.length ? r.dns.join("；") : t("set.dnsBound"));
 }
@@ -5630,7 +5788,7 @@ async function pageAccount(acc, tab) {
   const tabs = `<div class="tabs">${TABS[acc.provider].map(([k, l]) =>
     `<a href="#/${acc.provider}/${acc.id}/${k}" class="${k === tab ? "on" : ""}">${t(l)}</a>`).join("")}</div>`;
   const prevScroll = TAB_SCROLL[acc.provider] || 0;
-  view.innerHTML = tabs + `<div id="tab"></div>`;
+  view.innerHTML = tabs + (acc.restricted ? `<p class="muted" id="rapiNote" style="margin:4px 2px">🔒 ${t("rapi.badge")} · ${t("rapi.badgeTip")}</p>` : "") + `<div id="tab"></div>`;   // build 30
   keepTabVisible(view.querySelector(".tabs"), acc.provider, prevScroll);
   const box = $("#tab");
   // build 25：默认选中有机器的区域 —— 还没有区域记录时先查一次总览（有缓存，最多等 8 秒）
@@ -5661,7 +5819,7 @@ function instOps(acc, kind) {
   ops.push(["dns", t("op.dns")], ["monitor", t("op.monitor")], ["terminate", acc.provider === "azure" || kind === "lightsail" ? t("op.delete") : t("op.terminate")]);
   return v16Ops(acc, kind, ops);   // v1.6：附加 IP / 500M / 磁盘 / 防火墙 / IP 质量 / 重装系统
 }
-// v1.5：改名同步主机名 —— 只通过云厂商 Run Command 执行固定命令，不走 SSH
+// 改名只改云端显示名；系统主机名在改名结果里给手动命令（面板不进系统执行命令，v1.6 关停自动同步）
 const RENAME_HOSTNAME_TIP = "inst.renameTip";
 function renameResult(r) {
   const h = r && r.hostname;
@@ -5694,6 +5852,7 @@ function instCard(acc, i, kind) {
     <span>${t("inst.private")}</span><span class="mono">${esc(i.private_ip || "-")}</span>
     ${extra.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join("")}
     <span>${t("inst.zone")}</span><span>${esc(i.zone ? regionLabel(i.zone) : "-")}</span>
+    ${(i._dns || []).length ? `<span>${t("op.dns")}</span><span class="mono wide">${i._dns.map((x) => "🌐 " + esc(x)).join("<br>")}</span>` : ""}
     ${ip6 !== "-" ? `<span>IPv6</span><span class="mono wide">${ip6}</span>` : ""}</div>
     <div class="ops">${inl.map(([o, l]) => opBtn(o, l, i)).join("")}${more ? `<button class="btn sm" data-more aria-label="${t("inst.moreOps")}">${t("inst.more")} ▾</button>` : ""}</div></div>`;
 }
@@ -5715,6 +5874,12 @@ async function tabInstances(acc, box, kind = "vm") {
   try { list = await api(`/accounts/${acc.id}/instances?kind=${kind}&${rq(acc)}`); }
   catch (e) { $("#list", box).innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; return; }
   $("#info", box).textContent = t("inst.count", { n: list.length });
+  // DNS 绑定标记：已绑定的实例在卡片/表格里直接带子域名，不用点进对话框才分得清（拉不到就静默不显示）
+  try {
+    const byInst = {};
+    (await api("/dns-bindings")).filter((d) => +d.account_id === +acc.id).forEach((d) => { (byInst[d.instance_id] = byInst[d.instance_id] || []).push(d.record); });
+    list.forEach((i) => { i._dns = byInst[i.id] || []; });
+  } catch (_) { /* ignore */ }
   const useTable = instView() === "table" && isDesktop() && list.length;
   const lb = $("#list", box);
   lb.className = useTable ? "card itable" : "grid";
@@ -5772,7 +5937,6 @@ async function instOp(acc, inst, op, kind, btn, reload) {
     if (await act(btn, () => post(`/accounts/${acc.id}/oci/ipv6/delete`, { ...base, confirm: true }), (r) => t("inst.deletedList", { list: r.deleted.join(", ") }))) setTimeout(reload, 1500);
   } else if (op === "rename") {
     const r = await modal(t("inst.renameTitle"), `<input name="new_name" value="${esc(inst.name)}">
-      <label><input type="checkbox" name="sync_hostname" style="width:auto" checked> ${t("inst.syncHostname")}</label>
       <p class="muted">${t(RENAME_HOSTNAME_TIP)}</p>`, (bg) => post(`/accounts/${acc.id}/instances/rename`, { ...base, ...form(bg) }), t("common.save"));
     if (r) { renameResult(r); reload(); }
   } else if (op === "bootvol") {
@@ -6011,7 +6175,7 @@ function instTable(acc, list, kind) {
   const when = (c) => { if (!c || c === "None") return "-"; const t = String(c).replace("T", " "); return esc(t.slice(0, 16)); };
   const ops = instOps(acc, kind);
   return `<table class="inst-table"><tr><th>${t("acc.colName")}</th><th>${t("common.status")}</th><th>${t("inst.spec")}</th><th>${t("inst.colPublic")}</th><th>${t("inst.colPrivate")}</th><th>${t("inst.colRegion")}</th><th>${t("inst.colCreated")}</th><th>${t("inst.colOps")}</th></tr>
-    ${list.map((i) => `<tr data-id="${esc(i.id)}"><td><b title="${esc(i.id)}">${esc(i.name)}</b>${(i.ipv6 || []).length ? `<div class="muted mono" title="${esc(i.ipv6.join("\n"))}">${esc(i.ipv6[i.ipv6.length - 1])}${i.ipv6.length > 1 ? ` +${i.ipv6.length - 1}` : ""}</div>` : ""}</td>
+    ${list.map((i) => `<tr data-id="${esc(i.id)}"><td><b title="${esc(i.id)}">${esc(i.name)}</b>${(i.ipv6 || []).length ? `<div class="muted mono" title="${esc(i.ipv6.join("\n"))}">${esc(i.ipv6[i.ipv6.length - 1])}${i.ipv6.length > 1 ? ` +${i.ipv6.length - 1}` : ""}</div>` : ""}${(i._dns || []).length ? `<div class="muted mono" title="${esc(i._dns.join("\n"))}">🌐 ${esc(i._dns[0])}${i._dns.length > 1 ? ` +${i._dns.length - 1}` : ""}</div>` : ""}</td>
     <td><span class="badge ${esc(i.state)}">${esc(i.state)}</span></td><td>${spec(i)}</td><td class="mono nowrap">${esc(i.public_ip || "-")}</td><td class="mono nowrap">${esc(i.private_ip || "-")}</td>
     <td class="nowrap">${esc(i.zone || i.region ? regionLabel(i.zone || i.region) : "-")}</td><td class="mono nowrap">${when(i.created)}</td>
     <td class="row-ops"><div class="row-ops-in">${ops.map(([o, l]) => opBtn(o, l, i, o === "terminate" ? "danger" : "")).join("")}</div></td></tr>`).join("")}</table>`;
@@ -6217,7 +6381,7 @@ async function pageTasks() {
 // ================= v1.4 新增 =================
 const TASK_NAME = { snatch: "task.name.snatch", change_ip: "task.name.change_ip", resize: "task.name.resize", ipv6: "task.name.ipv6", azure_create: "task.name.azure_create", ensure_network: "task.name.ensure_network",
   snapshot: "task.name.snapshot", migrate: "task.name.migrate", cf_delete: "task.name.cf_delete", reinstall: "task.name.reinstall", net500m: "task.name.net500m", foundry: "task.name.foundry",
-  billing_keep: "task.name.billing_keep", aws_credit: "task.name.aws_credit", onedrive_backup: "task.name.onedrive_backup" };
+  billing_keep: "task.name.billing_keep", aws_credit: "task.name.aws_credit", onedrive_backup: "task.name.onedrive_backup", oci_restrict: "task.name.oci_restrict" };
 const TST = { running: "task.st.running", done: "task.st.done", failed: "task.st.failed", stopped: "task.st.stopped", interrupted: "task.st.interrupted" };
 
 // ---------- 任务抽屉：提交任务后自动打开并跟踪，运行中每 2 秒刷新 ----------
@@ -6355,17 +6519,51 @@ function renderSide(p) {
     const list = ACCOUNTS.filter((a) => a.provider === prov);
     if (!list.length) continue;
     html += `<div class="grp prov">${PLOGO[prov]}${PNAME[prov]}</div>`;
-    for (const a of list) html += link(`#/${prov}/${a.id}`, esc(a.name), `<span class="dot ${prov}"></span>`);
+    for (const a of list) html += `<a href="#/${prov}/${a.id}" data-acc="${a.id}" draggable="true" class="${cur === `#/${prov}/${a.id}` ? "on" : ""}"><span class="dot ${prov}"></span>${esc(a.name)}</a>`;
   }
   html += `<div class="grp">${t("nav.manage")}</div>` + link("#/accounts", `🔑 ${t("nav.accounts")}`) + link("#/health", `🩺 ${t("nav.health")}`) + link("#/freecheck", `🆓 ${t("nav.freecheck")}`) + link("#/traffic", `📈 ${t("nav.traffic")}`) + link("#/tasks", `⏱ ${t("nav.tasks")}`) +
     link("#/monitors", `📡 ${t("nav.monitors")}`) + link("#/secrets", `🔐 ${t("nav.secrets")}`) + link("#/scripts", `📜 ${t("nav.scripts")}`) +
     link("#/dns", `🌐 ${t("nav.dns")}`) + link("#/security", `🛡 ${t("nav.security")}`) + link("#/onedrive", `☁️ ${t("nav.onedrive")}`) + link("#/settings", `⚙️ ${t("nav.settings")}`);
   $("#side").innerHTML = html;
+  wireSideDrag();
   const acc = TABS[p[0]] && ACCOUNTS.find((a) => a.id == p[1]);
   renderAccSwitch(acc);
   $("#title").textContent = acc ? `${PNAME[acc.provider]} · ${acc.name}` :
     ({ accounts: t("nav.accounts"), tasks: t("nav.tasks"), monitors: t("nav.monitors"), settings: t("nav.settings"), secrets: t("nav.secrets"), scripts: t("nav.scripts"),
       dns: t("title.dns"), security: t("nav.security"), onedrive: t("nav.onedrive"), health: t("nav.health"), traffic: t("nav.traffic"), deleted: t("nav.deleted"), freecheck: t("nav.freecheck") }[p[0]] || t("nav.home"));
+}
+
+// ---------- 左侧账号手动排序（同云组内拖动，松手存后端 sort_order） ----------
+function wireSideDrag() {
+  const side = $("#side");
+  let dragId = null;
+  const items = () => [...side.querySelectorAll("a[data-acc]")];
+  const provOf = (id) => (ACCOUNTS.find((a) => a.id == id) || {}).provider;
+  items().forEach((el) => {
+    el.addEventListener("dragstart", (e) => {
+      dragId = el.dataset.acc; el.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      try { e.dataTransfer.setData("text/plain", dragId); } catch {}
+    });
+    el.addEventListener("dragend", () => { dragId = null; items().forEach((x) => x.classList.remove("dragging", "drop-before", "drop-after")); });
+    el.addEventListener("dragover", (e) => {
+      if (dragId == null || el.dataset.acc === dragId || provOf(el.dataset.acc) !== provOf(dragId)) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = "move";
+      const r = el.getBoundingClientRect(), after = e.clientY > r.top + r.height / 2;
+      el.classList.toggle("drop-after", after); el.classList.toggle("drop-before", !after);
+      el.dataset.after = after ? "1" : "";
+    });
+    el.addEventListener("dragleave", () => el.classList.remove("drop-before", "drop-after"));
+    el.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      if (dragId == null || el.dataset.acc === dragId) return;
+      const dragEl = side.querySelector(`a[data-acc="${dragId}"]`);
+      if (!dragEl || provOf(el.dataset.acc) !== provOf(dragId)) return;
+      el.parentNode.insertBefore(dragEl, el.dataset.after ? el.nextSibling : el);
+      await post("/accounts/reorder", { ids: items().map((x) => +x.dataset.acc) });
+      await loadAccounts(); renderSide(parseHash());
+    });
+  });
 }
 
 // ---------- 顶栏账号快速切换器 ----------
@@ -6462,7 +6660,7 @@ const applyAll = () => { applyI18n(document); syncAria(); };
   $("#taskBtn").onclick = () => (TaskDrawer.isOpen() ? TaskDrawer.close() : TaskDrawer.open());
   $("#tdClose").onclick = () => TaskDrawer.close();
   $("#tdScrim").onclick = () => TaskDrawer.close();
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && TaskDrawer.isOpen() && !document.querySelector(".modal-bg")) TaskDrawer.close(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !e._escHandled && TaskDrawer.isOpen() && !document.querySelector(".modal-bg")) TaskDrawer.close(); });
   const badge = () => { if (!document.hidden && !TaskDrawer.isOpen()) api("/tasks?limit=20").then(updateTaskBadge).catch(() => {}); };
   setInterval(badge, 15000);
   await loadAccounts();

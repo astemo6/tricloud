@@ -744,8 +744,10 @@ class AWSProvider(AWSMore, AWSCredit):
         return {"ok": True}
 
     def cf_set_plan(self, dist_id, tier):
-        """切换套餐：FREE / PRO / BUSINESS / PREMIUM（订阅），PAYGO（从订阅解绑，回到按量付费）。计费操作。
-        订阅前自动关联 WAF（cf_ensure_waf）；切回按量时解绑面板 WAF，返回值带 waf_cleanup 供路由排清理任务。
+        """切换套餐：FREE / PRO / BUSINESS / PREMIUM（订阅），PAYGO（取消订阅，回到按量付费）。计费操作。
+        订阅的 resourceArns 必须恰好含分发 + 其关联 WAF 两个 ARN（AWS 官方要求，缺一被判不兼容）；
+        订阅前自动关联 WAF（cf_ensure_waf）。切回按量走 cancel_subscription：FREE 立即生效、
+        解绑面板 WAF 并带 waf_cleanup 供路由排清理任务；付费档只是排到账期结束，期间不拆 WAF。
         AWS 的 ClientError 统一转 ValueError 透传原始原因，不再吞成 500。"""
         tier = tier.upper()
         try:
@@ -760,7 +762,13 @@ class AWSProvider(AWSMore, AWSCredit):
             if tier == "PAYGO":
                 if not current:
                     raise ValueError("该分发已是按量付费")
-                ppm.disassociate_resources_from_subscription(arn=current["arn"], resourceArns=[arn])
+                cur_tier = (current.get("planTier") or "").upper()
+                ppm.cancel_subscription(arn=current["arn"], ifMatch=current["eTag"],
+                                        clientToken=f"tricloud-{dist_id}-{uuid.uuid4().hex[:8]}")
+                if cur_tier != "FREE":
+                    # 付费档取消排到本账期结束，订阅在账期内仍有效：必填资源（WAF）不能先拆
+                    return {"ok": True, "plan": "PAYGO",
+                            "message": f"已申请取消 {cur_tier} 套餐，将在本账期结束后切回按量付费"}
                 out = {"ok": True, "plan": "PAYGO", "message": "已切回按量付费"}
                 cleanup = self._cf_detach_panel_waf(dist_id)   # 按量下 WAF 单独计费，面板 WAF 必须清掉
                 if cleanup:
@@ -770,7 +778,8 @@ class AWSProvider(AWSMore, AWSCredit):
             if current and (current.get("planTier") or "").upper() == tier:
                 raise ValueError(f"该分发已是 {tier} 套餐")
             waf_info = self.cf_ensure_waf(dist_id)
-            sub = ppm.create_subscription(planFamily="CloudFront", planTier=tier, resourceArns=[arn], approvalMode="IMMEDIATE",
+            sub = ppm.create_subscription(planFamily="CloudFront", planTier=tier,
+                                          resourceArns=[arn, waf_info["web_acl_arn"]], approvalMode="IMMEDIATE",
                                           clientToken=f"tricloud-{dist_id}-{uuid.uuid4().hex[:8]}").get("subscription", {})
             message = f"已订阅 {tier} 套餐（{CF_PLANS[tier]['price']}），状态 {sub.get('status') or '未知'}"
             if waf_info.get("attached"):

@@ -2,11 +2,12 @@
 
 覆盖：
 1) cf_ensure_waf：空 WebACLId 的分发 → 建零规则面板 ACL 并关联；二次调用不重复建；
-2) cf_set_plan FREE：create_subscription 被调用时分发已关联 WAF；订阅成功且 message 标注自动关联；
-3) cf_set_plan 时已有用户自己的 WAF → 不新建面板 ACL、照常订阅；
+2) cf_set_plan FREE：create_subscription 被调用时分发已关联 WAF，且 resourceArns 恰为 {分发 ARN, WAF ARN}；
+3) cf_set_plan 时已有用户自己的 WAF → 不新建面板 ACL、照常订阅，resourceArns 带用户 WAF ARN；
 4) fake ppm 抛 ClientError(ValidationException) → cf_set_plan 抛 ValueError 且含 AWS 原始 message；
 5) cf_delete：带面板 ACL 的分发删除后 ACL 同步消失；带用户 ACL 的分发删除后 ACL 仍在；
-6) PAYGO 解绑：返回值带 waf_cleanup 且分发 WebACLId 已清空。
+6) PAYGO（当前 FREE）：走 cancel_subscription（arn + ifMatch=eTag），返回值带 waf_cleanup 且 WebACLId 已清空；
+7) PAYGO（当前付费档 PRO）：走 cancel、不拆 WAF、不带 waf_cleanup、message 含账期字样。
 """
 import os
 import sys
@@ -44,7 +45,8 @@ class FakePPM:
     def __init__(self):
         self.subs = []            # list_subscriptions 返回的订阅
         self.created = []         # create_subscription 入参
-        self.disassociated = []   # disassociate 入参
+        self.disassociated = []   # disassociate 入参（现行代码已不用，保留防误调用时可观测）
+        self.cancelled = []       # cancel_subscription 入参
         self.fail_create = None   # 置为 ClientError 时 create_subscription 抛它
         self.on_create = None     # create_subscription 被调用时的钩子
 
@@ -60,6 +62,7 @@ class FakePPM:
             raise self.fail_create
         sub = {"arn": f"arn:aws:pricing-plan-manager::123456789012:subscription/fake-{len(self.subs) + 1}",
                "planFamily": kw["planFamily"], "planTier": kw["planTier"], "status": "ACTIVE",
+               "eTag": f"etag-fake-{len(self.subs) + 1}",
                "resourceArns": list(kw["resourceArns"])}
         self.subs.append(sub)
         return {"subscription": {"arn": sub["arn"], "status": "ACTIVE"}}
@@ -69,6 +72,11 @@ class FakePPM:
         for s in self.subs:
             if s["arn"] == arn:
                 s["resourceArns"] = [a for a in s["resourceArns"] if a not in (resourceArns or [])]
+        return {}
+
+    def cancel_subscription(self, arn=None, ifMatch=None, **kw):
+        self.cancelled.append({"arn": arn, "ifMatch": ifMatch})
+        self.subs = [s for s in self.subs if s["arn"] != arn]
         return {}
 
 
@@ -124,15 +132,20 @@ with mock_aws():
     ok("2: subscribe FREE ok + message notes auto WAF",
        r["ok"] is True and r["plan"] == "FREE" and "已自动关联 WAF" in r["message"])
     ok("2: fake ppm got planTier FREE", fake.created[-1]["planTier"] == "FREE")
+    ok("2: resourceArns == {dist ARN, WAF ARN}",
+       set(fake.created[-1]["resourceArns"]) == {f"arn:aws:cloudfront::{acct}:distribution/{d2}", seen["web_acl"]})
 
     # 3) 已有用户 WAF：不新建面板 ACL
     d3 = p.cf_create("waf3.example.com")["id"]
-    attach_waf(p, d3, make_user_acl(p, "user-own-acl"))
+    user_arn = make_user_acl(p, "user-own-acl")
+    attach_waf(p, d3, user_arn)
     before = set(waf_names(p))
     r = p.cf_set_plan(d3, "FREE")
     ok("3: subscribe with user WAF ok", r["ok"] is True and "已自动关联 WAF" not in r["message"])
     ok("3: no panel ACL created for user-WAF dist", set(waf_names(p)) == before
        and f"tricloud-cf-{d3.lower()}" not in waf_names(p))
+    ok("3: resourceArns == {dist ARN, user WAF ARN}",
+       set(fake.created[-1]["resourceArns"]) == {f"arn:aws:cloudfront::{acct}:distribution/{d3}", user_arn})
 
     # 4) AWS 报错透传
     d4 = p.cf_create("waf4.example.com")["id"]
@@ -161,17 +174,35 @@ with mock_aws():
     r = p.cf_delete(d6)
     ok("5: delete dist with user WAF leaves it alone", r["ok"] is True and "keep-acl" in waf_names(p))
 
-    # 6) PAYGO 解绑带面板 ACL：返回 waf_cleanup 且 WebACLId 已清空
+    # 6) PAYGO（当前 FREE）走 cancel：返回 waf_cleanup 且 WebACLId 已清空
     d7 = p.cf_create("waf7.example.com")["id"]
     p.cf_ensure_waf(d7)
     fake.subs.append({"arn": "arn:aws:pricing-plan-manager::123456789012:subscription/manual-1",
-                      "planFamily": "CloudFront", "planTier": "FREE", "status": "ACTIVE",
+                      "planFamily": "CloudFront", "planTier": "FREE", "status": "ACTIVE", "eTag": "etag-manual-1",
                       "resourceArns": [f"arn:aws:cloudfront::{acct}:distribution/{d7}"]})
     r = p.cf_set_plan(d7, "PAYGO")
     ok("6: PAYGO returns waf_cleanup for panel WAF",
        r["ok"] is True and (r.get("waf_cleanup") or {}).get("name") == f"tricloud-cf-{d7.lower()}")
     ok("6: WebACLId cleared after PAYGO detach", dist_cfg(p, d7).get("WebACLId") == "")
-    ok("6: disassociate called on the subscription", len(fake.disassociated) == 1)
+    ok("6: cancel_subscription called with arn + ifMatch == eTag",
+       fake.cancelled == [{"arn": "arn:aws:pricing-plan-manager::123456789012:subscription/manual-1",
+                           "ifMatch": "etag-manual-1"}])
+    ok("6: disassociate no longer used", fake.disassociated == [])
+
+    # 7) PAYGO（当前付费档 PRO）：只 cancel 排账期结束，不拆 WAF、不带 waf_cleanup
+    d8 = p.cf_create("waf8.example.com")["id"]
+    panel_info = p.cf_ensure_waf(d8)
+    fake.subs.append({"arn": "arn:aws:pricing-plan-manager::123456789012:subscription/manual-2",
+                      "planFamily": "CloudFront", "planTier": "PRO", "status": "ACTIVE", "eTag": "etag-manual-2",
+                      "resourceArns": [f"arn:aws:cloudfront::{acct}:distribution/{d8}"]})
+    r = p.cf_set_plan(d8, "PAYGO")
+    ok("7: paid PAYGO cancels with arn + ifMatch == eTag",
+       fake.cancelled[-1] == {"arn": "arn:aws:pricing-plan-manager::123456789012:subscription/manual-2",
+                              "ifMatch": "etag-manual-2"})
+    ok("7: paid PAYGO keeps WAF attached, no waf_cleanup",
+       "waf_cleanup" not in r and dist_cfg(p, d8).get("WebACLId") == panel_info["web_acl_arn"])
+    ok("7: paid PAYGO message defers to billing cycle end",
+       r["ok"] is True and r["plan"] == "PAYGO" and "账期" in r["message"] and "PRO" in r["message"])
 
 print(f"\n{sum(x[1] for x in R)}/{len(R)} passed")
 sys.exit(0 if all(x[1] for x in R) else 1)

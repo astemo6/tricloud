@@ -149,8 +149,8 @@ export async function tabCloudFront(acc, box) {
   let list;
   try { list = await api(`/accounts/${acc.id}/cloudfront`); } catch (e) { $("#t", box).textContent = "❌ " + e.message; return; }
   $("#t", box).innerHTML = list.length ? `<table><tr><th>${t("aws.cfColId")}</th><th>${t("aws.cfOriginCol")}</th><th>${t("common.status")}</th><th>${t("aws.cfColPlan")}</th><th>${t("inst.colOps")}</th></tr>
-    ${list.map((d) => `<tr><td><b>${esc(d.id)}</b><br><code>${esc(d.domain)}</code>${d.aliases.length ? "<br>" + d.aliases.map(esc).join(", ") : ""}
-    <div class="muted">${esc(d.comment)}</div></td><td class="mono">${d.origins.map(esc).join("<br>")}</td>
+    ${list.map((d) => `<tr><td><b>${esc(d.comment || d.id)}</b><br><code>${esc(d.domain)}</code>${d.aliases.length ? "<br>" + d.aliases.map(esc).join(", ") : ""}${d.comment ? `
+    <div class="muted">${esc(d.id)}</div>` : ""}</td><td class="mono">${d.origins.map(esc).join("<br>")}</td>
     <td><span class="badge ${esc(d.status)}">${esc(d.status)}</span><br>${d.enabled ? t("aws.cfOn") : t("aws.cfOff")}</td>
     <td>${d.plan == null ? t("aws.cfUnknown") : esc(cfPlanLabel(d.plan))}<div class="muted">${esc(d.price_class || "-")}</div></td>
     <td><button class="btn sm" data-cf="inv" data-id="${esc(d.id)}">${t("aws.cfInv")}</button> <button class="btn sm" data-cf="edit" data-id="${esc(d.id)}">${t("common.edit")}</button>

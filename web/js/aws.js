@@ -167,7 +167,7 @@ export async function cfOp(acc, d, op, btn, reload) {
     const r = await modal(t("aws.cfEditTitle", { id: d.id }), `<label>${t("inst.desc")}</label><input name="comment" value="${esc(c.comment)}">
       <label>${t("aws.cfOrigin")}</label><input name="origin_domain" value="${esc(c.origin_domain)}">
       <div class="row2"><div><label>${t("aws.cfProto")}</label><select name="origin_protocol">${["http-only", "https-only", "match-viewer"].map((x) => `<option ${x === c.origin_protocol ? "selected" : ""}>${x}</option>`).join("")}</select></div>
-      <div><label>${t("aws.cfPrice")}</label><select name="price_class">${["100", "200", "All"].map((x) => `<option ${x === c.price_class ? "selected" : ""}>${x}</option>`).join("")}</select></div></div>
+      <div><label>${t("aws.cfPrice")}</label><select name="price_class">${[["all", "aws.cfPriceAll"], ["200", "aws.cfPrice200"], ["100", "aws.cfPrice100"]].map(([v, k]) => `<option value="${v}"${String(c.price_class).toLowerCase() === v ? " selected" : ""}>${t(k)}</option>`).join("")}</select></div></div>
       <div class="row2"><div><label>${t("aws.cfHttpPort")}</label><input name="http_port" type="number" value="${c.http_port ?? 80}"></div>
       <div><label>${t("aws.cfHttpsPort")}</label><input name="https_port" type="number" value="${c.https_port ?? 443}"></div></div>
       <label><input type="checkbox" name="ws_mode" style="width:auto" ${c.ws_mode ? "checked" : ""}> ${t("aws.cfWsMode")}</label><p class="muted">${t("aws.cfWsModeNote")}</p>

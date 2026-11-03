@@ -214,7 +214,7 @@ async def _do_cf_delete(c):
 
 
 async def _do_cf_waf_cleanup(c):
-    """切回按量付费后清理面板 WAF：等分发解绑部署生效，再删掉已解绑的 Web ACL。"""
+    """切回按量付费后清理面板 WAF：先带重试地解绑（等订阅取消同步生效），再等部署生效删掉 Web ACL。"""
     t, p, prov, checkpoint = c.t, c.p, c.prov, c.checkpoint
     await _cf_waf_cleanup(t, p, prov, checkpoint)
 
@@ -619,10 +619,48 @@ def _cf_waf_state(prov, did):
     return False, bool(cfg.get("WebACLId")), prov.cf_state(did)["status"]
 
 
+def _cf_attached_panel_waf(prov, did):
+    """分发当前关联的是面板 WAF 时返回 {"name", "id"}，否则 None（无关联 / 用户自己的 WAF / 分发已不存在）。"""
+    try:
+        cfg = prov._cf().get_distribution_config(Id=did)["DistributionConfig"]
+    except Exception as e:
+        code = (getattr(e, "response", None) or {}).get("Error", {}).get("Code", "")
+        if code == "NoSuchDistribution":
+            return None
+        raise
+    return prov._panel_waf_from_arn(cfg.get("WebACLId") or "")
+
+
 async def _cf_waf_cleanup(t, p, prov, checkpoint):
-    """删掉已解绑的面板 WAF：WAF 仍关联在部署中的分发上时 AWS 不让删，先等 WebACLId 清空且 Deployed。"""
+    """清理面板 WAF，两阶段共用一个总时限：
+    一、解绑：FREE 切按量时取消订阅还在同步传播，分发仍被视为套餐覆盖，CloudFront
+       以「套餐分发必须保留 WAF」拒绝拆 WAF——带重试地调 _cf_detach_panel_waf，等放行。
+       解绑前先核对分发关联的正是任务指定的那个面板 ACL，不一致就 warn 结束、防误拆。
+    二、删除：等 WebACLId 清空且分发 Deployed 后 cf_delete_waf（WAF 还关联在部署中的
+       分发上时 AWS 不让删）。"""
     did, name, acl_id = p["distribution_id"], p["acl_name"], p["acl_id"]
     deadline = time.time() + WAF_CLEANUP_WAIT_SECONDS
+    # ---- 第一阶段：带重试地解绑 ----
+    while True:
+        gone, attached, status = await asyncio.to_thread(_cf_waf_state, prov, did)
+        if gone or not attached:
+            break
+        info = await asyncio.to_thread(_cf_attached_panel_waf, prov, did)
+        if not info or info["name"] != name or info["id"] != acl_id:
+            log(t["id"], f"分发 {did} 当前关联的 WAF 不是待清理的面板 WAF {name}，任务结束，未做任何更改", "warn")
+            _update(t["id"], status="done", message=f"WAF {name} 未清理：分发当前关联的不是该面板 WAF，未做更改")
+            return
+        try:
+            await asyncio.to_thread(prov._cf_detach_panel_waf, did)
+        except ValueError as e:   # 取消订阅还没同步完，CloudFront 暂不放行拆 WAF
+            if time.time() > deadline:
+                log(t["id"], f"等待 CloudFront 放行解绑 WAF {name} 超时：{e}，WAF 未删除，请稍后手动清理", "warn")
+                _update(t["id"], status="done", message=f"WAF {name} 清理超时未解绑（{e}），请手动处理")
+                return
+            checkpoint("等待订阅取消生效以解绑 WAF（AWS 暂未放行）…")
+            await asyncio.sleep(WAF_CLEANUP_POLL_SECONDS)
+        # 解绑没抛错也回顶复查：WebACLId 真清空了才进第二阶段
+    # ---- 第二阶段：等解绑部署生效后删除 ----
     while True:
         gone, attached, status = await asyncio.to_thread(_cf_waf_state, prov, did)
         if gone or (not attached and status == "Deployed"):

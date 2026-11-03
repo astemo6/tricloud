@@ -6,8 +6,11 @@
 3) cf_set_plan 时已有用户自己的 WAF → 不新建面板 ACL、照常订阅，resourceArns 带用户 WAF ARN；
 4) fake ppm 抛 ClientError(ValidationException) → cf_set_plan 抛 ValueError 且含 AWS 原始 message；
 5) cf_delete：带面板 ACL 的分发删除后 ACL 同步消失；带用户 ACL 的分发删除后 ACL 仍在；
-6) PAYGO（当前 FREE）：走 cancel_subscription（arn + ifMatch=eTag），返回值带 waf_cleanup 且 WebACLId 已清空；
-7) PAYGO（当前付费档 PRO）：走 cancel、不拆 WAF、不带 waf_cleanup、message 含账期字样。
+6) PAYGO（当前 FREE）：走 cancel_subscription（arn + ifMatch=eTag），返回值带 waf_cleanup 但不同步解绑
+   （WebACLId 仍保持关联——取消同步传播期 CloudFront 不许拆 WAF，解绑归 cf_waf_cleanup 任务）；
+7) PAYGO（当前付费档 PRO）：走 cancel、不拆 WAF、不带 waf_cleanup、message 含账期字样；
+8) cf_waf_cleanup 任务：解绑第一次被 AWS 拒绝、重试后成功 → 最终删掉 WAF；关联的不是面板 ACL
+   时 warn 结束，不解绑不删除。
 """
 import os
 import sys
@@ -174,16 +177,19 @@ with mock_aws():
     r = p.cf_delete(d6)
     ok("5: delete dist with user WAF leaves it alone", r["ok"] is True and "keep-acl" in waf_names(p))
 
-    # 6) PAYGO（当前 FREE）走 cancel：返回 waf_cleanup 且 WebACLId 已清空
+    # 6) PAYGO（当前 FREE）走 cancel：返回 waf_cleanup，但不同步解绑（解绑归清理任务带重试地做）
     d7 = p.cf_create("waf7.example.com")["id"]
-    p.cf_ensure_waf(d7)
+    panel7 = p.cf_ensure_waf(d7)
     fake.subs.append({"arn": "arn:aws:pricing-plan-manager::123456789012:subscription/manual-1",
                       "planFamily": "CloudFront", "planTier": "FREE", "status": "ACTIVE", "eTag": "etag-manual-1",
                       "resourceArns": [f"arn:aws:cloudfront::{acct}:distribution/{d7}"]})
     r = p.cf_set_plan(d7, "PAYGO")
     ok("6: PAYGO returns waf_cleanup for panel WAF",
        r["ok"] is True and (r.get("waf_cleanup") or {}).get("name") == f"tricloud-cf-{d7.lower()}")
-    ok("6: WebACLId cleared after PAYGO detach", dist_cfg(p, d7).get("WebACLId") == "")
+    ok("6: WebACLId still attached after PAYGO (no sync detach)",
+       dist_cfg(p, d7).get("WebACLId") == panel7["web_acl_arn"])
+    ok("6: PAYGO message promises auto WAF deletion after cancel takes effect",
+       "自动删除" in r["message"] and "取消生效后" in r["message"])
     ok("6: cancel_subscription called with arn + ifMatch == eTag",
        fake.cancelled == [{"arn": "arn:aws:pricing-plan-manager::123456789012:subscription/manual-1",
                            "ifMatch": "etag-manual-1"}])
@@ -203,6 +209,83 @@ with mock_aws():
        "waf_cleanup" not in r and dist_cfg(p, d8).get("WebACLId") == panel_info["web_acl_arn"])
     ok("7: paid PAYGO message defers to billing cycle end",
        r["ok"] is True and r["plan"] == "PAYGO" and "账期" in r["message"] and "PRO" in r["message"])
+
+    # 8) cf_waf_cleanup 任务：解绑带重试；关联的不是面板 ACL 时 warn 结束、不动任何东西
+    import asyncio as _aio
+
+    from app import tasks as cf_tasks
+
+    class FakeCF:
+        def __init__(self, prov):
+            self._prov = prov
+
+        def get_distribution_config(self, Id=None):
+            if self._prov.gone:
+                raise ClientError({"Error": {"Code": "NoSuchDistribution", "Message": "gone"}},
+                                  "GetDistributionConfig")
+            return {"DistributionConfig": {"WebACLId": self._prov.web_acl_id}, "ETag": "etag"}
+
+    class FakeProv:
+        """任务测试用假 provider：状态全在内存，detach 可按次数先失败后成功。"""
+
+        def __init__(self, web_acl_id):
+            self.web_acl_id = web_acl_id
+            self.gone = False
+            self.detach_calls = 0
+            self.fail_detach_times = 0
+            self.deleted = []
+
+        def _cf(self):
+            return FakeCF(self)
+
+        def cf_state(self, did):
+            return {"status": "Deployed"}
+
+        def _panel_waf_from_arn(self, arn):
+            return AWSProvider._panel_waf_from_arn(arn)
+
+        def _cf_detach_panel_waf(self, did):
+            self.detach_calls += 1
+            if self.fail_detach_times > 0:
+                self.fail_detach_times -= 1
+                raise ValueError("AWS 返回错误：You can't remove or replace the web ACL for your distribution. "
+                                 "Distributions with a pricing plan subscription must have a web ACL resource.")
+            info = AWSProvider._panel_waf_from_arn(self.web_acl_id)
+            self.web_acl_id = ""
+            return info
+
+        def cf_delete_waf(self, name, acl_id):
+            self.deleted.append((name, acl_id))
+            return {"ok": True}
+
+    task_logs = []
+    orig_log, orig_update = cf_tasks.log, cf_tasks._update
+    orig_poll = cf_tasks.WAF_CLEANUP_POLL_SECONDS
+    cf_tasks.log = lambda tid, msg, level="info": task_logs.append((level, msg))  # noqa: E731
+    cf_tasks._update = lambda tid, **kw: None  # noqa: E731
+    cf_tasks.WAF_CLEANUP_POLL_SECONDS = 0   # 测试里不真等轮询间隔
+    try:
+        panel_arn = "arn:aws:wafv2:us-east-1:123456789012:global/webacl/tricloud-cf-e8/acl-id-8"
+        prov8 = FakeProv(panel_arn)
+        prov8.fail_detach_times = 1   # 第一次解绑被 AWS 拒绝（取消还在同步传播），第二次放行
+        _aio.run(cf_tasks._cf_waf_cleanup(
+            {"id": 9001}, {"distribution_id": "E8", "acl_name": "tricloud-cf-e8", "acl_id": "acl-id-8"},
+            prov8, lambda msg: None))
+        ok("8: cleanup retried detach after AWS refusal", prov8.detach_calls == 2)
+        ok("8: cleanup deleted WAF after detach succeeded",
+           prov8.deleted == [("tricloud-cf-e8", "acl-id-8")] and prov8.web_acl_id == "")
+
+        user_arn = "arn:aws:wafv2:us-east-1:123456789012:global/webacl/user-own-acl/acl-id-9"
+        prov9 = FakeProv(user_arn)
+        _aio.run(cf_tasks._cf_waf_cleanup(
+            {"id": 9002}, {"distribution_id": "E9", "acl_name": "tricloud-cf-e9", "acl_id": "acl-id-9"},
+            prov9, lambda msg: None))
+        ok("8: cleanup leaves non-panel WAF alone (no detach, no delete)",
+           prov9.detach_calls == 0 and prov9.deleted == [] and prov9.web_acl_id == user_arn)
+        ok("8: cleanup warned about non-panel WAF", any(lv == "warn" for lv, _ in task_logs))
+    finally:
+        cf_tasks.log, cf_tasks._update = orig_log, orig_update
+        cf_tasks.WAF_CLEANUP_POLL_SECONDS = orig_poll
 
 print(f"\n{sum(x[1] for x in R)}/{len(R)} passed")
 sys.exit(0 if all(x[1] for x in R) else 1)

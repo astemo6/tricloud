@@ -747,7 +747,8 @@ class AWSProvider(AWSMore, AWSCredit):
         """切换套餐：FREE / PRO / BUSINESS / PREMIUM（订阅），PAYGO（取消订阅，回到按量付费）。计费操作。
         订阅的 resourceArns 必须恰好含分发 + 其关联 WAF 两个 ARN（AWS 官方要求，缺一被判不兼容）；
         订阅前自动关联 WAF（cf_ensure_waf）。切回按量走 cancel_subscription：FREE 立即生效、
-        解绑面板 WAF 并带 waf_cleanup 供路由排清理任务；付费档只是排到账期结束，期间不拆 WAF。
+        带 waf_cleanup 供路由排清理任务（解绑由任务在取消同步生效后带重试执行——同步解绑
+        会被 CloudFront 以「套餐分发必须保留 WAF」拒绝）；付费档只是排到账期结束，期间不拆 WAF。
         AWS 的 ClientError 统一转 ValueError 透传原始原因，不再吞成 500。"""
         tier = tier.upper()
         try:
@@ -770,10 +771,14 @@ class AWSProvider(AWSMore, AWSCredit):
                     return {"ok": True, "plan": "PAYGO",
                             "message": f"已申请取消 {cur_tier} 套餐，将在本账期结束后切回按量付费"}
                 out = {"ok": True, "plan": "PAYGO", "message": "已切回按量付费"}
-                cleanup = self._cf_detach_panel_waf(dist_id)   # 按量下 WAF 单独计费，面板 WAF 必须清掉
+                # 只登记待清理的面板 WAF，不在这里解绑：取消订阅还在同步传播时，分发仍被
+                # 视为套餐覆盖，CloudFront 会以「套餐分发必须保留 WAF」拒绝拆 WAF，并让整单
+                # 误报失败（实际取消已成功）。解绑挪进 cf_waf_cleanup 任务，等放行后带重试做。
+                cfg = self._cf().get_distribution_config(Id=dist_id)["DistributionConfig"]
+                cleanup = self._panel_waf_from_arn(cfg.get("WebACLId") or "")
                 if cleanup:
                     out["waf_cleanup"] = cleanup
-                    out["message"] += "；其 WAF 将在部署完成后自动删除"
+                    out["message"] = "已切回按量付费；其 WAF 将在订阅取消生效后自动删除"
                 return out
             if current and (current.get("planTier") or "").upper() == tier:
                 raise ValueError(f"该分发已是 {tier} 套餐")

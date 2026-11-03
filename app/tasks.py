@@ -595,7 +595,33 @@ async def _cf_delete(t, p, prov, checkpoint):
             raise RuntimeError(f"等待停用部署完成超时（{CF_WAIT_SECONDS // 60} 分钟），分发已停用，可稍后再删除")
         checkpoint(f"等待停用部署完成（当前 {st['status']}）…")
         await asyncio.sleep(CF_POLL_SECONDS)
-    r = await asyncio.to_thread(prov.cf_delete, did)
+    # 套餐处理：订阅中的分发 AWS 不让删。FREE 先取消；付费档取消要等账期结束才生效，
+    # 不能替用户做计费决定，直接失败并说明；cf_plans 查询失败（None）时按无套餐继续，
+    # 真有问题 AWS 会报错、provider 层有中文兜底翻译。
+    plans = await asyncio.to_thread(prov.cf_plans)
+    tier = (plans or {}).get(did)
+    if tier and tier != "PAYGO":
+        if tier != "FREE":
+            raise RuntimeError(f"该分发订阅了 {tier} 付费套餐，取消后需到账期结束才生效，暂时无法删除；"
+                               "请先切回按量付费并等账期结束后再删除")
+        log(t["id"], "分发订阅了 FREE 套餐，先取消套餐再删除…")
+        await asyncio.to_thread(prov.cf_set_plan, did, "PAYGO")
+    # 删除重试：实测 cancel 成功后 cf_plans 立刻显示无套餐，但 delete_distribution 仍会被
+    # 「subscribed to a pricing plan」拒绝——列表视图与删除前置校验传播不一致，删除时机
+    # 只能以删除本身的成败为准。套餐类错误（provider 已翻成中文）就等待后重试，其余错误
+    # 直接抛出；无套餐直删同样适用（防 cf_plans 视图滞后于真实订阅状态）。
+    deadline = time.time() + CF_WAIT_SECONDS
+    while True:
+        try:
+            r = await asyncio.to_thread(prov.cf_delete, did)
+            break
+        except ValueError as e:
+            if "pricing plan" not in str(e) and "订阅着套餐" not in str(e):
+                raise
+            if time.time() > deadline:
+                raise RuntimeError("套餐取消同步未完成，分发已停用，可稍后重试删除") from e
+            checkpoint("套餐取消同步中，等待后重试删除…")
+            await asyncio.sleep(CF_POLL_SECONDS)
     if r.get("waf_deleted"):
         log(t["id"], "已同步删除该分发的面板 WAF", "ok")
     if r.get("waf_note"):

@@ -82,7 +82,10 @@ async def cf_op(acc_id: int, body: dict = Body(...)):
     if op in ("enable", "disable"):
         return await run(p.cf_set_enabled, body["id"], op == "enable")
     if op == "delete":
-        return await run(p.cf_delete, body["id"])
+        try:
+            return await run(p.cf_delete, body["id"])
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     raise HTTPException(400, msg("err.invalid_op"))
 
 
@@ -176,7 +179,17 @@ async def cf_delete_v15(acc_id: int, dist_id: str, confirm: bool = False):
         raise HTTPException(400, msg("err.cf_delete_confirm"))
     st = await run(services.provider(acc_id).cf_state, dist_id)
     if not st["enabled"] and st["status"] == "Deployed":
-        await run(services.provider(acc_id).cf_delete, dist_id)
+        # 订阅了套餐的分发不能同步删（FREE 要先取消并等同步、付费档要等账期）：转后台任务处理
+        plans = await run(services.provider(acc_id).cf_plans)
+        tier = (plans or {}).get(dist_id)
+        if tier and tier != "PAYGO":
+            tid = tasks.create_task("cf_delete", acc_id, {"instance_id": dist_id, "name": dist_id, "distribution_id": dist_id})
+            return {"ok": True, "deleted": False, "task_id": tid,
+                    "message": f"分发订阅了 {tier} 套餐：已转后台任务处理（任务日志会说明套餐处理结果）"}
+        try:
+            await run(services.provider(acc_id).cf_delete, dist_id)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         return {"ok": True, "deleted": True}
     tid = tasks.create_task("cf_delete", acc_id, {"instance_id": dist_id, "name": dist_id, "distribution_id": dist_id})
     return {"ok": True, "deleted": False, "task_id": tid,

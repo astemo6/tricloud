@@ -826,6 +826,8 @@ class AWSProvider(AWSMore, AWSCredit):
             web_acl_id = d["DistributionConfig"].get("WebACLId") or ""
             cf.delete_distribution(Id=dist_id, IfMatch=r["ETag"])
         except ClientError as e:
+            if "subscribed to a pricing plan" in ((e.response.get("Error") or {}).get("Message") or ""):
+                raise ValueError("该分发仍订阅着套餐，请先切回按量付费（FREE 可立即取消）再删除") from e
             raise self._aws_value_err(e) from e
         out = {"ok": True}
         info = self._panel_waf_from_arn(web_acl_id)

@@ -57,11 +57,34 @@ bash <(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercon
                "ec2:RunInstances", "ec2:CreateTags", "ec2:CreateSecurityGroup", "ec2:AuthorizeSecurityGroupIngress", "ssm:GetParameter",
                "account:ListRegions", "account:EnableRegion",
                "lightsail:*", "cloudfront:*Distribution*", "servicequotas:Get*", "ce:GetCostAndUsage",
+               "wafv2:CreateWebACL", "wafv2:GetWebACL", "wafv2:ListWebACLs", "wafv2:DeleteWebACL",
+               "pricingplanmanager:CreateSubscription", "pricingplanmanager:CancelSubscription", "pricingplanmanager:ListSubscriptions",
+               "cloudwatch:GetMetricStatistics", "freetier:GetAccountPlanState",
                "sts:GetCallerIdentity"],
     "Resource": "*"
   }]
 }
 ```
+
+CloudFront 包月套餐订阅时面板会自动为分发创建并关联一个配套 WAF，取消套餐后自动删除；缺 `wafv2:DeleteWebACL` 会导致残留 WAF 删不掉、按月白白付费。
+
+仅用账单 + CloudFront 的账号可用精简策略：
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["ce:GetCostAndUsage", "cloudfront:*Distribution*",
+               "wafv2:CreateWebACL", "wafv2:GetWebACL", "wafv2:ListWebACLs", "wafv2:DeleteWebACL",
+               "pricingplanmanager:CreateSubscription", "pricingplanmanager:CancelSubscription", "pricingplanmanager:ListSubscriptions",
+               "sts:GetCallerIdentity"],
+    "Resource": "*"
+  }]
+}
+```
+
+如需在面板看 CloudFront 用量图表，再加 `cloudwatch:GetMetricStatistics`。
 
 **Azure**：`az ad sp create-for-rbac --name tricloud --role "Virtual Machine Contributor" --scopes /subscriptions/<SUB_ID>`，换 IP / 创建 VM / 资源组管理需在订阅上授予 Contributor（或 Virtual Machine Contributor + Network Contributor + 资源组写权限），账单需 Cost Management Reader。学生订阅部分账单 API 可能不可用，面板会显示错误而不影响其他功能。
 

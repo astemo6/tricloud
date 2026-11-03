@@ -108,6 +108,9 @@ export async function tabCloudFront(acc, box) {
       <div><label>${t("aws.cfPrice")}</label><select name="price_class"><option value="all">${t("aws.cfPriceAll")}</option><option value="200">${t("aws.cfPrice200")}</option><option value="100">${t("aws.cfPrice100")}</option></select></div>
       <div><label>${t("aws.cfCache")}</label><select name="cache_mode"><option value="disabled">${t("aws.cfCacheOff")}</option><option value="optimized">${t("aws.cfCacheOpt")}</option></select></div>
       <div><label>&nbsp;</label><label><input type="checkbox" name="compress" style="width:auto" checked> ${t("aws.cfCompress")}</label></div></div>
+      <div class="row2"><div><label>${t("aws.cfHttpPort")}</label><input name="http_port" type="number" value="80"></div>
+      <div><label>${t("aws.cfHttpsPort")}</label><input name="https_port" type="number" value="443"></div></div>
+      <label><input type="checkbox" name="ws_mode" style="width:auto"> ${t("aws.cfWsMode")}</label><p class="muted">${t("aws.cfWsModeNote")}</p>
       <label>${t("inst.desc")}</label><input name="comment"><p class="muted">${t("aws.cfNewNote")}</p>`,
       (bg) => post(`/accounts/${acc.id}/cloudfront`, { op: "create", ...form(bg) }), t("oci.create"));
     if (r) { toast(t("aws.cfCreated", { domain: r.domain })); reload(); }
@@ -137,6 +140,9 @@ export async function cfOp(acc, d, op, btn, reload) {
       <label>${t("aws.cfOrigin")}</label><input name="origin_domain" value="${esc(c.origin_domain)}">
       <div class="row2"><div><label>${t("aws.cfProto")}</label><select name="origin_protocol">${["http-only", "https-only", "match-viewer"].map((x) => `<option ${x === c.origin_protocol ? "selected" : ""}>${x}</option>`).join("")}</select></div>
       <div><label>${t("aws.cfPrice")}</label><select name="price_class">${["100", "200", "All"].map((x) => `<option ${x === c.price_class ? "selected" : ""}>${x}</option>`).join("")}</select></div></div>
+      <div class="row2"><div><label>${t("aws.cfHttpPort")}</label><input name="http_port" type="number" value="${c.http_port ?? 80}"></div>
+      <div><label>${t("aws.cfHttpsPort")}</label><input name="https_port" type="number" value="${c.https_port ?? 443}"></div></div>
+      <label><input type="checkbox" name="ws_mode" style="width:auto" ${c.ws_mode ? "checked" : ""}> ${t("aws.cfWsMode")}</label><p class="muted">${t("aws.cfWsModeNote")}</p>
       <label>${t("aws.cfRoot")}</label><input name="default_root_object" value="${esc(c.default_root_object)}" placeholder="index.html">
       <p class="muted">${t("aws.cfEditNote")}</p>`, (bg) => {
       const f = form(bg);

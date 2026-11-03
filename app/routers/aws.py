@@ -73,7 +73,9 @@ async def cf_op(acc_id: int, body: dict = Body(...)):
         try:   # v1.5：可选 price_class / compress / cache_mode，不传时与 v1.4 行为一致
             return await run(p.cf_create, body.get("origin") or body.get("origin_domain") or "", body.get("comment", ""),
                              body.get("origin_protocol", "http-only"), body.get("price_class") or "all",
-                             body.get("compress", True) not in (False, "false", "0", 0), body.get("cache_mode") or "disabled")
+                             body.get("compress", True) not in (False, "false", "0", 0), body.get("cache_mode") or "disabled",
+                             body.get("http_port") or 80, body.get("https_port") or 443,
+                             body.get("ws_mode", False) not in (False, "false", "False", "0", 0))
         except ValueError as e:
             raise HTTPException(400, str(e))
     if op in ("enable", "disable"):

@@ -87,6 +87,18 @@ CF_CACHE_POLICY = {   # AWS 托管缓存策略
     "disabled": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",    # CachingDisabled：反代动态内容
     "optimized": "658327ea-f89d-4fab-a63d-7e88639e58f6",   # CachingOptimized：静态资源
 }
+CF_ORIGIN_REQUEST_POLICY_ALL_VIEWER = "216adef6-5c7f-47e4-b989-5492eafa07d3"
+
+
+def cf_validate_port(val, name="回源端口"):
+    """AWS CloudFront 自定义源站回源端口：80、443 或 1024–65535。"""
+    try:
+        p = int(str(val).strip())
+    except (ValueError, TypeError):
+        raise ValueError(f"{name}必须为整数（80、443 或 1024–65535）")
+    if p in (80, 443) or (1024 <= p <= 65535):
+        return p
+    raise ValueError(f"{name}只能是 80、443 或 1024–65535（当前：{p}）")
 
 
 class AWSProvider(AWSMore, AWSCredit):
@@ -536,14 +548,20 @@ class AWSProvider(AWSMore, AWSCredit):
         cfg = r["DistributionConfig"]
         origins = (cfg.get("Origins") or {}).get("Items", [])
         o = origins[0] if origins else {}
+        coc = o.get("CustomOriginConfig") or {}
+        dcb = cfg.get("DefaultCacheBehavior") or {}
+        ws_mode = (dcb.get("CachePolicyId") == CF_CACHE_POLICY["disabled"] and
+                   dcb.get("OriginRequestPolicyId") == CF_ORIGIN_REQUEST_POLICY_ALL_VIEWER)
         return {"id": dist_id, "comment": cfg.get("Comment", ""), "origin_domain": o.get("DomainName", ""),
-                "origin_protocol": (o.get("CustomOriginConfig") or {}).get("OriginProtocolPolicy", ""),
+                "origin_protocol": coc.get("OriginProtocolPolicy", ""),
+                "http_port": coc.get("HTTPPort", 80), "https_port": coc.get("HTTPSPort", 443),
+                "ws_mode": bool(ws_mode),
                 "price_class": (cfg.get("PriceClass") or "").replace("PriceClass_", ""),
                 "default_root_object": cfg.get("DefaultRootObject", ""), "enabled": bool(cfg.get("Enabled")),
                 "aliases": (cfg.get("Aliases") or {}).get("Items", [])}
 
     def cf_update(self, dist_id, params):
-        """修改备注 / 源站域名 / 回源协议 / 价格等级 / 默认根对象 / 启用状态，带 ETag 防并发覆盖。"""
+        """修改备注 / 源站域名 / 回源协议 / 端口 / WebSocket模式 / 价格等级 / 默认根对象 / 启用状态，带 ETag 防并发覆盖。"""
         cf = self._cf()
         r = cf.get_distribution_config(Id=dist_id)
         cfg, changed = r["DistributionConfig"], []
@@ -567,6 +585,27 @@ class AWSProvider(AWSMore, AWSCredit):
                 raise ValueError("该源站不是自定义源站，不能修改回源协议")
             origins[0]["CustomOriginConfig"]["OriginProtocolPolicy"] = params["origin_protocol"]
             changed.append("回源协议")
+        if params.get("http_port") is not None and str(params.get("http_port")).strip() != "":
+            if not origins or "CustomOriginConfig" not in origins[0]:
+                raise ValueError("该源站不是自定义源站，不能修改 HTTP 回源端口")
+            port = cf_validate_port(params["http_port"], "HTTP 回源端口")
+            origins[0]["CustomOriginConfig"]["HTTPPort"] = port
+            changed.append("HTTP 回源端口")
+        if params.get("https_port") is not None and str(params.get("https_port")).strip() != "":
+            if not origins or "CustomOriginConfig" not in origins[0]:
+                raise ValueError("该源站不是自定义源站，不能修改 HTTPS 回源端口")
+            port = cf_validate_port(params["https_port"], "HTTPS 回源端口")
+            origins[0]["CustomOriginConfig"]["HTTPSPort"] = port
+            changed.append("HTTPS 回源端口")
+        if str(params.get("ws_mode")).strip().lower() in ("true", "1"):
+            if not origins or "CustomOriginConfig" not in origins[0]:
+                raise ValueError("该源站不是自定义源站，不能启用 WebSocket 节点模式")
+            dcb = cfg.setdefault("DefaultCacheBehavior", {})
+            dcb["CachePolicyId"] = CF_CACHE_POLICY["disabled"]
+            dcb["OriginRequestPolicyId"] = CF_ORIGIN_REQUEST_POLICY_ALL_VIEWER
+            dcb["Compress"] = False
+            dcb.pop("ForwardedValues", None)
+            changed.append("WebSocket 节点模式")
         if params.get("price_class"):
             pc = CF_PRICE_CLASS.get(str(params["price_class"]).lower())
             if not pc:
@@ -646,9 +685,10 @@ class AWSProvider(AWSMore, AWSCredit):
         return {"ok": True}
 
     def cf_create(self, origin_domain, comment="", origin_protocol="http-only", price_class="all", compress=True,
-                  cache_mode="disabled"):
+                  cache_mode="disabled", http_port=80, https_port=443, ws_mode=False):
         """新建分发。默认（v1.1 起）：CachingDisabled + AllViewer、全部边缘节点，适合反代动态内容。
-        v1.5 可选：price_class 100/200/all、compress、cache_mode=optimized（CachingOptimized，适合静态资源）。"""
+        v1.5 可选：price_class 100/200/all、compress、cache_mode=optimized（CachingOptimized，适合静态资源）。
+        v1.6.1 新增：http_port / https_port 自定义回源端口、ws_mode WebSocket 节点模式。"""
         origin_domain = (origin_domain or "").strip().removeprefix("https://").removeprefix("http://").strip("/")
         if not origin_domain or "/" in origin_domain or " " in origin_domain:
             raise ValueError("请填写源站域名（如 origin.example.com，不带路径）")
@@ -656,22 +696,25 @@ class AWSProvider(AWSMore, AWSCredit):
             raise ValueError("回源协议只能是 http-only / https-only / match-viewer")
         if str(price_class).lower() not in CF_PRICE_CLASS or cache_mode not in CF_CACHE_POLICY:
             raise ValueError("价格等级或缓存模式无效")
+        h_port = cf_validate_port(http_port, "HTTP 回源端口")
+        hs_port = cf_validate_port(https_port, "HTTPS 回源端口")
+        is_ws = str(ws_mode).strip().lower() in ("true", "1")
         cf = self.c("cloudfront", "us-east-1")
         oid = "origin-1"
         cfg = {
             "CallerReference": uuid.uuid4().hex, "Comment": comment or "TriCloud", "Enabled": True,
             "Origins": {"Quantity": 1, "Items": [{
                 "Id": oid, "DomainName": origin_domain,
-                "CustomOriginConfig": {"HTTPPort": 80, "HTTPSPort": 443, "OriginProtocolPolicy": origin_protocol,
+                "CustomOriginConfig": {"HTTPPort": h_port, "HTTPSPort": hs_port, "OriginProtocolPolicy": origin_protocol,
                                        "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]}}}]},
             "DefaultCacheBehavior": {
                 "TargetOriginId": oid, "ViewerProtocolPolicy": "allow-all",
                 # AWS 托管策略：CachingDisabled + AllViewer，适合反代/动态内容
-                "CachePolicyId": CF_CACHE_POLICY[cache_mode],
-                "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+                "CachePolicyId": CF_CACHE_POLICY["disabled"] if is_ws else CF_CACHE_POLICY[cache_mode],
+                "OriginRequestPolicyId": CF_ORIGIN_REQUEST_POLICY_ALL_VIEWER,
                 "AllowedMethods": {"Quantity": 7, "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
                                    "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}},
-                "Compress": bool(compress)},
+                "Compress": False if is_ws else bool(compress)},
             "PriceClass": CF_PRICE_CLASS[str(price_class).lower()], "HttpVersion": "http2and3",
         }
         d = cf.create_distribution(DistributionConfig=cfg)["Distribution"]

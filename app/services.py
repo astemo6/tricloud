@@ -76,9 +76,40 @@ def _credits(acc_id):
     return core.q("SELECT * FROM aws_credits WHERE account_id=? ORDER BY start_date", (acc_id,))
 
 
+def _credit_since(creds):
+    return min((c["start_date"] for c in creds if c["start_date"]), default=None)
+
+
+def _manual_ce_keys(acc_id):
+    ym = now_local().strftime("%Y%m")
+    return f"ce_manual_used_{acc_id}_{ym}", f"ce_manual_extra_{acc_id}_{ym}"
+
+
+def _manual_ce_state(acc_id):
+    used_key, extra_key = _manual_ce_keys(acc_id)
+    used = int(core.get_setting(used_key, 0) or 0)
+    extra = int(core.get_setting(extra_key, 0) or 0)
+    return {"used": used, "budget": 2 + extra}
+
+
+def _manual_ce_cost(acc_id):
+    """一次手动刷新预计消耗的 CE 调用次数，与 _aws_fetch 的 credit_since 判定同源。"""
+    return 2 if _credit_since(_credits(acc_id)) else 1
+
+
+def billing_add_allowance(acc_id, n):
+    """给指定 AWS 账号增加当月手动刷新 CE 调用预算，返回最新已用/上限。"""
+    if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 20:
+        raise ValueError("增加次数必须是 1–20 的整数")
+    _, extra_key = _manual_ce_keys(acc_id)
+    extra = int(core.get_setting(extra_key, 0) or 0)
+    core.set_setting(extra_key, extra + n)
+    return _manual_ce_state(acc_id)
+
+
 def _aws_fetch(acc_id):
     creds = _credits(acc_id)
-    since = min((c["start_date"] for c in creds if c["start_date"]), default=None)
+    since = _credit_since(creds)
     data = provider(acc_id).cost_explorer(credit_since=since)
     now = int(time.time())
     core.ex("INSERT OR REPLACE INTO billing_cache(account_id, data, fetched_at) VALUES(?,?,?)",
@@ -96,11 +127,21 @@ def aws_billing(acc_id, force=False, scheduled=False):
     - 其他：只读缓存；没有缓存也绝不主动调用 Cost Explorer
     """
     row = core.q("SELECT * FROM billing_cache WHERE account_id=?", (acc_id,), one=True)
+    manual_ce = _manual_ce_state(acc_id)
+    if force:
+        expected = _manual_ce_cost(acc_id)
+        if manual_ce["used"] + expected > manual_ce["budget"]:
+            raise ValueError(f"本月手动刷新次数已用完（已用 {manual_ce['used']} / 上限 {manual_ce['budget']} 次调用）。"
+                             "可在账单页点『增加次数』后再刷新")
     need = bool(force)
     if scheduled and not need and is_aws_refresh_day(now_local().date()):
         need = row is None or dt.datetime.fromtimestamp(row["fetched_at"], tz()).date() != now_local().date()
     if need:
         data, ts = _aws_fetch(acc_id)
+        if force:
+            used_key, _ = _manual_ce_keys(acc_id)
+            manual_ce["used"] += int(data.get("ce_calls", expected))
+            core.set_setting(used_key, manual_ce["used"])
     elif row:
         data, ts = json.loads(row["data"]), row["fetched_at"]
     else:
@@ -115,6 +156,7 @@ def aws_billing(acc_id, force=False, scheduled=False):
     data["updated_at"] = dt.datetime.fromtimestamp(ts, tz()).strftime("%Y-%m-%d %H:%M") if ts else "尚无数据"
     data["next_refresh"] = next_aws_refresh_day().isoformat()
     data["ce_calls_this_month"] = core.get_setting(f"ce_calls_{now_local():%Y%m}", 0)
+    data["manual_ce"] = manual_ce
     return data
 
 

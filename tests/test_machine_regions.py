@@ -252,7 +252,7 @@ with TestClient(main.app) as c:
         ok("delete: hint removed", str(a4) not in core.get_setting(overview.HINT_KEY))
 
     ok("route: /accounts unauthenticated -> 401", anon.get("/api/accounts").status_code == 401)
-    ok("route: no new /api routes (hint rides on GET /accounts)", sum(1 for r in main.app.routes if getattr(r, "path", "").startswith("/api")) == 182)   # build 30：+ 账号排序 1 + 受限 API 3
+    ok("route: no new /api routes (hint rides on GET /accounts)", sum(1 for r in main.app.routes if getattr(r, "path", "").startswith("/api")) == 183)   # build 30：+ 账号排序 1 + 受限 API 3；其后 + 账单 allowance 1
 
 # ================= 三端：源码 =================
 P = {k: os.path.join(ROOT, v) for k, v in {

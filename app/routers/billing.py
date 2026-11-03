@@ -4,7 +4,7 @@ from fastapi import APIRouter, Body, HTTPException
 from .. import core, services
 from ..i18n import msg
 from .. import credits as creditsm
-from .common import _num_or_none, _valid_date, need_acc, run
+from .common import _num_or_none, _valid_date, call, need_acc, run
 
 router = APIRouter()
 
@@ -14,6 +14,12 @@ router = APIRouter()
 async def billing(acc_id: int, force: bool = False):
     need_acc(acc_id)
     return await run(services.billing, acc_id, force)
+
+
+@router.post("/api/accounts/{acc_id}/billing/allowance")
+async def billing_allowance(acc_id: int, body: dict = Body(...)):
+    need_acc(acc_id, "aws")
+    return await call(services.billing_add_allowance, acc_id, body.get("add"))
 
 
 @router.get("/api/accounts/{acc_id}/credits")

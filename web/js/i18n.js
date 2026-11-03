@@ -758,6 +758,8 @@ export const STR = {
     "bill.totalLabel": "总额（USD，留空 = 各条 Credit 之和）", "bill.editCredit": "编辑 Credit",
     "bill.delTitle": "删除 Credit", "bill.delConfirm": "确定删除这条 Credit？",
     "bill.forceTitle": "手动刷新 AWS 账单", "bill.forceConfirm": "这会调用 Cost Explorer API（每次 $0.01，本次约 1–2 次）。确定？",
+    "bill.manualCe": "本月手动刷新：已用 {used} / 上限 {budget} 次调用", "bill.addAllowance": "增加次数",
+    "bill.addAllowanceTitle": "增加手动刷新次数", "bill.addAllowanceLabel": "增加次数（1–20 次调用）", "bill.addAllowanceInvalid": "请输入 1–20 的整数",
     // ---- 第 2 批通用 ----
     "common.save": "保存", "common.saved": "已保存", "common.delete": "删除", "common.deleted": "已删除",
     "common.edit": "编辑", "common.add": "添加", "common.refresh": "刷新", "common.remove": "移除", "common.removed": "已移除",
@@ -1566,6 +1568,8 @@ export const STR = {
     "bill.totalLabel": "Total (USD; blank = sum of all Credits)", "bill.editCredit": "Edit Credit",
     "bill.delTitle": "Delete Credit", "bill.delConfirm": "Delete this Credit?",
     "bill.forceTitle": "Refresh AWS billing manually", "bill.forceConfirm": "This calls the Cost Explorer API ($0.01 per call, about 1–2 calls now). Continue?",
+    "bill.manualCe": "Manual refreshes this month: {used} used / {budget} calls allowed", "bill.addAllowance": "Add calls",
+    "bill.addAllowanceTitle": "Add manual refresh calls", "bill.addAllowanceLabel": "Calls to add (1–20)", "bill.addAllowanceInvalid": "Enter a whole number from 1 to 20",
     // ---- batch 2 common ----
     "common.save": "Save", "common.saved": "Saved", "common.delete": "Delete", "common.deleted": "Deleted",
     "common.edit": "Edit", "common.add": "Add", "common.refresh": "Refresh", "common.remove": "Remove", "common.removed": "Removed",

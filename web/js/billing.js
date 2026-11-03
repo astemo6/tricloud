@@ -14,7 +14,8 @@ export async function tabBilling(acc, box, force = false) {
     <div class="muted">${esc(b.period)} · ${t("bill.updatedAt", { t: esc(b.updated_at) })}</div>
     ${b.no_cache ? `<div class="muted">${t("bill.noCache", { t: esc(b.next_refresh) })}</div>` : ""}
     ${isAws ? `<div class="muted">${t("bill.awsNote", { next: esc(b.next_refresh), n: esc(b.ce_calls_this_month) })}</div>
-    <div class="bar" style="margin-top:8px"><button class="btn sm" id="force">${t("bill.forceBtn")}</button></div>` : ""}</div>`;
+    <div class="muted">${t("bill.manualCe", { used: esc(b.manual_ce?.used ?? 0), budget: esc(b.manual_ce?.budget ?? 2) })}</div>
+    <div class="bar" style="margin-top:8px"><button class="btn sm" id="force">${t("bill.forceBtn")}</button><button class="btn sm" id="addce">${t("bill.addAllowance")}</button></div>` : ""}</div>`;
   if (isAws) {
     const c = b.credits;
     html += `<div class="card"><h3>${t("bill.creditBalance")}</h3><div class="big">${b.no_cache ? "—" : "$" + esc(c.remaining)}</div>
@@ -28,6 +29,15 @@ export async function tabBilling(acc, box, force = false) {
   if (!isAws) return;
   $("#force", box).onclick = async () => {
     if (await confirmBox(t("bill.forceTitle"), t("bill.forceConfirm"))) tabBilling(acc, box, true);
+  };
+  $("#addce", box).onclick = async () => {
+    const r = await modal(t("bill.addAllowanceTitle"), `<label>${t("bill.addAllowanceLabel")}</label><input name="add" type="number" min="1" max="20" step="1" value="2">`,
+      (bg) => {
+        const n = Number(form(bg).add);
+        if (!Number.isInteger(n) || n < 1 || n > 20) throw new Error(t("bill.addAllowanceInvalid"));
+        return post(`/accounts/${acc.id}/billing/allowance`, { add: n });
+      }, t("common.save"));
+    if (r) tabBilling(acc, box);
   };
 }
 

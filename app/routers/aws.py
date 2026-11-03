@@ -155,9 +155,15 @@ async def cf_plan(acc_id: int, body: dict = Body(...)):
     if CF_PLANS[tier]["paid"] and not body.get("confirm"):
         raise HTTPException(400, msg("err.cf_plan_paid", tier=tier, price=CF_PLANS[tier]["price"]))
     try:
-        return await run(services.provider(acc_id).cf_set_plan, body["distribution_id"], tier)
+        r = await run(services.provider(acc_id).cf_set_plan, body["distribution_id"], tier)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    cleanup = r.pop("waf_cleanup", None) if isinstance(r, dict) else None
+    if cleanup:   # 切回按量时面板 WAF 已解绑：排一次性任务，等分发部署生效后删掉它（按量下 WAF 单独计费）
+        tasks.create_task("cf_waf_cleanup", acc_id, {"distribution_id": body["distribution_id"],
+                                                     "acl_name": cleanup["name"], "acl_id": cleanup["id"]})
+        r["message"] = (r.get("message") or "") + "（WAF 清理任务已排队）"
+    return r
 
 
 @router.delete("/api/accounts/{acc_id}/cloudfront/{dist_id}")

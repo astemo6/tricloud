@@ -10,6 +10,7 @@ RUNNING = set()
 LOG_KEEP = 500          # 每个任务最多保留的日志行数（抢机任务可能跑几千次）
 TYPE_NAME = {"snatch": "抢机", "change_ip": "换 IP", "resize": "改配置", "ipv6": "IPv6", "azure_create": "创建 VM",
              "ensure_network": "自动建网", "snapshot": "快照（已移除）", "migrate": "迁移", "cf_delete": "删除 CDN 分发",
+             "cf_waf_cleanup": "清理 CDN 的 WAF",
              "reinstall": "重装系统", "net500m": "下行 500Mbps", "foundry": "部署 AI 模型",
              "billing_keep": "保号账单", "aws_credit": "新号 Credit", "onedrive_backup": "OneDrive 备份",
              "oci_restrict": "切换受限 API"}
@@ -210,6 +211,12 @@ async def _do_cf_delete(c):
     t, p, acc, prov, checkpoint = c.t, c.p, c.acc, c.prov, c.checkpoint
     await _cf_delete(t, p, prov, checkpoint)
     await telegram.send(telegram.L("tg.push.cfDeleted", acc=telegram.esc(acc["name"]), did=telegram.esc(p["distribution_id"])))
+
+
+async def _do_cf_waf_cleanup(c):
+    """切回按量付费后清理面板 WAF：等分发解绑部署生效，再删掉已解绑的 Web ACL。"""
+    t, p, prov, checkpoint = c.t, c.p, c.prov, c.checkpoint
+    await _cf_waf_cleanup(t, p, prov, checkpoint)
 
 
 async def _do_resize(c):
@@ -498,6 +505,7 @@ ONCE_HANDLERS = {
     "ensure_network": _do_ensure_network,
     "migrate": _do_migrate,
     "cf_delete": _do_cf_delete,
+    "cf_waf_cleanup": _do_cf_waf_cleanup,
     "resize": _do_resize,
     "reinstall": _do_reinstall,
     "net500m": _do_net500m,
@@ -587,8 +595,48 @@ async def _cf_delete(t, p, prov, checkpoint):
             raise RuntimeError(f"等待停用部署完成超时（{CF_WAIT_SECONDS // 60} 分钟），分发已停用，可稍后再删除")
         checkpoint(f"等待停用部署完成（当前 {st['status']}）…")
         await asyncio.sleep(CF_POLL_SECONDS)
-    await asyncio.to_thread(prov.cf_delete, did)
+    r = await asyncio.to_thread(prov.cf_delete, did)
+    if r.get("waf_deleted"):
+        log(t["id"], "已同步删除该分发的面板 WAF", "ok")
+    if r.get("waf_note"):
+        log(t["id"], r["waf_note"], "warn")
     _update(t["id"], status="done", message=f"分发 {did} 已删除", result={"distribution_id": did, "deleted": True})
+
+
+WAF_CLEANUP_POLL_SECONDS = 60        # 清理面板 WAF：等分发解绑部署生效的轮询间隔
+WAF_CLEANUP_WAIT_SECONDS = 40 * 60   # 最长等待，超时只记 warn 日志结束，不无限等
+
+
+def _cf_waf_state(prov, did):
+    """(分发已不存在, WebACLId 是否仍关联, 分发状态)。分发已被删视为可直接删 WAF。"""
+    try:
+        cfg = prov._cf().get_distribution_config(Id=did)["DistributionConfig"]
+    except Exception as e:
+        code = (getattr(e, "response", None) or {}).get("Error", {}).get("Code", "")
+        if code == "NoSuchDistribution":
+            return True, False, ""
+        raise
+    return False, bool(cfg.get("WebACLId")), prov.cf_state(did)["status"]
+
+
+async def _cf_waf_cleanup(t, p, prov, checkpoint):
+    """删掉已解绑的面板 WAF：WAF 仍关联在部署中的分发上时 AWS 不让删，先等 WebACLId 清空且 Deployed。"""
+    did, name, acl_id = p["distribution_id"], p["acl_name"], p["acl_id"]
+    deadline = time.time() + WAF_CLEANUP_WAIT_SECONDS
+    while True:
+        gone, attached, status = await asyncio.to_thread(_cf_waf_state, prov, did)
+        if gone or (not attached and status == "Deployed"):
+            break
+        if time.time() > deadline:
+            log(t["id"], f"等待分发 {did} 解绑部署生效超时，WAF {name} 未删除，请稍后手动清理", "warn")
+            _update(t["id"], status="done", message=f"WAF {name} 清理超时未删除（分发部署未生效），请手动处理")
+            return
+        checkpoint(f"等待分发部署生效后删除 WAF（当前 {status or '未知'}）…")
+        await asyncio.sleep(WAF_CLEANUP_POLL_SECONDS)
+    await asyncio.to_thread(prov.cf_delete_waf, name, acl_id)
+    log(t["id"], f"已删除面板 WAF {name}", "ok")
+    _update(t["id"], status="done", message=f"WAF {name} 已删除",
+            result={"distribution_id": did, "acl_name": name, "acl_id": acl_id, "deleted": True})
 
 
 def _quality_accept(p, tlog=None):

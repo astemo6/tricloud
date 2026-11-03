@@ -11,6 +11,7 @@ import uuid
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 from .. import hostname
 from ..core import LightsailRegionError
@@ -644,28 +645,139 @@ class AWSProvider(AWSMore, AWSCredit):
         except Exception:
             return None
 
+    # ---------- CloudFront 套餐用 WAF：自动关联 / 解绑 / 删除 ----------
+    PANEL_WAF_PREFIX = "tricloud-cf-"   # 面板为套餐准入自动建的 WAF 命名前缀；只有带此前缀的 ACL 才归面板清理
+
+    def _waf(self):
+        return self.c("wafv2", "us-east-1")    # CLOUDFRONT scope 的 Web ACL 固定在 us-east-1
+
+    @staticmethod
+    def _aws_value_err(e):
+        """AWS ClientError → 带原始 message 的 ValueError，让面板显示真实原因而不是 500。"""
+        return ValueError(f"AWS 返回错误：{(e.response.get('Error') or {}).get('Message') or e}")
+
+    @classmethod
+    def _panel_waf_from_arn(cls, web_acl_id):
+        """分发 config 的 WebACLId（ARN）指向面板自动建的 ACL 时返回 {"name", "id"}，否则 None。
+        Web ACL ARN 形如 arn:aws:wafv2::<账号>:global/webacl/<Name>/<Id>，名字自带在 ARN 里。"""
+        parts = (web_acl_id or "").split("/")
+        if len(parts) >= 3 and parts[-2].startswith(cls.PANEL_WAF_PREFIX):
+            return {"name": parts[-2], "id": parts[-1]}
+        return None
+
+    @staticmethod
+    def _cf_update_config(cf, dist_id, etag, cfg):
+        """按 cf_update 同款写法回写整份 DistributionConfig（带 ETag 防并发覆盖）。"""
+        try:
+            cf.update_distribution(Id=dist_id, IfMatch=etag, DistributionConfig=cfg)
+        except cf.exceptions.PreconditionFailed:
+            raise ValueError("配置已被其他人修改，请刷新后重试")
+
+    def cf_ensure_waf(self, dist_id):
+        """订包月套餐前确保分发关联了 WAF：AWS 要求上了套餐的分发必须关联 Web ACL，
+        否则 create_subscription 直接报 "Resources are incompatible with plan tier"。
+
+        零规则 WAF 是刻意的：这条链路是给 WebSocket 节点分发用的，托管规则的正文体积
+        检查等会误伤代理流量；WAF 在此只作套餐准入的关联要求，DDoS 防护由
+        CloudFront / Shield 本身承担。
+        已关联任意 WAF（用户自己的）时原样返回、绝不接管。
+        返回 {"web_acl_arn", "created", "attached"}：created=本次新建了 ACL；
+        attached=本次发生了关联动作（新建或复用面板 ACL 后写入分发 config）。"""
+        cf, waf = self._cf(), self._waf()
+        name = f"{self.PANEL_WAF_PREFIX}{dist_id.lower()}"
+        try:
+            r = cf.get_distribution_config(Id=dist_id)
+            cfg = r["DistributionConfig"]
+            existing = cfg.get("WebACLId") or ""
+            if existing:
+                return {"web_acl_arn": existing, "created": False, "attached": False}
+            acl_arn, marker = None, None
+            while True:   # 按名找已有面板 ACL（重试幂等：上次建好没关联上就复用，不重复建）
+                kw = {"Scope": "CLOUDFRONT", "Limit": 100}
+                if marker:
+                    kw["NextMarker"] = marker
+                resp = waf.list_web_acls(**kw)
+                for item in resp.get("WebACLs", []):
+                    if item.get("Name") == name:
+                        acl_arn = item["ARN"]
+                        break
+                if acl_arn or not resp.get("NextMarker"):
+                    break
+                marker = resp["NextMarker"]
+            created = False
+            if acl_arn is None:
+                out = waf.create_web_acl(Name=name, Scope="CLOUDFRONT", DefaultAction={"Allow": {}}, Rules=[],
+                                         VisibilityConfig={"SampledRequestsEnabled": False,
+                                                           "CloudWatchMetricsEnabled": False, "MetricName": name})
+                acl_arn, created = out["Summary"]["ARN"], True
+            cfg["WebACLId"] = acl_arn
+            self._cf_update_config(cf, dist_id, r["ETag"], cfg)
+            return {"web_acl_arn": acl_arn, "created": created, "attached": True}
+        except ClientError as e:
+            raise self._aws_value_err(e) from e
+
+    def _cf_detach_panel_waf(self, dist_id):
+        """把分发上关联的面板 WAF 解绑（WebACLId 清空并回写 config）；不是面板的 ACL 不动。
+        返回 {"name", "id"}（已解绑、待部署生效后由清理任务删除）或 None。"""
+        cf = self._cf()
+        try:
+            r = cf.get_distribution_config(Id=dist_id)
+            cfg = r["DistributionConfig"]
+            info = self._panel_waf_from_arn(cfg.get("WebACLId") or "")
+            if not info:
+                return None
+            cfg["WebACLId"] = ""
+            self._cf_update_config(cf, dist_id, r["ETag"], cfg)
+            return info
+        except ClientError as e:
+            raise self._aws_value_err(e) from e
+
+    def cf_delete_waf(self, name, acl_id):
+        """删除面板自动建的 WAF（删前取最新 LockToken）。"""
+        waf = self._waf()
+        try:
+            resp = waf.get_web_acl(Name=name, Scope="CLOUDFRONT", Id=acl_id)
+            token = resp.get("LockToken") or (resp.get("WebACL") or {}).get("LockToken")
+            waf.delete_web_acl(Name=name, Scope="CLOUDFRONT", Id=acl_id, LockToken=token)
+        except ClientError as e:
+            raise self._aws_value_err(e) from e
+        return {"ok": True}
+
     def cf_set_plan(self, dist_id, tier):
-        """切换套餐：FREE / PRO / BUSINESS / PREMIUM（订阅），PAYGO（从订阅解绑，回到按量付费）。计费操作。"""
+        """切换套餐：FREE / PRO / BUSINESS / PREMIUM（订阅），PAYGO（从订阅解绑，回到按量付费）。计费操作。
+        订阅前自动关联 WAF（cf_ensure_waf）；切回按量时解绑面板 WAF，返回值带 waf_cleanup 供路由排清理任务。
+        AWS 的 ClientError 统一转 ValueError 透传原始原因，不再吞成 500。"""
         tier = tier.upper()
-        account = self.c("sts").get_caller_identity()["Account"]
-        arn = f"arn:aws:cloudfront::{account}:distribution/{dist_id}"
-        ppm = self._ppm()
-        current = None
-        for page in ppm.get_paginator("list_subscriptions").paginate():
-            for sub in page.get("subscriptionSummaries", []):
-                if sub.get("planFamily") == "CloudFront" and arn in sub.get("resourceArns", []):
-                    current = sub
-        if tier == "PAYGO":
-            if not current:
-                raise ValueError("该分发已是按量付费")
-            ppm.disassociate_resources_from_subscription(arn=current["arn"], resourceArns=[arn])
-            return {"ok": True, "plan": "PAYGO", "message": "已切回按量付费"}
-        if current and (current.get("planTier") or "").upper() == tier:
-            raise ValueError(f"该分发已是 {tier} 套餐")
-        sub = ppm.create_subscription(planFamily="CloudFront", planTier=tier, resourceArns=[arn], approvalMode="IMMEDIATE",
-                                      clientToken=f"tricloud-{dist_id}-{uuid.uuid4().hex[:8]}").get("subscription", {})
-        return {"ok": True, "plan": tier, "status": sub.get("status"),
-                "message": f"已订阅 {tier} 套餐（{CF_PLANS[tier]['price']}），状态 {sub.get('status') or '未知'}"}
+        try:
+            account = self.c("sts").get_caller_identity()["Account"]
+            arn = f"arn:aws:cloudfront::{account}:distribution/{dist_id}"
+            ppm = self._ppm()
+            current = None
+            for page in ppm.get_paginator("list_subscriptions").paginate():
+                for sub in page.get("subscriptionSummaries", []):
+                    if sub.get("planFamily") == "CloudFront" and arn in sub.get("resourceArns", []):
+                        current = sub
+            if tier == "PAYGO":
+                if not current:
+                    raise ValueError("该分发已是按量付费")
+                ppm.disassociate_resources_from_subscription(arn=current["arn"], resourceArns=[arn])
+                out = {"ok": True, "plan": "PAYGO", "message": "已切回按量付费"}
+                cleanup = self._cf_detach_panel_waf(dist_id)   # 按量下 WAF 单独计费，面板 WAF 必须清掉
+                if cleanup:
+                    out["waf_cleanup"] = cleanup
+                    out["message"] += "；其 WAF 将在部署完成后自动删除"
+                return out
+            if current and (current.get("planTier") or "").upper() == tier:
+                raise ValueError(f"该分发已是 {tier} 套餐")
+            waf_info = self.cf_ensure_waf(dist_id)
+            sub = ppm.create_subscription(planFamily="CloudFront", planTier=tier, resourceArns=[arn], approvalMode="IMMEDIATE",
+                                          clientToken=f"tricloud-{dist_id}-{uuid.uuid4().hex[:8]}").get("subscription", {})
+            message = f"已订阅 {tier} 套餐（{CF_PLANS[tier]['price']}），状态 {sub.get('status') or '未知'}"
+            if waf_info.get("attached"):
+                message += "（已自动关联 WAF）"
+            return {"ok": True, "plan": tier, "status": sub.get("status"), "message": message}
+        except ClientError as e:
+            raise self._aws_value_err(e) from e
 
     def cf_set_enabled(self, dist_id, enabled: bool):
         cf = self.c("cloudfront", "us-east-1")
@@ -676,13 +788,29 @@ class AWSProvider(AWSMore, AWSCredit):
         return {"ok": True}
 
     def cf_delete(self, dist_id):
+        """删除分发；关联了面板 WAF 时同步删掉它（分发已删、关联已消失，可直接删），
+        用户自己的 WAF 不动。WAF 删除失败不连累分发删除，用 waf_deleted / waf_note 标注。
+        AWS 的 ClientError 转 ValueError 透传原始原因；原有中文前置提示保持 RuntimeError。"""
         cf = self.c("cloudfront", "us-east-1")
-        r = cf.get_distribution(Id=dist_id)
-        d = r["Distribution"]
-        if d["DistributionConfig"]["Enabled"] or d["Status"] != "Deployed":
-            raise RuntimeError("需先禁用分发并等待状态变为 Deployed 后才能删除")
-        cf.delete_distribution(Id=dist_id, IfMatch=r["ETag"])
-        return {"ok": True}
+        try:
+            r = cf.get_distribution(Id=dist_id)
+            d = r["Distribution"]
+            if d["DistributionConfig"]["Enabled"] or d["Status"] != "Deployed":
+                raise RuntimeError("需先禁用分发并等待状态变为 Deployed 后才能删除")
+            web_acl_id = d["DistributionConfig"].get("WebACLId") or ""
+            cf.delete_distribution(Id=dist_id, IfMatch=r["ETag"])
+        except ClientError as e:
+            raise self._aws_value_err(e) from e
+        out = {"ok": True}
+        info = self._panel_waf_from_arn(web_acl_id)
+        if info:
+            try:
+                self.cf_delete_waf(info["name"], info["id"])
+                out["waf_deleted"] = True
+            except Exception as e:   # 分发已删成功：WAF 没删掉只记 note，留待手动清理
+                out["waf_deleted"] = False
+                out["waf_note"] = f"WAF 删除失败：{e}"
+        return out
 
     def cf_create(self, origin_domain, comment="", origin_protocol="http-only", price_class="all", compress=True,
                   cache_mode="disabled", http_port=80, https_port=443, ws_mode=False):

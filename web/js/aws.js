@@ -97,6 +97,17 @@ export async function tabAwsRegions(acc, box, refresh = false) {
 // ---- CloudFront：新建 / 缓存刷新 / 编辑配置 / 启停 / 套餐 / 删除（启用中先停用再删） ----
 export const CF_PLAN = { PAYGO: "aws.cfPaygo", FREE: "aws.cfFree", PRO: "aws.cfPro", BUSINESS: "aws.cfBusiness", PREMIUM: "aws.cfPremium" };
 export const cfPlanLabel = (p) => (CF_PLAN[p] ? t(CF_PLAN[p]) : p);
+// 端口框按回源协议置灰：https-only 只用 HTTPS 端口、http-only 只用 HTTP 端口、match-viewer 两个都用
+// 只切 disabled 不改值——form() 用 querySelectorAll 取值，disabled 字段照常提交
+export const cfPortsOnOpen = (bg) => {
+  const proto = bg.querySelector('[name="origin_protocol"]');
+  const hp = bg.querySelector('[name="http_port"]');
+  const sp = bg.querySelector('[name="https_port"]');
+  if (!proto || !hp || !sp) return;
+  const sync = () => { hp.disabled = proto.value === "https-only"; sp.disabled = proto.value === "http-only"; };
+  proto.addEventListener("change", sync);
+  sync();
+};
 export async function tabCloudFront(acc, box) {
   const reload = () => tabCloudFront(acc, box);
   box.innerHTML = `<div class="bar"><button class="btn" id="rf">${t("common.refresh")}</button><button class="btn primary" id="new">${t("aws.cfNew")}</button>
@@ -106,13 +117,30 @@ export async function tabCloudFront(acc, box) {
     const r = await modal(t("aws.cfNewTitle"), `<label>${t("aws.cfOrigin")}</label><input name="origin" placeholder="${t("aws.cfOriginPh")}">
       <div class="row2"><div><label>${t("aws.cfProto")}</label><select name="origin_protocol"><option value="http-only">HTTP</option><option value="https-only">HTTPS</option><option value="match-viewer">${t("aws.cfMatch")}</option></select></div>
       <div><label>${t("aws.cfPrice")}</label><select name="price_class"><option value="all">${t("aws.cfPriceAll")}</option><option value="200">${t("aws.cfPrice200")}</option><option value="100">${t("aws.cfPrice100")}</option></select></div>
+      <div><label>${t("aws.cfPlan")}</label><select name="plan_tier">${Object.entries(CF_PLAN).map(([k]) => `<option value="${k}"${k === "PAYGO" ? " selected" : ""}>${esc(cfPlanLabel(k))}</option>`).join("")}</select></div>
       <div><label>${t("aws.cfCache")}</label><select name="cache_mode"><option value="disabled">${t("aws.cfCacheOff")}</option><option value="optimized">${t("aws.cfCacheOpt")}</option></select></div>
       <div><label>&nbsp;</label><label><input type="checkbox" name="compress" style="width:auto" checked> ${t("aws.cfCompress")}</label></div></div>
       <div class="row2"><div><label>${t("aws.cfHttpPort")}</label><input name="http_port" type="number" value="80"></div>
       <div><label>${t("aws.cfHttpsPort")}</label><input name="https_port" type="number" value="443"></div></div>
       <label><input type="checkbox" name="ws_mode" style="width:auto"> ${t("aws.cfWsMode")}</label><p class="muted">${t("aws.cfWsModeNote")}</p>
       <label>${t("inst.desc")}</label><input name="comment"><p class="muted">${t("aws.cfNewNote")}</p>`,
-      (bg) => post(`/accounts/${acc.id}/cloudfront`, { op: "create", ...form(bg) }), t("oci.create"));
+      async (bg) => {
+        const f = form(bg);
+        const r = await post(`/accounts/${acc.id}/cloudfront`, { op: "create", ...f });
+        // 选了包月套餐：分发建好后接着订阅；这一步失败/取消都不影响分发本身
+        const tier = (f.plan_tier || "PAYGO").toUpperCase();
+        if (!CF_PLAN[tier] || tier === "PAYGO") return r;
+        const paid = ["PRO", "BUSINESS", "PREMIUM"].includes(tier);
+        if (paid && !(await confirmBox(t("aws.cfPaidTitle"), t("aws.cfPaidMsg", { id: esc(r.id), plan: esc(cfPlanLabel(tier)) }), true))) {
+          toast(t("aws.cfPlanSkipped"));
+          return r;
+        }
+        try {
+          const pr = await post(`/accounts/${acc.id}/cloudfront/plan`, { distribution_id: r.id, plan_tier: tier, confirm: paid });
+          if (pr && pr.message) toast(pr.message);
+        } catch (e) { toast(t("aws.cfPlanFailed", { msg: e.message }), true); }
+        return r;
+      }, t("oci.create"), false, cfPortsOnOpen);
     if (r) { toast(t("aws.cfCreated", { domain: r.domain })); reload(); }
   };
   let list;
@@ -148,7 +176,7 @@ export async function cfOp(acc, d, op, btn, reload) {
       const f = form(bg);
       if (!c.origin_protocol) delete f.origin_protocol;
       return api(`${base}/${encodeURIComponent(d.id)}`, { method: "PUT", body: f });
-    }, t("common.save"));
+    }, t("common.save"), false, cfPortsOnOpen);
     if (r) { toast(r.message); reload(); }
   } else if (op === "toggle") {
     if (!(await confirmBox(d.enabled ? t("aws.cfDisableTitle") : t("aws.cfEnableTitle"), d.enabled ? t("aws.cfDisableMsg", { domain: esc(d.domain) }) : t("aws.cfEnableMsg", { id: esc(d.id) }), d.enabled))) return;

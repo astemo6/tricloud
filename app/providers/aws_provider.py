@@ -606,6 +606,10 @@ class AWSProvider(AWSMore, AWSCredit):
             dcb["OriginRequestPolicyId"] = CF_ORIGIN_REQUEST_POLICY_ALL_VIEWER
             dcb["Compress"] = False
             dcb.pop("ForwardedValues", None)
+            # 关联缓存策略后 AWS 不允许再带旧式 TTL 字段（InvalidArgument: MinTTL cannot be used…）
+            dcb.pop("MinTTL", None)
+            dcb.pop("DefaultTTL", None)
+            dcb.pop("MaxTTL", None)
             changed.append("WebSocket 节点模式")
         if params.get("price_class"):
             pc = CF_PRICE_CLASS.get(str(params["price_class"]).lower())

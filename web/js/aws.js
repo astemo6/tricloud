@@ -97,6 +97,9 @@ export async function tabAwsRegions(acc, box, refresh = false) {
 // ---- CloudFront：新建 / 缓存刷新 / 编辑配置 / 启停 / 套餐 / 删除（启用中先停用再删） ----
 export const CF_PLAN = { PAYGO: "aws.cfPaygo", FREE: "aws.cfFree", PRO: "aws.cfPro", BUSINESS: "aws.cfBusiness", PREMIUM: "aws.cfPremium" };
 export const cfPlanLabel = (p) => (CF_PLAN[p] ? t(CF_PLAN[p]) : p);
+// 选择界面专用标签：档位名后带月额度（流量 + 请求数）；PAYGO 无额度。列表列仍用 cfPlanLabel 保持简洁
+export const CF_PLAN_QUOTA = { FREE: "aws.cfQuotaFree", PRO: "aws.cfQuotaPro", BUSINESS: "aws.cfQuotaBusiness", PREMIUM: "aws.cfQuotaPremium" };
+export const cfPlanPickLabel = (p) => (CF_PLAN_QUOTA[p] ? `${cfPlanLabel(p)}（${t(CF_PLAN_QUOTA[p])}）` : cfPlanLabel(p));
 // 端口框按回源协议置灰：https-only 只用 HTTPS 端口、http-only 只用 HTTP 端口、match-viewer 两个都用
 // 只切 disabled 不改值——form() 用 querySelectorAll 取值，disabled 字段照常提交
 export const cfPortsOnOpen = (bg) => {
@@ -117,7 +120,7 @@ export async function tabCloudFront(acc, box) {
     const r = await modal(t("aws.cfNewTitle"), `<label>${t("aws.cfOrigin")}</label><input name="origin" placeholder="${t("aws.cfOriginPh")}">
       <div class="row2"><div><label>${t("aws.cfProto")}</label><select name="origin_protocol"><option value="http-only">HTTP</option><option value="https-only">HTTPS</option><option value="match-viewer">${t("aws.cfMatch")}</option></select></div>
       <div><label>${t("aws.cfPrice")}</label><select name="price_class"><option value="all">${t("aws.cfPriceAll")}</option><option value="200">${t("aws.cfPrice200")}</option><option value="100">${t("aws.cfPrice100")}</option></select></div>
-      <div><label>${t("aws.cfPlan")}</label><select name="plan_tier">${Object.entries(CF_PLAN).map(([k]) => `<option value="${k}"${k === "PAYGO" ? " selected" : ""}>${esc(cfPlanLabel(k))}</option>`).join("")}</select></div>
+      <div><label>${t("aws.cfPlan")}</label><select name="plan_tier">${Object.entries(CF_PLAN).map(([k]) => `<option value="${k}"${k === "PAYGO" ? " selected" : ""}>${esc(cfPlanPickLabel(k))}</option>`).join("")}</select></div>
       <div><label>${t("aws.cfCache")}</label><select name="cache_mode"><option value="disabled">${t("aws.cfCacheOff")}</option><option value="optimized">${t("aws.cfCacheOpt")}</option></select></div>
       <div><label>&nbsp;</label><label><input type="checkbox" name="compress" style="width:auto" checked> ${t("aws.cfCompress")}</label></div></div>
       <div class="row2"><div><label>${t("aws.cfHttpPort")}</label><input name="http_port" type="number" value="80"></div>
@@ -184,7 +187,7 @@ export async function cfOp(acc, d, op, btn, reload) {
   } else if (op === "plan") {
     const cur = d.plan || "PAYGO";
     const tier = await modal(t("aws.cfPlanTitle", { id: d.id }), `<p class="muted">${t("aws.cfPlanBody", { cur: d.plan == null ? t("aws.cfPlanUnknown") : esc(cfPlanLabel(cur)) })}</p>
-      ${Object.entries(CF_PLAN).map(([k, l]) => `<label class="chip" style="display:flex"><input type="radio" name="tier" value="${k}" style="width:auto" ${k === cur ? "checked" : ""}> ${t(l)}</label>`).join("")}`,
+      ${Object.entries(CF_PLAN).map(([k, l]) => `<label class="chip" style="display:flex"><input type="radio" name="tier" value="${k}" style="width:auto" ${k === cur ? "checked" : ""}> ${cfPlanPickLabel(k)}</label>`).join("")}`,
       (bg) => { const v = bg.querySelector("input[name=tier]:checked"); return v ? v.value : false; }, t("inst.next"));
     if (!tier || tier === cur) return tier === cur && toast(t("aws.cfSamePlan"));
     const paid = ["PRO", "BUSINESS", "PREMIUM"].includes(tier);

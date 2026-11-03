@@ -50,13 +50,14 @@ export async function route() {
 
 export function renderSide(p) {
   const cur = "#/" + (p[0] === "deleted" ? "accounts" : p.slice(0, 2).join("/"));
+  const curTab = TABS[p[0]] ? p[2] : null;   // 与顶栏切换器同款：切账号时保留当前标签页（跨云走 mapTab 等价映射/回落）
   const link = (h, label, cls = "") => `<a href="${h}" class="${(cur === h || (h === "#/" && !p.length)) ? "on" : ""}">${cls}${label}</a>`;
   let html = `<div class="logo">Tri<span>Cloud</span></div>` + link("#/", `🏠 ${t("nav.home")}`);
   for (const prov of PROVS) {
     const list = ACCOUNTS.filter((a) => a.provider === prov);
     if (!list.length) continue;
     html += `<div class="grp prov">${PLOGO[prov]}${PNAME[prov]}</div>`;
-    for (const a of list) html += `<a href="#/${prov}/${a.id}" data-acc="${a.id}" draggable="true" class="${cur === `#/${prov}/${a.id}` ? "on" : ""}"><span class="dot ${prov}"></span>${esc(a.name)}</a>`;
+    for (const a of list) html += `<a href="#/${prov}/${a.id}/${mapTab(curTab, prov)}" data-acc="${a.id}" draggable="true" class="${cur === `#/${prov}/${a.id}` ? "on" : ""}"><span class="dot ${prov}"></span>${esc(a.name)}</a>`;
   }
   html += `<div class="grp">${t("nav.manage")}</div>` + link("#/accounts", `🔑 ${t("nav.accounts")}`) + link("#/health", `🩺 ${t("nav.health")}`) + link("#/freecheck", `🆓 ${t("nav.freecheck")}`) + link("#/traffic", `📈 ${t("nav.traffic")}`) + link("#/tasks", `⏱ ${t("nav.tasks")}`) +
     link("#/monitors", `📡 ${t("nav.monitors")}`) + link("#/secrets", `🔐 ${t("nav.secrets")}`) + link("#/scripts", `📜 ${t("nav.scripts")}`) +

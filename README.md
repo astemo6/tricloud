@@ -59,7 +59,7 @@ bash <(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercon
                "lightsail:*", "cloudfront:*Distribution*", "servicequotas:Get*", "ce:GetCostAndUsage",
                "wafv2:CreateWebACL", "wafv2:GetWebACL", "wafv2:ListWebACLs", "wafv2:DeleteWebACL",
                "pricingplanmanager:CreateSubscription", "pricingplanmanager:CancelSubscription", "pricingplanmanager:ListSubscriptions",
-               "cloudwatch:GetMetricStatistics", "freetier:GetAccountPlanState",
+               "cloudwatch:GetMetricStatistics", "cloudwatch:GetMetricData", "freetier:GetAccountPlanState",
                "sts:GetCallerIdentity"],
     "Resource": "*"
   }]
@@ -84,7 +84,7 @@ CloudFront 包月套餐订阅时面板会自动为分发创建并关联一个配
 }
 ```
 
-如需在面板看 CloudFront 用量图表，再加 `cloudwatch:GetMetricStatistics`。
+如需在面板看 CloudFront 用量图表，再加 `cloudwatch:GetMetricStatistics`；订 CloudFront 包月套餐必须加 `cloudwatch:GetMetricData`（订阅时 AWS 要调它核查历史用量）。
 
 **Azure**：`az ad sp create-for-rbac --name tricloud --role "Virtual Machine Contributor" --scopes /subscriptions/<SUB_ID>`，换 IP / 创建 VM / 资源组管理需在订阅上授予 Contributor（或 Virtual Machine Contributor + Network Contributor + 资源组写权限），账单需 Cost Management Reader。学生订阅部分账单 API 可能不可用，面板会显示错误而不影响其他功能。
 

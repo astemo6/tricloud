@@ -555,6 +555,7 @@ class AWSProvider(AWSMore, AWSCredit):
                    dcb.get("OriginRequestPolicyId") == CF_ORIGIN_REQUEST_POLICY_ALL_VIEWER)
         return {"id": dist_id, "comment": cfg.get("Comment", ""), "origin_domain": o.get("DomainName", ""),
                 "origin_protocol": coc.get("OriginProtocolPolicy", ""),
+                "ip_address_type": coc.get("IpAddressType") or "ipv4",
                 "http_port": coc.get("HTTPPort", 80), "https_port": coc.get("HTTPSPort", 443),
                 "ws_mode": bool(ws_mode),
                 "price_class": (cfg.get("PriceClass") or "").replace("PriceClass_", ""),
@@ -562,7 +563,7 @@ class AWSProvider(AWSMore, AWSCredit):
                 "aliases": (cfg.get("Aliases") or {}).get("Items", [])}
 
     def cf_update(self, dist_id, params):
-        """修改备注 / 源站域名 / 回源协议 / 端口 / WebSocket模式 / 价格等级 / 默认根对象 / 启用状态，带 ETag 防并发覆盖。"""
+        """修改备注 / 源站域名 / 回源协议 / 源站 IP 类型 / 端口 / WebSocket模式 / 价格等级 / 默认根对象 / 启用状态，带 ETag 防并发覆盖。"""
         cf = self._cf()
         r = cf.get_distribution_config(Id=dist_id)
         cfg, changed = r["DistributionConfig"], []
@@ -586,6 +587,13 @@ class AWSProvider(AWSMore, AWSCredit):
                 raise ValueError("该源站不是自定义源站，不能修改回源协议")
             origins[0]["CustomOriginConfig"]["OriginProtocolPolicy"] = params["origin_protocol"]
             changed.append("回源协议")
+        if params.get("ip_address_type"):
+            if params["ip_address_type"] not in ("ipv4", "ipv6", "dualstack"):
+                raise ValueError("源站 IP 类型只能是 ipv4 / ipv6 / dualstack")
+            if not origins or "CustomOriginConfig" not in origins[0]:
+                raise ValueError("该源站不是自定义源站，不能修改源站 IP 类型")
+            origins[0]["CustomOriginConfig"]["IpAddressType"] = params["ip_address_type"]
+            changed.append("源站 IP 类型")
         if params.get("http_port") is not None and str(params.get("http_port")).strip() != "":
             if not origins or "CustomOriginConfig" not in origins[0]:
                 raise ValueError("该源站不是自定义源站，不能修改 HTTP 回源端口")
@@ -831,15 +839,18 @@ class AWSProvider(AWSMore, AWSCredit):
         return out
 
     def cf_create(self, origin_domain, comment="", origin_protocol="http-only", price_class="all", compress=True,
-                  cache_mode="disabled", http_port=80, https_port=443, ws_mode=False):
+                  cache_mode="disabled", http_port=80, https_port=443, ws_mode=False, ip_address_type="ipv4"):
         """新建分发。默认（v1.1 起）：CachingDisabled + AllViewer、全部边缘节点，适合反代动态内容。
         v1.5 可选：price_class 100/200/all、compress、cache_mode=optimized（CachingOptimized，适合静态资源）。
-        v1.6.1 新增：http_port / https_port 自定义回源端口、ws_mode WebSocket 节点模式。"""
+        v1.6.1 新增：http_port / https_port 自定义回源端口、ws_mode WebSocket 节点模式。
+        本次新增：ip_address_type 源站 IP 类型（ipv6 = IPv6-only 源站回源、dualstack = 双栈）。"""
         origin_domain = (origin_domain or "").strip().removeprefix("https://").removeprefix("http://").strip("/")
         if not origin_domain or "/" in origin_domain or " " in origin_domain:
             raise ValueError("请填写源站域名（如 origin.example.com，不带路径）")
         if origin_protocol not in ("http-only", "https-only", "match-viewer"):
             raise ValueError("回源协议只能是 http-only / https-only / match-viewer")
+        if ip_address_type not in ("ipv4", "ipv6", "dualstack"):
+            raise ValueError("源站 IP 类型只能是 ipv4 / ipv6 / dualstack")
         if str(price_class).lower() not in CF_PRICE_CLASS or cache_mode not in CF_CACHE_POLICY:
             raise ValueError("价格等级或缓存模式无效")
         h_port = cf_validate_port(http_port, "HTTP 回源端口")
@@ -852,6 +863,7 @@ class AWSProvider(AWSMore, AWSCredit):
             "Origins": {"Quantity": 1, "Items": [{
                 "Id": oid, "DomainName": origin_domain,
                 "CustomOriginConfig": {"HTTPPort": h_port, "HTTPSPort": hs_port, "OriginProtocolPolicy": origin_protocol,
+                                       "IpAddressType": ip_address_type,
                                        "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]}}}]},
             "DefaultCacheBehavior": {
                 "TargetOriginId": oid, "ViewerProtocolPolicy": "allow-all",

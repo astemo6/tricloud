@@ -125,6 +125,7 @@ export async function tabCloudFront(acc, box) {
       <div><label>&nbsp;</label><label><input type="checkbox" name="compress" style="width:auto" checked> ${t("aws.cfCompress")}</label></div></div>
       <div class="row2"><div><label>${t("aws.cfHttpPort")}</label><input name="http_port" type="number" value="80"></div>
       <div><label>${t("aws.cfHttpsPort")}</label><input name="https_port" type="number" value="443"></div></div>
+      <div class="row2"><div><label>${t("aws.cfIpType")}</label><select name="ip_address_type"><option value="ipv4">${t("aws.cfIpV4")}</option><option value="ipv6">${t("aws.cfIpV6")}</option><option value="dualstack">${t("aws.cfIpDual")}</option></select></div><div></div></div>
       <label><input type="checkbox" name="ws_mode" style="width:auto"> ${t("aws.cfWsMode")}</label><p class="muted">${t("aws.cfWsModeNote")}</p>
       <label>${t("inst.desc")}</label><input name="comment"><p class="muted">${t("aws.cfNewNote")}</p>`,
       async (bg) => {
@@ -173,6 +174,7 @@ export async function cfOp(acc, d, op, btn, reload) {
       <div><label>${t("aws.cfPrice")}</label><select name="price_class">${[["all", "aws.cfPriceAll"], ["200", "aws.cfPrice200"], ["100", "aws.cfPrice100"]].map(([v, k]) => `<option value="${v}"${String(c.price_class).toLowerCase() === v ? " selected" : ""}>${t(k)}</option>`).join("")}</select></div></div>
       <div class="row2"><div><label>${t("aws.cfHttpPort")}</label><input name="http_port" type="number" value="${c.http_port ?? 80}"></div>
       <div><label>${t("aws.cfHttpsPort")}</label><input name="https_port" type="number" value="${c.https_port ?? 443}"></div></div>
+      <div class="row2"><div><label>${t("aws.cfIpType")}</label><select name="ip_address_type">${[["ipv4", "aws.cfIpV4"], ["ipv6", "aws.cfIpV6"], ["dualstack", "aws.cfIpDual"]].map(([v, k]) => `<option value="${v}"${(c.ip_address_type || "ipv4") === v ? " selected" : ""}>${t(k)}</option>`).join("")}</select></div><div></div></div>
       <label><input type="checkbox" name="ws_mode" style="width:auto" ${c.ws_mode ? "checked" : ""}> ${t("aws.cfWsMode")}</label><p class="muted">${t("aws.cfWsModeNote")}</p>
       <label>${t("aws.cfRoot")}</label><input name="default_root_object" value="${esc(c.default_root_object)}" placeholder="index.html">
       <p class="muted">${t("aws.cfEditNote")}</p>`, (bg) => {

@@ -3,7 +3,7 @@ uvicorn[standard]==0.32.*
 httpx[socks]>=0.27
 PySocks>=1.7          # requests/urllib3（OCI、Azure SDK）走 socks5:// 代理所需
 cryptography>=43
-boto3>=1.35
+boto3>=1.43.0
 oci>=2.135
 azure-identity>=1.19
 azure-mgmt-compute>=33

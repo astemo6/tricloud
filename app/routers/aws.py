@@ -75,7 +75,8 @@ async def cf_op(acc_id: int, body: dict = Body(...)):
                              body.get("origin_protocol", "http-only"), body.get("price_class") or "all",
                              body.get("compress", True) not in (False, "false", "0", 0), body.get("cache_mode") or "disabled",
                              body.get("http_port") or 80, body.get("https_port") or 443,
-                             body.get("ws_mode", False) not in (False, "false", "False", "0", 0))
+                             body.get("ws_mode", False) not in (False, "false", "False", "0", 0),
+                             body.get("ip_address_type") or "ipv4")
         except ValueError as e:
             raise HTTPException(400, str(e))
     if op in ("enable", "disable"):

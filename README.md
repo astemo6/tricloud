@@ -45,7 +45,7 @@ bash <(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercon
 
 **OCI**：控制台右上角头像 → User settings（进入 Identity & Security → My profile）→ Tokens and keys 标签 → Add API key，填入 user / tenancy OCID、指纹、区域与私钥 PEM。账单需要 Usage 读权限（租户管理员默认具备）。
 
-**AWS**（IAM 用户策略示例）：
+**AWS**：控制台 → IAM → 用户 → 创建用户（用户名如 tricloud，不需要勾选控制台登录访问）→ 在创建向导的权限步骤或用户详情的「添加权限 → 创建内联策略 → JSON 标签页」把下方完整策略整段粘贴保存（只用账单 + CloudFront 的账号改用后面的精简策略）→ 建完后进该用户的「安全凭证」标签 → 创建访问密钥（用途选“其他”即可），得到 Access Key ID 和 Secret Access Key（Secret 只显示一次，当场保存）→ 把 Access Key ID 与 Secret Access Key 填进面板「添加账号 → AWS」的对应字段：
 
 ```json
 {

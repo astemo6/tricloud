@@ -10,7 +10,10 @@
 4) 任务流（打桩 provider）：无套餐 → 不调 cancel、一次 delete 成功、流程与现行一致；
    cf_plans 返回 None（查询失败）时同样按无套餐走完；
 5) 任务流（打桩 provider）：无套餐但 delete 头两次抛含 pricing plan 原文的 ValueError
-   （cf_plans 视图滞后的兜底场景）→ 重试后成功。
+   （cf_plans 视图滞后的兜底场景）→ 重试后成功；
+6) 任务流（打桩 provider）：cancel FREE 后分发短暂回到 InProgress（cf_state 头两次报
+   InProgress、cf_delete 未就绪时按真 provider 抛 RuntimeError）→ 任务应先等状态就绪
+   再删除，不得失败、且不得在未 Deployed 时调 cf_delete。
 """
 import asyncio
 import os
@@ -92,6 +95,46 @@ class StubProv:
             if self.plan_fail_mode == "cn":
                 raise ValueError("该分发仍订阅着套餐，请先切回按量付费（FREE 可立即取消）再删除")
             raise ValueError(f"AWS 返回错误：{PLAN_MSG}")
+        return {"ok": True}
+
+
+class RedeployStubProv:
+    """任务层打桩 provider：模拟 cancel 套餐后分发短暂回到 InProgress 重新部署。
+
+    cf_set_plan 后 cf_state 头两次报 InProgress、之后 Deployed；cf_delete 在未
+    Deployed 时按真 provider 抛 RuntimeError「需先禁用分发并等待状态变为 Deployed
+    后才能删除」，就绪后一次成功。"""
+
+    def __init__(self, did):
+        self._plans = {did: "FREE"}
+        self.set_plan_calls = []
+        self.delete_calls = 0            # 就绪后真正的删除次数
+        self.delete_while_not_ready = 0  # 未 Deployed 时被调 cf_delete 的次数（应为 0）
+        self._inprogress_left = 0        # cancel 后还剩几次 cf_state 报 InProgress
+
+    def _status(self):
+        return "InProgress" if self._inprogress_left > 0 else "Deployed"
+
+    def cf_state(self, did):
+        st = self._status()
+        if self._inprogress_left > 0:
+            self._inprogress_left -= 1
+        return {"enabled": False, "status": st}
+
+    def cf_plans(self):
+        return self._plans
+
+    def cf_set_plan(self, did, tier):
+        self.set_plan_calls.append((did, tier))
+        self._plans = {}
+        self._inprogress_left = 2        # 取消套餐触发重新部署
+        return {"ok": True, "plan": tier}
+
+    def cf_delete(self, did):
+        if self._status() != "Deployed":
+            self.delete_while_not_ready += 1
+            raise RuntimeError("需先禁用分发并等待状态变为 Deployed 后才能删除")
+        self.delete_calls += 1
         return {"ok": True}
 
 
@@ -193,6 +236,15 @@ prov = StubProv({}, plan_fail_times=2, plan_fail_mode="raw")
 updates, err = run_delete_task(prov, "E-LAGGING")
 ok("5: raw pricing-plan ValueError is retried to success", err is None and prov.delete_calls == 3
    and any(u.get("status") == "done" for u in updates))
+
+# ---------- 6) 任务流（打桩）：cancel 后分发短暂 InProgress → 等就绪后删除成功 ----------
+prov = RedeployStubProv("E-REDEPLOY")
+updates, err = run_delete_task(prov, "E-REDEPLOY")
+ok("6: task waits out post-cancel redeploy and completes", err is None
+   and any(u.get("status") == "done" for u in updates))
+ok("6: FREE cancelled once before delete", prov.set_plan_calls == [("E-REDEPLOY", "PAYGO")])
+ok("6: cf_delete only called once state is Deployed",
+   prov.delete_calls == 1 and prov.delete_while_not_ready == 0)
 
 print(f"\n{sum(x[1] for x in R)}/{len(R)} passed")
 sys.exit(0 if all(x[1] for x in R) else 1)

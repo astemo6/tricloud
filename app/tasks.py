@@ -610,8 +610,18 @@ async def _cf_delete(t, p, prov, checkpoint):
     # 「subscribed to a pricing plan」拒绝——列表视图与删除前置校验传播不一致，删除时机
     # 只能以删除本身的成败为准。套餐类错误（provider 已翻成中文）就等待后重试，其余错误
     # 直接抛出；无套餐直删同样适用（防 cf_plans 视图滞后于真实订阅状态）。
+    # 另注意：cancel 动作本身会让分发短暂回到 InProgress 重新部署，未 Deployed 时 cf_delete
+    # 抛的是 RuntimeError 而非套餐 ValueError、接不住——所以每轮先查状态，就绪才删。
+    # 两种等待（套餐同步 / 重新部署）共用同一个总时限。
     deadline = time.time() + CF_WAIT_SECONDS
     while True:
+        st = await asyncio.to_thread(prov.cf_state, did)
+        if st["enabled"] or st["status"] != "Deployed":
+            if time.time() > deadline:
+                raise RuntimeError("套餐取消同步或部署未完成，分发已停用，可稍后重试删除")
+            checkpoint(f"等待分发部署完成（当前 {st['status']}）…")
+            await asyncio.sleep(CF_POLL_SECONDS)
+            continue
         try:
             r = await asyncio.to_thread(prov.cf_delete, did)
             break
@@ -619,7 +629,7 @@ async def _cf_delete(t, p, prov, checkpoint):
             if "pricing plan" not in str(e) and "订阅着套餐" not in str(e):
                 raise
             if time.time() > deadline:
-                raise RuntimeError("套餐取消同步未完成，分发已停用，可稍后重试删除") from e
+                raise RuntimeError("套餐取消同步或部署未完成，分发已停用，可稍后重试删除") from e
             checkpoint("套餐取消同步中，等待后重试删除…")
             await asyncio.sleep(CF_POLL_SECONDS)
     if r.get("waf_deleted"):

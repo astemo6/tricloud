@@ -1,7 +1,7 @@
 """build 33：CloudFront 分发卡片流量行新增近 30 天总量（total30d）。纯静态检查。
 后端 GET /api/accounts/{id}/cloudfront/traffic 的每个 item 新增 total30d 字段（近 30 天下行+上行总字节），
 Android / iOS 在周期已用流量行下方新增一行显示近 30 天总量。"""
-import os, sys
+import os, re, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 P = F = 0
@@ -11,8 +11,8 @@ def ok(name, cond):
     else: F += 1; print("FAIL", name)
 def rd(*p): return open(os.path.join(ROOT, *p), encoding="utf-8").read()
 
-# version 33
-ok("version 33", "versionCode 33" in rd("android", "app", "build.gradle") and 'CURRENT_PROJECT_VERSION: "33"' in rd("ios", "project.yml"))
+_vc = int(re.search(r"versionCode (\d+)", rd("android", "app", "build.gradle")).group(1))
+ok("version >= 33 and Android == iOS", _vc >= 33 and f'CURRENT_PROJECT_VERSION: "{_vc}"' in rd("ios", "project.yml"))
 
 # android total30d
 A = rd("android", "app", "src", "main", "java", "com", "tricloud", "app", "AccountActivity.java")

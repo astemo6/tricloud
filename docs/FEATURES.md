@@ -118,6 +118,9 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 - 绑定域名：记录名只填前缀，自动补所选域名（`@` = 根域名，完整名仍可用），后端统一补全与校验。
 - App 切换语言立即生效（Android 重建页面栈停在设置页；iOS 已打开页面即时重绘）。
 
+## 1.6.1 build 34
+- 分发卡片「复制域名」按钮（Android / iOS，与 Web 一致）：点「复制」把分发 DomainName 写进剪贴板，按钮短暂显示「已复制」（约 1.2 秒）后恢复。
+
 ## 1.6.1 build 33
 - 分发卡片流量双行（Android / iOS，与 Web 一致）：周期已用（看套餐额度）+ 近30天总量（total30d，实际跑量），item 无 total30d 时只显示周期行。
 

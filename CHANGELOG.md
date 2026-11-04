@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.1（build 34）(2026-11-04)
+- 改进：CloudFront 分发卡片新增「复制」按钮（Android / iOS，与网页版一致）：点击只复制分发域名本身到剪贴板，按钮文案短暂切换为「已复制」约 1.2 秒后恢复。Android 复用既有 strings s0500「复制」/ s0098「已复制」与文件内 ClipboardManager 内联惯例；iOS 复用全局 copyText() 与 Localizable 既有「复制」/「已复制」键，均未新增词条。
+- 版本：Android versionCode 34 / iOS build 34（versionName 1.6.1）。
+
 ## 1.6.1（build 33）(2026-11-04)
 - 改进：CloudFront 分发卡片流量行新增一行近 30 天总量。后端 traffic 接口每个 item 新增 total30d（近 30 天下行 + 上行总字节），Android / iOS 在周期「已用流量」行下方以小字显示「近30天 X」/「Last 30 days X」；item 无 total30d（旧后端 / 旧缓存）时不显示这一行。周期 down/up/total/quota_bytes 语义不变。
 - 版本：Android versionCode 33 / iOS build 33（versionName 1.6.1）。

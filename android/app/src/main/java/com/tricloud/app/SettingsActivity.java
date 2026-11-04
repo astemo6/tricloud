@@ -97,6 +97,13 @@ public class SettingsActivity extends BaseActivity {
                 try { Api.post(this, "/settings", new JSONObject().put("free_guard", !on), x -> refresh()); } catch (Exception ignored) { }
             });
 
+            LinearLayout cfb = card(getString(R.string.s1262));
+            boolean cfon = s.optBoolean("cf_invalidate_btn", false);
+            muted(cfb, getString(R.string.s1263, (cfon ? getString(R.string.s1180) : getString(R.string.s1152))));
+            button(row(cfb), cfon ? getString(R.string.s1270) : getString(R.string.s1269), v -> {
+                try { Api.post(this, "/settings", new JSONObject().put("cf_invalidate_btn", !cfon), x -> refresh()); } catch (Exception ignored) { }
+            });
+
             LinearLayout ai = card(getString(R.string.s1184));
             muted(ai, getString(R.string.s1185, s.optInt("auto_ip_daily_limit", 3)));
             button(row(ai), getString(R.string.s1154), v -> form(getString(R.string.s1184), getString(R.string.s1186), Arrays.asList(

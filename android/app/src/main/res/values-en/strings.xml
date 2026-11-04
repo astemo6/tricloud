@@ -1341,4 +1341,19 @@
     <string name="s1254">Calls to add (1–20)</string>
     <string name="s1255">Enter a whole number from 1 to 20</string>
     <string name="s1256">Last 30 days %1$s</string>
+    <string name="s1257">Account Sorting</string>
+    <string name="s1258">Use Move Up/Down to reorder, click Done when finished.</string>
+    <string name="s1259">Done</string>
+    <string name="s1260">Move Up</string>
+    <string name="s1261">Move Down</string>
+    <string name="s1262">Show CloudFront Cache Invalidation Button</string>
+    <string name="s1263">Off by default. When off, the Invalidate button is not shown in the CloudFront distribution list, to prevent accidental clicks. Current: %1$s</string>
+    <string name="s1264">Save these parameters as the %1$s create defaults (excluding name, password and script)</string>
+    <string name="s1265">Security Lists</string>
+    <string name="s1266">No rules</string>
+    <string name="s1267">Switch Account</string>
+    <string name="s1268">Search account name</string>
+    <string name="s1269">Enable</string>
+    <string name="s1270">Disable</string>
+    <string name="s1271">Saved as default</string>
 </resources>

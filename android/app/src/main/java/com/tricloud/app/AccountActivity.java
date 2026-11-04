@@ -1,17 +1,32 @@
 package com.tricloud.app;
 
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
+import android.view.ContextThemeWrapper;
+import android.view.View;
+import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+
+import androidx.appcompat.app.AlertDialog;
+
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.tabs.TabLayout;
+import com.google.android.material.textfield.TextInputLayout;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
-
-import com.google.android.material.tabs.TabLayout;
 
 /** 单个云账号：与 Web 端相同的标签页（实例/Lightsail/CloudFront/配额/创建/抢机/安全组/账单）。v1.5 移除串口控制台。 */
 public class AccountActivity extends BaseActivity {
@@ -43,6 +58,19 @@ public class AccountActivity extends BaseActivity {
         if (!known) tab = tabs(prov)[0][0];
         setTitle(MainActivity.pname(prov) + " · " + acc.optString("name"));
         buildNav();
+
+        LinearLayout switchRow = new LinearLayout(this);
+        switchRow.setOrientation(LinearLayout.HORIZONTAL);
+        switchRow.setPadding(dp(16), dp(4), dp(16), dp(4));
+        MaterialButton switchBtn = new MaterialButton(new ContextThemeWrapper(this, R.style.ThemeOverlay_TriCloud_Tonal));
+        switchBtn.setText(getString(R.string.s1267));
+        switchBtn.setAllCaps(false);
+        switchBtn.setInsetTop(dp(2));
+        switchBtn.setInsetBottom(dp(2));
+        switchBtn.setOnClickListener(v -> switchAccount());
+        switchRow.addView(switchBtn, new LinearLayout.LayoutParams(-2, -2));
+        topBar.addView(switchRow, new LinearLayout.LayoutParams(-1, -2));
+
         // Material 3 TabLayout：可横向滚动，固定在内容区上方
         TabLayout tl = new TabLayout(this);
         tl.setTabMode(TabLayout.MODE_SCROLLABLE);
@@ -95,6 +123,97 @@ public class AccountActivity extends BaseActivity {
             if (x instanceof JSONObject) Regions.apply(id, (JSONObject) x);
             go.run();
         });
+    }
+
+    // ---------------- 账号快速切换 ----------------
+    private void switchAccount() {
+        if (Api.accounts == null) {
+            Api.quiet("/accounts", r -> {
+                Api.accounts = Api.arr(r);
+                showSwitchDialog();
+            });
+        } else {
+            showSwitchDialog();
+        }
+    }
+
+    private void showSwitchDialog() {
+        ScrollView sv = new ScrollView(this);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(24), dp(4), dp(24), 0);
+        sv.addView(box);
+
+        TextInputLayout searchLayout = inputLayout(getString(R.string.s1268), getString(R.string.s1268), InputType.TYPE_CLASS_TEXT);
+        EditText search = searchLayout.getEditText();
+        if (search != null) search.setHint(getString(R.string.s1268));
+        box.addView(searchLayout);
+
+        LinearLayout listContainer = new LinearLayout(this);
+        listContainer.setOrientation(LinearLayout.VERTICAL);
+        box.addView(listContainer);
+
+        final AlertDialog dlg = new MaterialAlertDialogBuilder(this)
+                .setTitle(getString(R.string.s1267))
+                .setView(sv)
+                .setNegativeButton(getString(R.string.s0614), null)
+                .create();
+
+        renderSwitchList(listContainer, "", dlg);
+
+        if (search != null) {
+            search.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+                @Override public void onTextChanged(CharSequence s, int start, int before, int count) { }
+                @Override public void afterTextChanged(Editable s) {
+                    renderSwitchList(listContainer, s != null ? s.toString() : "", dlg);
+                }
+            });
+        }
+
+        dlg.show();
+    }
+
+    private void renderSwitchList(LinearLayout container, String kw, AlertDialog dlg) {
+        container.removeAllViews();
+        if (Api.accounts == null) return;
+        String lower = kw == null ? "" : kw.trim().toLowerCase(Locale.ROOT);
+        for (String p : MainActivity.PROVS) {
+            List<JSONObject> matched = new ArrayList<>();
+            for (int i = 0; i < Api.accounts.length(); i++) {
+                JSONObject a = Api.accounts.optJSONObject(i);
+                if (a == null || !p.equals(a.optString("provider"))) continue;
+                String name = a.optString("name");
+                if (lower.isEmpty() || name.toLowerCase(Locale.ROOT).contains(lower)) {
+                    matched.add(a);
+                }
+            }
+            if (!matched.isEmpty()) {
+                TextView title = text(container, MainActivity.pname(p), 14, true);
+                title.setPadding(0, dp(8), 0, dp(2));
+                for (JSONObject a : matched) {
+                    int aid = a.optInt("id");
+                    String name = a.optString("name");
+                    boolean isCurrent = (aid == id);
+                    MaterialButton btn = new MaterialButton(new ContextThemeWrapper(this, R.style.ThemeOverlay_TriCloud_Tonal));
+                    btn.setText(name + (isCurrent ? " ✓" : ""));
+                    btn.setAllCaps(false);
+                    btn.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+                    btn.setPadding(dp(16), btn.getPaddingTop(), dp(16), btn.getPaddingBottom());
+                    if (isCurrent) {
+                        btn.setEnabled(false);
+                    } else {
+                        btn.setOnClickListener(v -> {
+                            dlg.dismiss();
+                            openPage("acc_" + aid, a);
+                        });
+                    }
+                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+                    lp.setMargins(0, dp(2), 0, dp(2));
+                    container.addView(btn, lp);
+                }
+            }
+        }
     }
 
     @Override
@@ -246,6 +365,7 @@ public class AccountActivity extends BaseActivity {
             button(r, getString(R.string.s0042), v -> resizeOci(inst));
             button(r, getString(R.string.s0043), v -> bootVol(inst, kind));
             button(r, getString(R.string.s0044), v -> ociIps(inst));
+            button(r, getString(R.string.s1265), v -> ociInstSecurity(inst));
         }
         if ("azure".equals(prov)) { button(r, getString(R.string.s0045), v -> resizeAzure(inst)); button(r, getString(R.string.s0046), v -> azDisks(inst)); }
         if ("lightsail".equals(kind)) button(r, getString(R.string.s0047), v -> lsPorts(inst));
@@ -460,6 +580,35 @@ public class AccountActivity extends BaseActivity {
         });
     }
 
+    // ---------------- build 31：保存创建参数为默认 ----------------
+    private Field saveDefaultField(String cloud) {
+        return Field.check("save_default", getString(R.string.s1264, cloud), false);
+    }
+
+    private JSONObject handleSaveDefault(String provider, JSONObject v) {
+        boolean save = v.optBoolean("save_default", false);
+        v.remove("save_default");
+        if (save) {
+            try {
+                JSONObject copy = new JSONObject(v.toString());
+                for (String k : new String[]{"name", "interval", "max_attempts", "script", "script_id", "user_data", "password_login", "region", "location_hint"}) {
+                    copy.remove(k);
+                }
+                JSONObject body = new JSONObject().put("provider", provider).put("defaults", copy);
+                Api.async(this, "PUT", "/create-defaults", body, res -> {
+                    try {
+                        JSONObject ret = Api.obj(res);
+                        JSONObject d = ret.optJSONObject("defaults");
+                        if (defaults == null) defaults = new JSONObject();
+                        defaults.put(provider, d != null ? d : copy);
+                        toast(getString(R.string.s1271));
+                    } catch (Exception ignored) { }
+                });
+            } catch (Exception ignored) { }
+        }
+        return v;
+    }
+
     // ---------------- v1.5：EC2 / Azure VM 创建（对照线上 android-native 的创建实例页） ----------------
     private void ec2Create() {
         Api.get(this, "/accounts/" + id + "/aws/ec2-options", r -> {
@@ -476,8 +625,12 @@ public class AccountActivity extends BaseActivity {
             f.add(Field.check("password_login", getString(R.string.s0139), true));
             f.add(scriptField());
             f.add(Field.multi("script", getString(R.string.s0140), ""));
+            f.add(saveDefaultField("AWS"));
             form(getString(R.string.s0141, Regions.label(region())), null, f, getString(R.string.s0142), v -> {
-                try { Api.post(this, "/accounts/" + id + "/aws/ec2-create", v.put("region", region()), x -> { created(Api.obj(x)); body.postDelayed(this::refresh, 4000); }); }
+                try {
+                    JSONObject b = handleSaveDefault("aws", v);
+                    Api.post(this, "/accounts/" + id + "/aws/ec2-create", b.put("region", region()), x -> { created(Api.obj(x)); body.postDelayed(this::refresh, 4000); });
+                }
                 catch (Exception ignored) { }
             });
         });
@@ -504,9 +657,11 @@ public class AccountActivity extends BaseActivity {
             f.add(Field.check("password_login", getString(R.string.s0149), true));
             f.add(scriptField());
             f.add(Field.multi("script", getString(R.string.s0140), ""));
+            f.add(saveDefaultField("Azure"));
             form(getString(R.string.s0150), getString(R.string.s0151), f, getString(R.string.s0142), v -> {
-                Api.setPref("azloc_" + id, v.optString("location"));
-                Api.post(this, "/accounts/" + id + "/azure/create", v, x -> taskOrToast(x, getString(R.string.s0152)));
+                JSONObject b = handleSaveDefault("azure", v);
+                Api.setPref("azloc_" + id, b.optString("location"));
+                Api.post(this, "/accounts/" + id + "/azure/create", b, x -> taskOrToast(x, getString(R.string.s0152)));
             });
         });
     }
@@ -526,8 +681,12 @@ public class AccountActivity extends BaseActivity {
             f.add(Field.check("password_login", getString(R.string.s0158), true));
             f.add(scriptField());
             f.add(Field.multi("user_data", getString(R.string.s0159), ""));
+            f.add(saveDefaultField("Lightsail"));
             form(getString(R.string.s0160), null, f, getString(R.string.s0142), v -> {
-                try { Api.post(this, "/accounts/" + id + "/lightsail/create", v.put("region", region()), x -> { created(Api.obj(x)); body.postDelayed(this::refresh, 3000); }); }
+                try {
+                    JSONObject b = handleSaveDefault("lightsail", v);
+                    Api.post(this, "/accounts/" + id + "/lightsail/create", b.put("region", region()), x -> { created(Api.obj(x)); body.postDelayed(this::refresh, 3000); });
+                }
                 catch (Exception ignored) { }
             });
         });
@@ -570,8 +729,6 @@ public class AccountActivity extends BaseActivity {
     }
 
     private void ociCreate(boolean snatch) {
-        JSONObject d = defaults.optJSONObject("oci");
-        if (d == null) d = new JSONObject();
         boolean freeA1 = !"paid".equals(a1Basis());   // 免费号 / 未知按 2 OCPU / 12 GB 给默认值
         LinearLayout c = card(snatch ? getString(R.string.s0003) : getString(R.string.s0002));
         muted(c, snatch ? getString(R.string.s0163) : getString(R.string.s0164));
@@ -579,55 +736,109 @@ public class AccountActivity extends BaseActivity {
         muted(c, getString(R.string.s0168, ("paid".equals(b0) ? getString(R.string.s0165) : "free".equals(b0) ? getString(R.string.s0166)
                 : getString(R.string.s0167))));
         String[] shapes = SHAPES;
-        List<Field> f = new ArrayList<>(Arrays.asList(
-                Field.text("name", getString(R.string.s0169), "oci-" + Long.toString(System.currentTimeMillis() / 1000, 36)),
-                Field.select("shape", getString(R.string.s0170), d.optString("shape", shapes[0]), shapes, shapeLabels()),
-                Field.num("ocpus", "OCPU", d.optString("ocpus", freeA1 ? "2" : "4")),
-                Field.num("memory_gb", getString(R.string.s0126), d.optString("memory_gb", freeA1 ? "12" : "24")),
-                Field.num("disk_gb", getString(R.string.s0171), d.optString("disk_gb", "50")),
-                osImageField(d.optString("os", "Canonical Ubuntu"), str(d, "os_version", "")),
-                Field.text("ad", getString(R.string.s0172), str(d, "ad", "")),
-                Field.text("subnet_id", getString(R.string.s0173), str(d, "subnet_id", "")),
-                Field.multi("ssh_key", getString(R.string.s0174), str(d, "ssh_key", "")),
-                Field.check("ipv6", getString(R.string.s0175), d.optBoolean("ipv6", false)),
-                Field.check("password_login", getString(R.string.s0139), true),
-                scriptField(),
-                Field.multi("script", getString(R.string.s0140), "")));
-        if (snatch) {
-            f.add(Field.num("interval", getString(R.string.s0176), "60"));
-            f.add(Field.num("max_attempts", getString(R.string.s0177), "0"));
-        }
         LinearLayout r = row(c);
-        button(r, snatch ? getString(R.string.s0178) : getString(R.string.s0179), v -> form(snatch ? getString(R.string.s0180) : getString(R.string.s0181), null, f, snatch ? getString(R.string.s0182) : getString(R.string.s0142), vals -> {
-            try {
-                JSONObject create = splitOsImage(new JSONObject(vals.toString()));
-                Object interval = create.remove("interval"), maxa = create.remove("max_attempts");
-                JSONObject b = new JSONObject().put("region", region()).put("create", create);
-                if (snatch) {
-                    b.put("interval", interval).put("max_attempts", maxa);
-                    Api.post(this, "/accounts/" + id + "/oci/snatch", b, x -> taskOrToast(x, getString(R.string.s0183)));
-                } else {
-                    Api.post(this, "/accounts/" + id + "/oci/create", b, x -> created(Api.obj(x)));
-                }
-            } catch (Exception e) { toast(e.getMessage()); }
-        }));
+        button(r, snatch ? getString(R.string.s0178) : getString(R.string.s0179), v -> {
+            JSONObject d = defaults.optJSONObject("oci");
+            if (d == null) d = new JSONObject();
+            form(snatch ? getString(R.string.s0180) : getString(R.string.s0181), null,
+                    Collections.singletonList(Field.select("shape", getString(R.string.s0170), d.optString("shape", shapes[0]), shapes, shapeLabels())),
+                    getString(R.string.s0105), sVals -> {
+                String shape = sVals.optString("shape", shapes[0]);
+                Api.job(this, () -> {
+                    try { return Api.call("GET", "/accounts/" + id + "/oci/os-versions?shape=" + Api.enc(shape) + "&" + rq(), null); }
+                    catch (Exception e) { return new JSONObject(); }
+                }, x -> {
+                    JSONObject osv = x instanceof JSONObject ? (JSONObject) x : new JSONObject();
+                    JSONObject curD = defaults.optJSONObject("oci");
+                    if (curD == null) curD = new JSONObject();
+                    List<Field> f = new ArrayList<>(Arrays.asList(
+                            Field.text("name", getString(R.string.s0169), "oci-" + Long.toString(System.currentTimeMillis() / 1000, 36)),
+                            Field.num("ocpus", "OCPU", curD.optString("ocpus", freeA1 ? "2" : "4")),
+                            Field.num("memory_gb", getString(R.string.s0126), curD.optString("memory_gb", freeA1 ? "12" : "24")),
+                            Field.num("disk_gb", getString(R.string.s0171), curD.optString("disk_gb", "50")),
+                            osImageField(curD.optString("os", "Canonical Ubuntu"), str(curD, "os_version", ""), osv),
+                            Field.text("ad", getString(R.string.s0172), str(curD, "ad", "")),
+                            Field.text("subnet_id", getString(R.string.s0173), str(curD, "subnet_id", "")),
+                            Field.multi("ssh_key", getString(R.string.s0174), str(curD, "ssh_key", "")),
+                            Field.check("ipv6", getString(R.string.s0175), curD.optBoolean("ipv6", false)),
+                            Field.check("password_login", getString(R.string.s0139), true),
+                            scriptField(),
+                            Field.multi("script", getString(R.string.s0140), "")));
+                    if (snatch) {
+                        f.add(Field.num("interval", getString(R.string.s0176), "60"));
+                        f.add(Field.num("max_attempts", getString(R.string.s0177), "0"));
+                    }
+                    f.add(saveDefaultField("OCI"));
+                    form(snatch ? getString(R.string.s0180) : getString(R.string.s0181), null, f, snatch ? getString(R.string.s0182) : getString(R.string.s0142), vals -> {
+                        try {
+                            JSONObject create = splitOsImage(new JSONObject(vals.toString()));
+                            create.put("shape", shape);
+                            handleSaveDefault("oci", create);
+                            Object interval = create.remove("interval"), maxa = create.remove("max_attempts");
+                            JSONObject b = new JSONObject().put("region", region()).put("create", create);
+                            if (snatch) {
+                                b.put("interval", interval).put("max_attempts", maxa);
+                                Api.post(this, "/accounts/" + id + "/oci/snatch", b, res -> taskOrToast(res, getString(R.string.s0183)));
+                            } else {
+                                Api.post(this, "/accounts/" + id + "/oci/create", b, res -> created(Api.obj(res)));
+                            }
+                        } catch (Exception e) { toast(e.getMessage()); }
+                    });
+                });
+            });
+        });
     }
 
     // v1.5：OCI「系统 + 版本」—— Field 不支持联动，所以列出全部组合（如「Ubuntu 22.04」），提交时拆成 os / os_version（"" = 最新）
     static final String[][] OCI_OS = {{"Canonical Ubuntu", "Ubuntu", "", "24.04", "22.04", "20.04"}, {"Oracle Linux", "Oracle Linux", "", "9", "8"}};
 
-    static Field osImageField(String os, String ver) {
+    private static Field buildOsImageField(String os, String ver, String[][] rows) {
         List<String> opts = new ArrayList<>(), labels = new ArrayList<>();
-        for (String[] o : OCI_OS)
+        for (String[] o : rows)
             for (int i = 2; i < o.length; i++) { opts.add(o[0] + "|" + o[i]); labels.add(o[1] + " " + (o[i].isEmpty() ? L10n.s(R.string.s0061) : o[i])); }
         String def = os + "|" + (ver == null ? "" : ver);
         if (!opts.contains(def)) {
             boolean known = false;
-            for (String[] o : OCI_OS) if (o[0].equals(os)) known = true;
+            for (String[] o : rows) if (o[0].equals(os)) known = true;
             if (known) { opts.add(def); labels.add(os + " " + ver); }   // 默认值里的版本不在列表里：临时加一个选项
             else def = opts.get(0);                                       // 已移除的系统（如 CentOS）回落到 Ubuntu 最新
         }
         return Field.select("os_image", L10n.s(R.string.s0184), def, opts.toArray(new String[0]), labels.toArray(new String[0]));
+    }
+
+    static Field osImageField(String os, String ver) {
+        return buildOsImageField(os, ver, OCI_OS);
+    }
+
+    static Field osImageField(String os, String ver, JSONObject osv) {
+        if (osv == null || osv.length() == 0) return osImageField(os, ver);
+        List<String> systems = new ArrayList<>();
+        for (Iterator<String> it = osv.keys(); it.hasNext(); ) {
+            String k = it.next();
+            JSONArray arr = osv.optJSONArray(k);
+            if (arr != null && arr.length() > 0) systems.add(k);
+        }
+        if (systems.isEmpty()) return osImageField(os, ver);
+        systems.sort((a, b) -> {
+            int pa = "Canonical Ubuntu".equals(a) ? 0 : "Oracle Linux".equals(a) ? 1 : 2;
+            int pb = "Canonical Ubuntu".equals(b) ? 0 : "Oracle Linux".equals(b) ? 1 : 2;
+            if (pa != pb) return Integer.compare(pa, pb);
+            return a.compareToIgnoreCase(b);
+        });
+        String[][] rows = new String[systems.size()][];
+        for (int i = 0; i < systems.size(); i++) {
+            String sys = systems.get(i);
+            JSONArray arr = osv.optJSONArray(sys);
+            String shortLabel = "Canonical Ubuntu".equals(sys) ? "Ubuntu" : "Oracle Linux".equals(sys) ? "Oracle Linux" : sys;
+            int n = arr == null ? 0 : arr.length();
+            String[] row = new String[3 + n];
+            row[0] = sys;
+            row[1] = shortLabel;
+            row[2] = "";
+            for (int j = 0; j < n; j++) row[3 + j] = arr.optString(j);
+            rows[i] = row;
+        }
+        return buildOsImageField(os, ver, rows);
     }
 
     static JSONObject splitOsImage(JSONObject c) throws Exception {
@@ -1495,38 +1706,71 @@ public class AccountActivity extends BaseActivity {
             choose(getString(R.string.s0450), labels, idx -> {
                 JSONObject to = ts.get(idx);
                 String tp = to.optString("provider");
-                List<Field> f = new ArrayList<>();
-                f.add(Field.text("name", getString(R.string.s0451), inst.optString("name") + "-new"));
                 if ("oci".equals(tp)) {
-                    f.add(Field.select("shape", getString(R.string.s0170), "VM.Standard.A1.Flex", new String[]{"VM.Standard.A1.Flex", "VM.Standard.E2.1.Micro"}, new String[]{shapeLabelsBase()[0], shapeLabelsBase()[1]}));
-                    f.add(Field.num("ocpus", "OCPU", "1"));
-                    f.add(Field.num("memory_gb", getString(R.string.s0126), "6"));
-                    f.add(Field.num("disk_gb", getString(R.string.s0144), "50"));
-                    f.add(osImageField("Canonical Ubuntu", ""));
-                } else if ("aws".equals(tp)) {
-                    f.add(Field.text("type", getString(R.string.s0136), "t3.micro"));
-                    f.add(Field.select("os", getString(R.string.s0059), "debian-12", new String[]{"debian-12", "ubuntu-24.04"}, new String[]{"Debian 12", "Ubuntu 24.04"}));
-                    f.add(Field.num("disk_gb", getString(R.string.s0144), "10"));
+                    String[] mShapes = {"VM.Standard.A1.Flex", "VM.Standard.E2.1.Micro"};
+                    String[] mLabels = {shapeLabelsBase()[0], shapeLabelsBase()[1]};
+                    form(getString(R.string.s0456, to.optString("name")), null,
+                            Collections.singletonList(Field.select("shape", getString(R.string.s0170), mShapes[0], mShapes, mLabels)),
+                            getString(R.string.s0105), shapeVal -> {
+                        String shape = shapeVal.optString("shape", mShapes[0]);
+                        String toRegion = Regions.current(to);
+                        String regParam = (toRegion != null && !toRegion.isEmpty()) ? "&region=" + Api.enc(toRegion) : "";
+                        Api.job(this, () -> {
+                            try { return Api.call("GET", "/accounts/" + to.optInt("id") + "/oci/os-versions?shape=" + Api.enc(shape) + regParam, null); }
+                            catch (Exception e) { return new JSONObject(); }
+                        }, x -> {
+                            JSONObject osv = x instanceof JSONObject ? (JSONObject) x : new JSONObject();
+                            List<Field> f = new ArrayList<>();
+                            f.add(Field.text("name", getString(R.string.s0451), inst.optString("name") + "-new"));
+                            f.add(Field.num("ocpus", "OCPU", "1"));
+                            f.add(Field.num("memory_gb", getString(R.string.s0126), "6"));
+                            f.add(Field.num("disk_gb", getString(R.string.s0144), "50"));
+                            f.add(osImageField("Canonical Ubuntu", "", osv));
+                            f.add(Field.check("switch_dns", getString(R.string.s0453), true));
+                            f.add(Field.check("copy_monitor", getString(R.string.s0454), true));
+                            f.add(Field.check("stop_source", getString(R.string.s0455), false));
+                            form(getString(R.string.s0456, to.optString("name")), getString(R.string.s0457), f, getString(R.string.s0458), v -> {
+                                try {
+                                    JSONObject create = splitOsImage(new JSONObject(v.toString()));
+                                    create.put("shape", shape);
+                                    for (String k : new String[]{"switch_dns", "copy_monitor", "stop_source"}) create.remove(k);
+                                    JSONObject b = new JSONObject().put("from_account_id", id).put("from_region", region()).put("instance_id", inst.optString("id"))
+                                            .put("name", inst.optString("name")).put("to_account_id", to.optInt("id")).put("create", create)
+                                            .put("switch_dns", v.optBoolean("switch_dns")).put("copy_monitor", v.optBoolean("copy_monitor")).put("stop_source", v.optBoolean("stop_source"));
+                                    b.put("region", Regions.current(to));
+                                    Api.post(this, "/migrate", b, y -> taskOrToast(y, getString(R.string.s0037)));
+                                } catch (Exception ignored) { }
+                            });
+                        });
+                    });
                 } else {
-                    f.add(Field.text("location", getString(R.string.s0010), "eastasia"));
-                    f.add(Field.text("size", getString(R.string.s0143), "Standard_B1s"));
-                    f.add(Field.select("disk_type", getString(R.string.s0046), "Premium_LRS", new String[]{"Premium_LRS", "StandardSSD_LRS"}, new String[]{getString(R.string.s0452), "Standard SSD"}));
-                    f.add(Field.num("disk_gb", getString(R.string.s0144), "64"));
+                    List<Field> f = new ArrayList<>();
+                    f.add(Field.text("name", getString(R.string.s0451), inst.optString("name") + "-new"));
+                    if ("aws".equals(tp)) {
+                        f.add(Field.text("type", getString(R.string.s0136), "t3.micro"));
+                        f.add(Field.select("os", getString(R.string.s0059), "debian-12", new String[]{"debian-12", "ubuntu-24.04"}, new String[]{"Debian 12", "Ubuntu 24.04"}));
+                        f.add(Field.num("disk_gb", getString(R.string.s0144), "10"));
+                    } else {
+                        f.add(Field.text("location", getString(R.string.s0010), "eastasia"));
+                        f.add(Field.text("size", getString(R.string.s0143), "Standard_B1s"));
+                        f.add(Field.select("disk_type", getString(R.string.s0046), "Premium_LRS", new String[]{"Premium_LRS", "StandardSSD_LRS"}, new String[]{getString(R.string.s0452), "Standard SSD"}));
+                        f.add(Field.num("disk_gb", getString(R.string.s0144), "64"));
+                    }
+                    f.add(Field.check("switch_dns", getString(R.string.s0453), true));
+                    f.add(Field.check("copy_monitor", getString(R.string.s0454), true));
+                    f.add(Field.check("stop_source", getString(R.string.s0455), false));
+                    form(getString(R.string.s0456, to.optString("name")), getString(R.string.s0457), f, getString(R.string.s0458), v -> {
+                        try {
+                            JSONObject create = splitOsImage(new JSONObject(v.toString()));
+                            for (String k : new String[]{"switch_dns", "copy_monitor", "stop_source"}) create.remove(k);
+                            JSONObject b = new JSONObject().put("from_account_id", id).put("from_region", region()).put("instance_id", inst.optString("id"))
+                                    .put("name", inst.optString("name")).put("to_account_id", to.optInt("id")).put("create", create)
+                                    .put("switch_dns", v.optBoolean("switch_dns")).put("copy_monitor", v.optBoolean("copy_monitor")).put("stop_source", v.optBoolean("stop_source"));
+                            if (!"azure".equals(tp)) b.put("region", Regions.current(to));
+                            Api.post(this, "/migrate", b, x -> taskOrToast(x, getString(R.string.s0037)));
+                        } catch (Exception ignored) { }
+                    });
                 }
-                f.add(Field.check("switch_dns", getString(R.string.s0453), true));
-                f.add(Field.check("copy_monitor", getString(R.string.s0454), true));
-                f.add(Field.check("stop_source", getString(R.string.s0455), false));
-                form(getString(R.string.s0456, to.optString("name")), getString(R.string.s0457), f, getString(R.string.s0458), v -> {
-                    try {
-                        JSONObject create = splitOsImage(new JSONObject(v.toString()));
-                        for (String k : new String[]{"switch_dns", "copy_monitor", "stop_source"}) create.remove(k);
-                        JSONObject b = new JSONObject().put("from_account_id", id).put("from_region", region()).put("instance_id", inst.optString("id"))
-                                .put("name", inst.optString("name")).put("to_account_id", to.optInt("id")).put("create", create)
-                                .put("switch_dns", v.optBoolean("switch_dns")).put("copy_monitor", v.optBoolean("copy_monitor")).put("stop_source", v.optBoolean("stop_source"));
-                        if (!"azure".equals(tp)) b.put("region", Regions.current(to));
-                        Api.post(this, "/migrate", b, x -> taskOrToast(x, getString(R.string.s0037)));
-                    } catch (Exception ignored) { }
-                });
             });
         });
     }
@@ -1628,6 +1872,89 @@ public class AccountActivity extends BaseActivity {
         if (!hint.isEmpty()) new com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle(getString(R.string.s0499)).setMessage(hint)
                 .setPositiveButton(getString(R.string.s0500), (d, w) -> copy("hint", hint)).setNegativeButton(getString(R.string.s0501), (d, w) -> ociIps(inst)).show();
         else { toast(getString(R.string.s0499)); ociIps(inst); }
+    }
+
+    // ---------------- OCI 实例级安全列表 ----------------
+    private void ociInstSecurity(JSONObject inst) {
+        Api.get(this, "/accounts/" + id + "/oci/security?instance_id=" + Api.enc(inst.optString("id")) + "&" + rq(), r -> {
+            JSONArray arr = Api.arr(r);
+            ScrollView sv = new ScrollView(this);
+            LinearLayout box = new LinearLayout(this);
+            box.setOrientation(LinearLayout.VERTICAL);
+            box.setPadding(dp(24), dp(4), dp(24), 0);
+            sv.addView(box);
+
+            final AlertDialog dlg = new MaterialAlertDialogBuilder(this)
+                    .setTitle(getString(R.string.s1265) + " · " + inst.optString("name"))
+                    .setView(sv)
+                    .setPositiveButton(getString(R.string.s0074), null)
+                    .create();
+
+            if (arr == null || arr.length() == 0) {
+                muted(box, getString(R.string.s1266));
+            } else {
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject sl = arr.optJSONObject(i);
+                    if (sl == null) continue;
+                    String slId = sl.optString("id");
+                    String slName = sl.optString("name");
+                    TextView header = text(box, slName, 14, true);
+                    if (i > 0) header.setPadding(0, dp(12), 0, dp(2));
+                    JSONArray rules = sl.optJSONArray("rules");
+                    if (rules == null || rules.length() == 0) {
+                        muted(box, getString(R.string.s1266));
+                    } else {
+                        for (int j = 0; j < rules.length(); j++) {
+                            JSONObject ru = rules.optJSONObject(j);
+                            if (ru == null) continue;
+                            String dir = ru.optString("direction");
+                            boolean ingress = "ingress".equals(dir);
+                            String dirText = ingress ? getString(R.string.s0255) : getString(R.string.s0256);
+                            String proto = ru.optString("protocol");
+                            String cidr = ru.optString("cidr");
+                            String port = ru.optString("port");
+                            int idx = ru.optInt("idx");
+
+                            LinearLayout line = new LinearLayout(this);
+                            line.setOrientation(LinearLayout.HORIZONTAL);
+                            line.setGravity(android.view.Gravity.CENTER_VERTICAL);
+                            line.setPadding(0, dp(2), 0, dp(2));
+
+                            TextView tv = text(line, dirText + " · " + proto + " · " + cidr + " · " + port, 13, false);
+                            LinearLayout.LayoutParams lpTv = new LinearLayout.LayoutParams(0, -2, 1f);
+                            tv.setLayoutParams(lpTv);
+
+                            MaterialButton delBtn = new MaterialButton(new ContextThemeWrapper(this, R.style.ThemeOverlay_TriCloud_Danger));
+                            delBtn.setText(getString(R.string.s0057));
+                            delBtn.setAllCaps(false);
+                            delBtn.setMinWidth(0);
+                            delBtn.setMinimumWidth(0);
+                            delBtn.setInsetTop(dp(2));
+                            delBtn.setInsetBottom(dp(2));
+                            delBtn.setPadding(dp(8), delBtn.getPaddingTop(), dp(8), delBtn.getPaddingBottom());
+                            delBtn.setOnClickListener(v -> confirm(getString(R.string.s0263), getString(R.string.s0265, (ingress && "22".equals(port)) ? getString(R.string.s0264) : ""), () -> {
+                                try {
+                                    JSONObject b = new JSONObject()
+                                            .put("op", "remove")
+                                            .put("region", region())
+                                            .put("sl_id", slId)
+                                            .put("direction", dir)
+                                            .put("idx", idx);
+                                    Api.post(this, "/accounts/" + id + "/oci/security", b, res -> {
+                                        toast(getString(R.string.s0223));
+                                        dlg.dismiss();
+                                        ociInstSecurity(inst);
+                                    });
+                                } catch (Exception ignored) { }
+                            }));
+                            line.addView(delBtn, new LinearLayout.LayoutParams(-2, -2));
+                            box.addView(line);
+                        }
+                    }
+                }
+            }
+            dlg.show();
+        });
     }
 
     /** Azure 磁盘：系统盘 / 数据盘扩容、换类型、调性能层。 */

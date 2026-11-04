@@ -79,20 +79,40 @@ public class AccountsActivity extends BaseActivity {
     @Override
     protected String navKey() { return "accounts"; }
 
+    private boolean sorting;
+    private JSONArray lastAccounts;
+    private final List<JSONObject> sortList = new ArrayList<>();
+
     @Override
     protected void refresh() {
         Api.get(this, "/accounts", r -> {
-            clear();
             JSONArray a = Api.arr(r);
             Api.accounts = a;
+            lastAccounts = a;
             Regions.HINTS.clear();   // build 25：/accounts 带的 machine_regions 是后端最新记录
             buildNav();
+            if (sorting) {
+                renderSort();
+                return;
+            }
+            clear();
             heads.clear();
             LinearLayout top = card(null);
             muted(top, getString(R.string.s0711));
             LinearLayout tr = row(top);
             button(tr, getString(R.string.s0712), v -> addAccount(""));
             button(tr, getString(R.string.s0713), v -> batchAdd(""));
+            if (a.length() > 1) {
+                button(tr, getString(R.string.s1257), v -> {
+                    sortList.clear();
+                    for (int i = 0; i < lastAccounts.length(); i++) {
+                        JSONObject obj = lastAccounts.optJSONObject(i);
+                        if (obj != null) sortList.add(obj);
+                    }
+                    sorting = true;
+                    renderSort();
+                });
+            }
             button(tr, getString(R.string.s0714), v -> testAll(a));
             button(tr, getString(R.string.s0715), v -> expiry());
             button(tr, getString(R.string.s0716), v -> startActivity(new Intent(this, DeletedActivity.class)));
@@ -106,6 +126,53 @@ public class AccountsActivity extends BaseActivity {
                 if (tv != null && acc != null) tv.setText(headText(acc));
             });
         });
+    }
+
+    private void renderSort() {
+        clear();
+        heads.clear();
+        LinearLayout top = card(null);
+        muted(top, getString(R.string.s1258));
+        LinearLayout tr = row(top);
+        button(tr, getString(R.string.s1259), v -> {
+            try {
+                JSONArray ids = new JSONArray();
+                for (JSONObject item : sortList) ids.put(item.optInt("id"));
+                Api.post(this, "/accounts/reorder", new JSONObject().put("ids", ids), x -> {
+                    sorting = false;
+                    toast(getString(R.string.s0777));
+                    refresh();
+                });
+            } catch (Exception e) { toast(e.getMessage()); }
+        });
+        button(tr, getString(R.string.s0614), v -> {
+            sorting = false;
+            refresh();
+        });
+
+        for (int i = 0; i < sortList.size(); i++) {
+            final int index = i;
+            JSONObject acc = sortList.get(i);
+            LinearLayout c = card(acc.optString("name"));
+            muted(c, MainActivity.pname(acc.optString("provider")));
+            LinearLayout btnRow = row(c);
+            if (index > 0) {
+                button(btnRow, getString(R.string.s1260), v -> {
+                    JSONObject tmp = sortList.get(index);
+                    sortList.set(index, sortList.get(index - 1));
+                    sortList.set(index - 1, tmp);
+                    renderSort();
+                });
+            }
+            if (index < sortList.size() - 1) {
+                button(btnRow, getString(R.string.s1261), v -> {
+                    JSONObject tmp = sortList.get(index);
+                    sortList.set(index, sortList.get(index + 1));
+                    sortList.set(index + 1, tmp);
+                    renderSort();
+                });
+            }
+        }
     }
 
     private final java.util.Map<Integer, TextView> heads = new java.util.HashMap<>();

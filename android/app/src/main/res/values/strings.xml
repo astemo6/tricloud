@@ -1341,4 +1341,19 @@
     <string name="s1254">增加次数（1–20 次调用）</string>
     <string name="s1255">请输入 1–20 的整数</string>
     <string name="s1256">近30天 %1$s</string>
+    <string name="s1257">账号排序</string>
+    <string name="s1258">使用上移/下移调整账号顺序，完成后点完成。</string>
+    <string name="s1259">完成</string>
+    <string name="s1260">上移</string>
+    <string name="s1261">下移</string>
+    <string name="s1262">显示 CloudFront 缓存刷新按钮</string>
+    <string name="s1263">默认关。关时 CloudFront 分发列表不显示「缓存刷新」按钮，防误点。当前：%1$s</string>
+    <string name="s1264">把本次参数保存为 %1$s 创建默认值（不含名称、密码、脚本）</string>
+    <string name="s1265">安全列表</string>
+    <string name="s1266">暂无规则</string>
+    <string name="s1267">切换账号</string>
+    <string name="s1268">搜索账号名称</string>
+    <string name="s1269">开启</string>
+    <string name="s1270">关闭</string>
+    <string name="s1271">已保存为默认值</string>
 </resources>

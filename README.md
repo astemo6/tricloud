@@ -50,19 +50,75 @@ bash <(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercon
 ```json
 {
   "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Action": ["ec2:Describe*", "ec2:StartInstances", "ec2:StopInstances", "ec2:RebootInstances",
-               "ec2:TerminateInstances", "ec2:ListSnapshotsInRecycleBin", "ec2:AllocateAddress", "ec2:AssociateAddress", "ec2:ReleaseAddress",
-               "ec2:RunInstances", "ec2:CreateTags", "ec2:CreateSecurityGroup", "ec2:AuthorizeSecurityGroupIngress", "ssm:GetParameter",
-               "account:ListRegions", "account:EnableRegion",
-               "lightsail:*", "cloudfront:*Distribution*", "servicequotas:Get*", "ce:GetCostAndUsage",
-               "wafv2:CreateWebACL", "wafv2:GetWebACL", "wafv2:ListWebACLs", "wafv2:DeleteWebACL",
-               "pricingplanmanager:CreateSubscription", "pricingplanmanager:CancelSubscription", "pricingplanmanager:ListSubscriptions",
-               "cloudwatch:GetMetricStatistics", "cloudwatch:GetMetricData", "freetier:GetAccountPlanState",
-               "sts:GetCallerIdentity"],
-    "Resource": "*"
-  }]
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:Describe*",
+        "ec2:StartInstances",
+        "ec2:StopInstances",
+        "ec2:RebootInstances",
+        "ec2:TerminateInstances",
+        "ec2:ListSnapshotsInRecycleBin",
+        "ec2:AllocateAddress",
+        "ec2:AssociateAddress",
+        "ec2:ReleaseAddress",
+        "ec2:RunInstances",
+        "ec2:CreateTags",
+        "ec2:CreateSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ssm:GetParameter",
+        "account:ListRegions",
+        "account:EnableRegion",
+        "lightsail:*",
+        "cloudfront:*Distribution*",
+        "servicequotas:Get*",
+        "ce:GetCostAndUsage",
+        "wafv2:CreateWebACL",
+        "wafv2:GetWebACL",
+        "wafv2:ListWebACLs",
+        "wafv2:DeleteWebACL",
+        "pricingplanmanager:CreateSubscription",
+        "pricingplanmanager:CancelSubscription",
+        "pricingplanmanager:ListSubscriptions",
+        "cloudwatch:GetMetricStatistics",
+        "cloudwatch:GetMetricData",
+        "freetier:GetAccountPlanState",
+        "sts:GetCallerIdentity",
+        "cloudfront:CreateInvalidation",
+        "ec2:CreateReplaceRootVolumeTask",
+        "freetier:ListAccountActivities",
+        "freetier:GetAccountActivity",
+        "budgets:ViewBudget",
+        "budgets:ModifyBudget",
+        "budgets:TagResource",
+        "lambda:ListFunctions",
+        "lambda:CreateFunction",
+        "lambda:GetFunction",
+        "lambda:CreateFunctionUrlConfig",
+        "lambda:AddPermission",
+        "lambda:DeleteFunction",
+        "lambda:DeleteFunctionUrlConfig",
+        "lambda:TagResource",
+        "iam:CreateRole",
+        "iam:GetRole",
+        "iam:PassRole",
+        "iam:TagRole",
+        "iam:DeleteRole",
+        "iam:ListAttachedRolePolicies",
+        "iam:DetachRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:DeleteRolePolicy",
+        "rds:CreateDBInstance",
+        "rds:DescribeDBInstances",
+        "rds:DeleteDBInstance",
+        "rds:DescribeOrderableDBInstanceOptions",
+        "rds:AddTagsToResource",
+        "bedrock:InvokeModel"
+      ],
+      "Resource": "*"
+    }
+  ]
 }
 ```
 
@@ -73,19 +129,34 @@ CloudFront 包月套餐订阅时面板会自动为分发创建并关联一个配
 ```json
 {
   "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Action": ["ce:GetCostAndUsage", "cloudfront:*Distribution*",
-               "wafv2:CreateWebACL", "wafv2:GetWebACL", "wafv2:ListWebACLs", "wafv2:DeleteWebACL",
-               "pricingplanmanager:CreateSubscription", "pricingplanmanager:CancelSubscription", "pricingplanmanager:ListSubscriptions",
-               "cloudwatch:GetMetricData", "cloudwatch:GetMetricStatistics",
-               "sts:GetCallerIdentity"],
-    "Resource": "*"
-  }]
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ce:GetCostAndUsage",
+        "cloudfront:*Distribution*",
+        "wafv2:CreateWebACL",
+        "wafv2:GetWebACL",
+        "wafv2:ListWebACLs",
+        "wafv2:DeleteWebACL",
+        "pricingplanmanager:CreateSubscription",
+        "pricingplanmanager:CancelSubscription",
+        "pricingplanmanager:ListSubscriptions",
+        "cloudwatch:GetMetricData",
+        "cloudwatch:GetMetricStatistics",
+        "sts:GetCallerIdentity",
+        "cloudfront:CreateInvalidation",
+        "freetier:GetAccountPlanState",
+        "freetier:ListAccountActivities",
+        "freetier:GetAccountActivity"
+      ],
+      "Resource": "*"
+    }
+  ]
 }
 ```
 
-精简策略已含 `cloudwatch:GetMetricStatistics`（分发列表的「已用流量」列要用它拉 CloudWatch 数据）；若账号是照早期版本贴的精简策略，需把这一条补进现有策略，否则该列会显示「—」。
+精简策略已经过 2026-11-04 全量代码审计：含 `cloudwatch:GetMetricStatistics`（分发列表「已用流量」列）、`cloudfront:CreateInvalidation`（缓存刷新；`*Distribution*` 通配符不覆盖它）与 freetier 三条（Credit 查询）。若账号是照早期版本贴的精简策略，请整段换成上面这版最终版。完整策略同日审计补齐 30 条（Credit 一键活动的 budgets/lambda/iam/rds/bedrock、EC2 重装系统的 CreateReplaceRootVolumeTask、缓存刷新等），老账号建议整段覆盖为新版。
 
 **Azure**：`az ad sp create-for-rbac --name tricloud --role "Virtual Machine Contributor" --scopes /subscriptions/<SUB_ID>`，换 IP / 创建 VM / 资源组管理需在订阅上授予 Contributor（或 Virtual Machine Contributor + Network Contributor + 资源组写权限），账单需 Cost Management Reader。学生订阅部分账单 API 可能不可用，面板会显示错误而不影响其他功能。
 

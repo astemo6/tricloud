@@ -78,14 +78,14 @@ CloudFront 包月套餐订阅时面板会自动为分发创建并关联一个配
     "Action": ["ce:GetCostAndUsage", "cloudfront:*Distribution*",
                "wafv2:CreateWebACL", "wafv2:GetWebACL", "wafv2:ListWebACLs", "wafv2:DeleteWebACL",
                "pricingplanmanager:CreateSubscription", "pricingplanmanager:CancelSubscription", "pricingplanmanager:ListSubscriptions",
-               "cloudwatch:GetMetricData",
+               "cloudwatch:GetMetricData", "cloudwatch:GetMetricStatistics",
                "sts:GetCallerIdentity"],
     "Resource": "*"
   }]
 }
 ```
 
-如需在面板看 CloudFront 用量图表，再加 `cloudwatch:GetMetricStatistics`。
+精简策略已含 `cloudwatch:GetMetricStatistics`（分发列表的「已用流量」列要用它拉 CloudWatch 数据）；若账号是照早期版本贴的精简策略，需把这一条补进现有策略，否则该列会显示「—」。
 
 **Azure**：`az ad sp create-for-rbac --name tricloud --role "Virtual Machine Contributor" --scopes /subscriptions/<SUB_ID>`，换 IP / 创建 VM / 资源组管理需在订阅上授予 Contributor（或 Virtual Machine Contributor + Network Contributor + 资源组写权限），账单需 Cost Management Reader。学生订阅部分账单 API 可能不可用，面板会显示错误而不影响其他功能。
 

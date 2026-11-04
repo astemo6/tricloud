@@ -113,6 +113,7 @@ extension AccountPage {
                         let total = it.optLong("total"), quota = it.optLong("quota_bytes")
                         let main = quota > 0 ? AccountPage.cfBytes(total) + " / " + AccountPage.cfBytes(quota) : AccountPage.cfBytes(total)
                         c.muted("已用流量 " + main + " · ↓ " + AccountPage.cfBytes(it.optLong("down")) + " · ↑ " + AccountPage.cfBytes(it.optLong("up")))
+                        if it.has("total30d") { c.muted("近30天 " + AccountPage.cfBytes(it.optLong("total30d")))}
                     }
                 case .failure:
                     break

@@ -8,6 +8,7 @@ final class AccountPage: Page {
     let id: Int
     var tab: String
     var defaults: JObj = [:]
+    var cfInvBtn = false
     var fdRegion = "swedencentral"
     /// build 19：Lightsail 支持的区域（GET /regions?service=lightsail，成功才缓存）。
     var lsRegs: [String]?
@@ -53,7 +54,7 @@ final class AccountPage: Page {
     override func appeared() {
         if !started {
             started = true
-            get("/settings") { r in self.defaults = jobj(r).optJSONObject("default_create") ?? [:] }
+            get("/settings") { r in self.defaults = jobj(r).optJSONObject("default_create") ?? [:]; self.cfInvBtn = jobj(r).optBoolean("cf_invalidate_btn") }
             refresh()
         }
     }

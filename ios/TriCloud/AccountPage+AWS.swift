@@ -12,18 +12,54 @@ extension AccountPage {
         return d.optString("plan")
     }
 
+    /// 与 Web cfBytes 等价：1024 进制、1 位小数并去掉尾随 .0。
+    static func cfBytes(_ n: Int64) -> String {
+        var v = Double(n)
+        let u = ["B", "KB", "MB", "GB", "TB"]
+        var i = 0
+        while v >= 1024 && i < 4 { v /= 1024; i += 1 }
+        if i == 0 { return "\(n) B" }
+        var s = String(format: "%.1f", v)
+        if s.hasSuffix(".0") { s = String(s.dropLast(2)) }
+        return s + " " + u[i]
+    }
+
     func cloudfront() {
         bigButton("＋ 新建分发") {
-            self.form("新建 CloudFront 分发", "部署约 5~15 分钟；默认与 v1.4 相同（不缓存 + 全部边缘节点）", [
+            self.form("新建 CloudFront 分发", "部署约 5~15 分钟；默认与 v1.4 相同（不缓存 + 全部边缘节点）。开启后禁用缓存、转发全部请求头，适合 ws 节点套 CloudFront；回源端口只能是 80、443 或 1024–65535。", [
                 Field.text("origin", "源站域名（不带 https:// 和路径）", ""),
                 Field.select("origin_protocol", "回源协议", "http-only", ["http-only", "https-only", "match-viewer"], ["HTTP", "HTTPS", "跟随访客"]),
                 Field.select("price_class", "价格等级", "all", ["all", "200", "100"], ["全部边缘节点", "200（含亚洲）", "100（北美+欧洲）"]),
+                Field.select("plan_tier", "套餐", "PAYGO", AccountPage.CF_TIERS, AccountPage.CF_TIER_NAMES),
                 Field.select("cache_mode", "缓存模式", "disabled", ["disabled", "optimized"], ["不缓存（反代动态内容）", "缓存优化（静态资源）"]),
                 Field.check("compress", "自动压缩", true),
+                Field.num("http_port", "HTTP 回源端口", "80"),
+                Field.num("https_port", "HTTPS 回源端口", "443"),
+                Field.select("ip_address_type", "源站 IP 类型", "ipv4", ["ipv4", "ipv6", "dualstack"], ["IPv4（默认）", "IPv6 only", "双栈"]),
+                Field.check("ws_mode", "WebSocket 节点模式", false),
                 Field.text("comment", "备注", "")], "创建") { vals in
                 var b = vals
                 b["op"] = "create"
-                self.post("/accounts/\(self.id)/cloudfront", b) { x in self.toast("已创建：" + jobj(x).optString("domain")); self.refresh() }
+                self.post("/accounts/\(self.id)/cloudfront", b) { x in
+                    let o = jobj(x)
+                    self.toast("已创建：" + o.optString("domain"))
+                    self.refresh()
+                    // 选了包月套餐：分发建好后接着订阅（同 Web）；付费档先确认，订阅失败只提示、不影响已建分发
+                    let tier = vals.optString("plan_tier")
+                    if tier.isEmpty || tier == "PAYGO" { return }
+                    let paid = tier != "FREE"
+                    let did = o.optString("id")
+                    let go = {
+                        self.post("/accounts/\(self.id)/cloudfront/plan", ["distribution_id": did, "plan_tier": tier, "confirm": paid]) { y in
+                            self.toast(jobj(y).optString("message"))
+                            self.refresh()
+                        }
+                    }
+                    if paid {
+                        let nm = AccountPage.CF_TIERS.firstIndex(of: tier).map { AccountPage.CF_TIER_NAMES[$0] } ?? tier
+                        self.confirm("确认订阅付费套餐", "⚠️ 为分发 " + did + " 订阅 " + nm + "，将立即开始按月计费（价格以 AWS 官网为准）。", go)
+                    } else { go() }
+                }
             }
         }
         let g = gen
@@ -31,16 +67,18 @@ extension AccountPage {
             guard self.cur(g) else { return }
             let a = jarr(r)
             if a.isEmpty { self.card("暂无分发").muted("") }
+            var cards: [String: Card] = [:]
             for i in 0..<a.count {
                 let d = a.obj(i)
                 let did = d.optString("id")
                 let en = d.optBoolean("enabled")
                 let c = self.card(did + "  [" + d.optString("status") + "]")
+                cards[did] = c
                 c.text(d.optString("domain") + "\n源站：" + join(d.optJSONArray("origins"))
                        + "\n" + (en ? "已启用" : "已停用") + " · " + AccountPage.cfPlanName(d) + " · 价格等级 " + str(d, "price_class", "-")
                        + (d.optString("comment").isEmpty ? "" : "\n" + d.optString("comment")), 13)
                 let row = c.row()
-                row.button("缓存刷新") { self.cfInvalidate(did) }
+                if self.cfInvBtn { row.button("缓存刷新") { self.cfInvalidate(did) } }
                 row.button("编辑") { self.cfEdit(did) }
                 row.button(en ? "停用" : "启用") {
                     self.confirm(en ? "停用分发" : "启用分发", en ? "停用后该域名将无法访问（配置保留，可再启用）。" : "启用 " + did + "？") {
@@ -62,6 +100,22 @@ extension AccountPage {
                             self.refresh()
                         }
                     }
+                }
+            }
+            // 已用流量：异步给每个分发卡片补一行（拉不到就静默不显示，同 Web）
+            Api.call("GET", "/accounts/\(id)/cloudfront/traffic", nil) { res in
+                guard self.cur(g) else { return }
+                switch res {
+                case .success(let tr):
+                    guard let items = jobj(tr).optJSONObject("items") else { return }
+                    for (did, c) in cards {
+                        guard let it = items.optJSONObject(did) else { continue }
+                        let total = it.optLong("total"), quota = it.optLong("quota_bytes")
+                        let main = quota > 0 ? AccountPage.cfBytes(total) + " / " + AccountPage.cfBytes(quota) : AccountPage.cfBytes(total)
+                        c.muted("已用流量 " + main + " · ↓ " + AccountPage.cfBytes(it.optLong("down")) + " · ↑ " + AccountPage.cfBytes(it.optLong("up")))
+                    }
+                case .failure:
+                    break
                 }
             }
         }
@@ -87,8 +141,16 @@ extension AccountPage {
             if !c.optString("origin_protocol").isEmpty {
                 f.append(Field.select("origin_protocol", "回源协议", c.optString("origin_protocol"), ["http-only", "https-only", "match-viewer"], nil))
             }
-            self.form("编辑分发 · " + did, "保存后重新部署，约几分钟生效", f, "保存") { v in
-                self.request("PUT", "/accounts/\(self.id)/cloudfront/" + enc(did), v) { x in
+            let hp = c.optInt("http_port"), sp = c.optInt("https_port")
+            f.append(Field.num("http_port", "HTTP 回源端口", hp > 0 ? "\(hp)" : "80"))
+            f.append(Field.num("https_port", "HTTPS 回源端口", sp > 0 ? "\(sp)" : "443"))
+            f.append(Field.select("ip_address_type", "源站 IP 类型", str(c, "ip_address_type", "ipv4"), ["ipv4", "ipv6", "dualstack"], ["IPv4（默认）", "IPv6 only", "双栈"]))
+            let wsOn = c.optBoolean("ws_mode")
+            f.append(Field.check("ws_mode", wsOn ? "WebSocket 节点模式（已开启，不可关闭）" : "WebSocket 节点模式", wsOn))
+            self.form("编辑分发 · " + did, "保存后重新部署，约几分钟生效。开启后禁用缓存、转发全部请求头，适合 ws 节点套 CloudFront；回源端口只能是 80、443 或 1024–65535。", f, "保存") { v in
+                var vv = v
+                if wsOn { vv["ws_mode"] = true }   // ws 只能开不能关（后端同语义）：已开启时强制保持
+                self.request("PUT", "/accounts/\(self.id)/cloudfront/" + enc(did), vv) { x in
                     self.toast(jobj(x).optString("message"))
                     self.refresh()
                 }

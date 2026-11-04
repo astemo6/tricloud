@@ -15,8 +15,18 @@ extension AccountPage {
             if noCache { c.muted("尚无缓存：将在 " + b.optString("next_refresh") + " 自动查询，或手动刷新（收费）") }
             if self.prov == "aws" {
                 c.muted("AWS 每月仅 15 号与月末自动查询（$0.01/次）。下次：" + b.optString("next_refresh") + "，本月已调用 \(b.optInt("ce_calls_this_month")) 次")
-                c.row().button("手动刷新（约 $0.02）") {
+                let mc = b.optJSONObject("manual_ce")
+                c.muted("本月手动刷新：已用 \(mc?.optInt("used") ?? 0) / 上限 \(mc?.optInt("budget") ?? 2) 次调用")
+                let br = c.row()
+                br.button("手动刷新（约 $0.02）") {
                     self.confirm("手动刷新", "将调用 Cost Explorer API（$0.01/次）") { self.header(); self.billing(true) }
+                }
+                br.button("增加次数") {
+                    self.form("增加手动刷新次数", nil, [Field.num("add", "增加次数（1–20 次调用）", "2")], "保存") { vals in
+                        let n = Int(vals.optString("add")) ?? -1
+                        if n < 1 || n > 20 { self.toast("❌ 请输入 1–20 的整数"); return }
+                        self.post("/accounts/\(self.id)/billing/allowance", ["add": n]) { _ in self.header(); self.billing(false) }
+                    }
                 }
             }
             let s = self.card("按服务")

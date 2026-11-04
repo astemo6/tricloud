@@ -1103,3 +1103,16 @@
 "请输入 6 位 Telegram 验证码" = "Enter the 6-digit Telegram code";
 "已开始切换，可以关闭窗口，进度见任务日志" = "Switch started; you can close this window. Progress is in the task log.";
 "切换受限 API" = "Switch to restricted API";
+"HTTP 回源端口" = "HTTP origin port";
+"HTTPS 回源端口" = "HTTPS origin port";
+"源站 IP 类型" = "Origin IP type";
+"IPv4（默认）" = "IPv4 (default)";
+"IPv6 only" = "IPv6 only";
+"双栈" = "Dual-stack";
+"WebSocket 节点模式" = "WebSocket node mode";
+"WebSocket 节点模式（已开启，不可关闭）" = "WebSocket node mode (on, cannot be turned off)";
+"部署约 5~15 分钟；默认与 v1.4 相同（不缓存 + 全部边缘节点）。开启后禁用缓存、转发全部请求头，适合 ws 节点套 CloudFront；回源端口只能是 80、443 或 1024–65535。" = "Deployment takes ~5–15 min; defaults match v1.4 (no caching + all edge locations). When on: caching disabled and all viewer headers forwarded — for fronting WebSocket proxy nodes with CloudFront. Origin ports must be 80, 443, or 1024–65535.";
+"保存后重新部署，约几分钟生效。开启后禁用缓存、转发全部请求头，适合 ws 节点套 CloudFront；回源端口只能是 80、443 或 1024–65535。" = "Redeploys after saving; takes effect in a few minutes. When on: caching disabled and all viewer headers forwarded — for fronting WebSocket proxy nodes with CloudFront. Origin ports must be 80, 443, or 1024–65535.";
+"增加次数" = "Add calls";
+"增加手动刷新次数" = "Add manual refresh calls";
+"增加次数（1–20 次调用）" = "Calls to add (1–20)";

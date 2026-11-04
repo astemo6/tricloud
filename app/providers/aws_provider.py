@@ -746,9 +746,9 @@ class AWSProvider(AWSMore, AWSCredit):
         - 缓存：key = f"cf_traffic_{acc_id}"；get_setting 读到 {"ts": epoch, "data": {...}} 且 time.time()-ts < 3600 时直接返回 data。缓存读写都包 try/except，失败不影响主流程。
         - 主流程包 try/except：任何异常 → 返回 {"items": {}, "fetched_at": now_iso, "error": str(e)}，绝不抛异常。
         - 数据：dists = self.cf_list()；starts = self._cf_sub_starts()；cw = self.c("cloudwatch", "us-east-1")。
-        - 每个分发：period_start, basis = _cf_period_start(plan, starts.get(id), now)；对 BytesDownloaded / BytesUploaded 各调一次 cw.get_metric_statistics(...)，Sum 累加后 int()。
+        - 每个分发：period_start, basis = _cf_period_start(plan, starts.get(id), now)；StartTime 取 min(period_start, now-30d) 调两次 cw.get_metric_statistics(...)，按 Timestamp 分别累加周期流量（down/up/total）与近 30 天流量（total30d）。
         - 单个分发异常：跳过该分发、把首个错误记进结果顶层 "error" 字段；有任何 error 时不写缓存。
-        - item = {"down": int, "up": int, "total": down+up, "quota_bytes": 额度表.get(plan), "plan": plan, "period_start": period_start.isoformat(), "period_basis": basis}。
+        - item = {"down": int, "up": int, "total": down+up, "total30d": int, "quota_bytes": 额度表.get(plan), "plan": plan, "period_start": period_start.isoformat(), "period_basis": basis}。
         - 成功（无 error）时 set_setting 写缓存 {"ts": time.time(), "data": result}。
         - 只能用 get_metric_statistics，禁止 get_metric_data。
         """
@@ -762,6 +762,7 @@ class AWSProvider(AWSMore, AWSCredit):
             pass
 
         now = dt.datetime.now(dt.timezone.utc)
+        since30 = now - dt.timedelta(days=30)
         now_iso = now.isoformat()
 
         try:
@@ -778,10 +779,11 @@ class AWSProvider(AWSMore, AWSCredit):
                 plan = d.get("plan")
                 try:
                     period_start, basis = self._cf_period_start(plan, starts.get(did), now)
+                    win_start = min(period_start, since30)
                     r_down = cw.get_metric_statistics(
                         Namespace="AWS/CloudFront",
                         MetricName="BytesDownloaded",
-                        StartTime=period_start,
+                        StartTime=win_start,
                         EndTime=now,
                         Period=86400,
                         Statistics=["Sum"],
@@ -793,7 +795,7 @@ class AWSProvider(AWSMore, AWSCredit):
                     r_up = cw.get_metric_statistics(
                         Namespace="AWS/CloudFront",
                         MetricName="BytesUploaded",
-                        StartTime=period_start,
+                        StartTime=win_start,
                         EndTime=now,
                         Period=86400,
                         Statistics=["Sum"],
@@ -802,14 +804,21 @@ class AWSProvider(AWSMore, AWSCredit):
                             {"Name": "Region", "Value": "Global"},
                         ],
                     )
-                    down = int(sum(dp.get("Sum", 0) for dp in r_down.get("Datapoints", [])))
-                    up = int(sum(dp.get("Sum", 0) for dp in r_up.get("Datapoints", [])))
+                    dps_down = r_down.get("Datapoints", [])
+                    dps_up = r_up.get("Datapoints", [])
+                    down = int(sum(dp.get("Sum", 0) for dp in dps_down if dp.get("Timestamp") is not None and dp.get("Timestamp") >= period_start))
+                    up = int(sum(dp.get("Sum", 0) for dp in dps_up if dp.get("Timestamp") is not None and dp.get("Timestamp") >= period_start))
                     total = down + up
+                    total30d = int(
+                        sum(dp.get("Sum", 0) for dp in dps_down if dp.get("Timestamp") is not None and dp.get("Timestamp") >= since30)
+                        + sum(dp.get("Sum", 0) for dp in dps_up if dp.get("Timestamp") is not None and dp.get("Timestamp") >= since30)
+                    )
                     quota_bytes = CF_TRAFFIC_QUOTA_BYTES.get(plan)
                     items[did] = {
                         "down": down,
                         "up": up,
                         "total": total,
+                        "total30d": total30d,
                         "quota_bytes": quota_bytes,
                         "plan": plan,
                         "period_start": period_start.isoformat(),

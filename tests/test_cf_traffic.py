@@ -100,8 +100,10 @@ with mock_aws():
     ok("scenario 1: E123 up == 1000000000", e123_1.get("up") == 1000000000)
     ok("scenario 1: E123 total == 4000000000", e123_1.get("total") == 4000000000)
     ok("scenario 1: E123 quota_bytes == 100*1024**3", e123_1.get("quota_bytes") == 100 * 1024**3)
+    ok("scenario 1: E123 total30d == 4000000000", e123_1.get("total30d") == 4000000000)
     ok("scenario 1: E123 period_basis == 'month'", e123_1.get("period_basis") == "month")
     ok("scenario 1: E456 quota_bytes is None", e456_1.get("quota_bytes") is None)
+    ok("scenario 1: E456 total30d == 700000000", e456_1.get("total30d") == 700000000)
 
     # 场景2 缓存命中
     def boom(*args, **kwargs):
@@ -132,6 +134,7 @@ with mock_aws():
     else:
         ok("scenario 3: period_start.day matches clamped sub_start.day", False)
     ok("scenario 3: total remains 4000000000", e123_3.get("total") == 4000000000)
+    ok("scenario 3: E123 total30d == 4000000000", e123_3.get("total30d") == 4000000000)
 
     # 场景4 无权限不抛
     p4 = AWSProvider({"access_key": "testing", "secret_key": "testing", "region": "us-east-1"})
@@ -173,6 +176,102 @@ with mock_aws():
         "scenario 5.3: PAYGO -> (2026-11-01, 'month')",
         res5_3 == (dt.datetime(2026, 11, 1, 0, 0, 0, tzinfo=dt.timezone.utc), "month"),
     )
+
+    # 场景6 套餐，假 CW 精确时间戳
+    p6 = AWSProvider({"access_key": "testing", "secret_key": "testing", "region": "us-east-1"})
+    p6.cf_list = lambda: [{"id": "E789", "plan": "FREE"}]
+    d5 = now - dt.timedelta(days=5)
+    target_d = d5.day
+    sub_start_6 = None
+    for k in (1, 2, 3):
+        m_cand = now.month - k
+        y_cand = now.year
+        while m_cand <= 0:
+            m_cand += 12
+            y_cand -= 1
+        if target_d <= calendar.monthrange(y_cand, m_cand)[1]:
+            sub_start_6 = dt.datetime(y_cand, m_cand, target_d, 0, 0, 0, tzinfo=dt.timezone.utc)
+            break
+    p6._cf_sub_starts = lambda: {"E789": sub_start_6}
+    period_start_6, _ = AWSProvider._cf_period_start("FREE", sub_start_6, now)
+
+    dps_down_6 = [
+        {"Timestamp": period_start_6 + dt.timedelta(days=1), "Sum": 1000},
+        {"Timestamp": period_start_6 - dt.timedelta(days=2), "Sum": 2000},
+        {"Timestamp": now - dt.timedelta(days=31), "Sum": 4000},
+    ]
+    dps_up_6 = [
+        {"Timestamp": period_start_6 + dt.timedelta(days=2), "Sum": 100},
+        {"Timestamp": period_start_6 - dt.timedelta(days=1), "Sum": 200},
+    ]
+
+    class FakeCW6:
+        def get_metric_statistics(self, **kw):
+            m = kw.get("MetricName")
+            if m == "BytesDownloaded":
+                return {"Datapoints": dps_down_6}
+            elif m == "BytesUploaded":
+                return {"Datapoints": dps_up_6}
+            return {"Datapoints": []}
+
+    p6.c = lambda *args, **kwargs: FakeCW6()
+
+    res6 = p6.cf_traffic(904)
+    e789 = res6.get("items", {}).get("E789", {})
+
+    ok("scenario 6: down == 1000", e789.get("down") == 1000)
+    ok("scenario 6: up == 100", e789.get("up") == 100)
+    ok("scenario 6: total == 1100", e789.get("total") == 1100)
+    ok("scenario 6: total30d == 3300", e789.get("total30d") == 3300)
+    ok("scenario 6: pre-period datapoints (2000+200) in total30d not in total", (e789.get("total30d") - e789.get("total")) == 2200)
+    ok("scenario 6: 31d-old datapoint (4000) excluded from both total and total30d", e789.get("total30d") == 3300 and e789.get("total") == 1100)
+
+    # 场景7 按量 PAYGO，假 CW 同上法
+    p7 = AWSProvider({"access_key": "testing", "secret_key": "testing", "region": "us-east-1"})
+    p7.cf_list = lambda: [{"id": "E321", "plan": "PAYGO"}]
+    p7._cf_sub_starts = lambda: {}
+
+    period_start_7 = dt.datetime(now.year, now.month, 1, 0, 0, 0, tzinfo=dt.timezone.utc)
+    since30_7 = now - dt.timedelta(days=30)
+
+    raw_down_7 = [
+        (now - dt.timedelta(days=1), 500),
+        (now - dt.timedelta(days=15), 700),
+        (now - dt.timedelta(days=32), 900),
+    ]
+    raw_up_7 = [
+        (now - dt.timedelta(days=2), 50),
+        (now - dt.timedelta(days=15), 70),
+    ]
+
+    exp_down_7 = sum(v for ts, v in raw_down_7 if ts >= period_start_7)
+    exp_up_7 = sum(v for ts, v in raw_up_7 if ts >= period_start_7)
+    exp_total_7 = exp_down_7 + exp_up_7
+    exp_30d_7 = sum(v for ts, v in raw_down_7 if ts >= since30_7) + sum(v for ts, v in raw_up_7 if ts >= since30_7)
+
+    dps_down_7 = [{"Timestamp": ts, "Sum": v} for ts, v in raw_down_7]
+    dps_up_7 = [{"Timestamp": ts, "Sum": v} for ts, v in raw_up_7]
+
+    class FakeCW7:
+        def get_metric_statistics(self, **kw):
+            m = kw.get("MetricName")
+            if m == "BytesDownloaded":
+                return {"Datapoints": dps_down_7}
+            elif m == "BytesUploaded":
+                return {"Datapoints": dps_up_7}
+            return {"Datapoints": []}
+
+    p7.c = lambda *args, **kwargs: FakeCW7()
+
+    res7 = p7.cf_traffic(905)
+    e321 = res7.get("items", {}).get("E321", {})
+
+    ok("scenario 7: down == exp_down", e321.get("down") == exp_down_7)
+    ok("scenario 7: up == exp_up", e321.get("up") == exp_up_7)
+    ok("scenario 7: total == exp_total", e321.get("total") == exp_total_7)
+    ok("scenario 7: total30d == exp_30d", e321.get("total30d") == exp_30d_7)
+    ok("scenario 7: period_basis == 'month'", e321.get("period_basis") == "month")
+    ok("scenario 7: quota_bytes is None", e321.get("quota_bytes") is None)
 
 passed = sum(1 for _, ok_ in R if ok_)
 total = len(R)

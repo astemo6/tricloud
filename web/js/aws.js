@@ -184,7 +184,7 @@ export async function tabCloudFront(acc, box) {
     const items = (tr && tr.items) || {};
     box.querySelectorAll("[data-cftraffic]").forEach((td) => {
       const it = items[td.dataset.cftraffic];
-      if (it) td.innerHTML = `${cfTrafficText(it)}<div class="muted">↓ ${cfBytes(it.down)} · ↑ ${cfBytes(it.up)}</div>`;
+      if (it) td.innerHTML = `${cfTrafficText(it)}<div class="muted">↓ ${cfBytes(it.down)} · ↑ ${cfBytes(it.up)}</div>${it.total30d != null ? `<div class="muted">${t("aws.cfLast30d", { val: cfBytes(it.total30d) })}</div>` : ""}`;
     });
     const note = box.querySelector("[data-cftraffic-note]");
     if (note && tr && tr.fetched_at) {

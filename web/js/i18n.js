@@ -36,7 +36,7 @@ export const STR = {
     "core.ov.lsPartial": "（部分区域失败）", "core.ov.queryFailed": "查询失败",
     "core.ov.regionsFailed": "{n} 个区域查询失败",
     "core.acc.noMachines": "无机器", "core.acc.noMachinesDefault": "无机器 · 默认 {d}",
-    "core.acc.defaultRegion": "{d}（默认区域）",
+    "core.acc.defaultRegion": "{d}（默认区域）", "core.acc.denied": "权限被拒",
     "core.ls.unsupported": "Lightsail 不支持 {from}，已切换到 {to}",
     // 任务抽屉
     "task.drawer.title": "任务与实时日志", "task.all": "全部任务", "task.recent": "最近任务",
@@ -848,7 +848,7 @@ export const STR = {
     "core.ov.lsPartial": " (partial region failure)", "core.ov.queryFailed": "Query failed",
     "core.ov.regionsFailed": "{n} region queries failed",
     "core.acc.noMachines": "No instances", "core.acc.noMachinesDefault": "No instances · default {d}",
-    "core.acc.defaultRegion": "{d} (default)",
+    "core.acc.defaultRegion": "{d} (default)", "core.acc.denied": "Access denied",
     "core.ls.unsupported": "Lightsail is unavailable in {from}, switched to {to}",
     // task drawer
     "task.drawer.title": "Tasks & live logs", "task.all": "All tasks", "task.recent": "Recent tasks",

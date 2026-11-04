@@ -89,12 +89,22 @@ def remember(acc_id, data, now=None):
             have = {r["region"] for r in rows}
             rows += [r for r in old.get("regions") or [] if r.get("region") in failed and r.get("region") not in have]
             rows.sort(key=lambda r: (-r["count"], -r["running"], r["region"]))
-        if old.get("regions") == rows and bool(old.get("partial")) == bool(failed) and now - int(old.get("ts") or 0) < HINT_MIN_WRITE:
+        if not old.get("denied") and old.get("regions") == rows and bool(old.get("partial")) == bool(failed) and now - int(old.get("ts") or 0) < HINT_MIN_WRITE:
             return old
         at = str(data.get("updated_at") or services.now_local().strftime("%Y-%m-%d %H:%M"))[:16]
         allh[str(acc_id)] = rec = {"regions": rows, "ts": now, "at": at, "partial": bool(failed)}
         core.set_setting(HINT_KEY, allh)
         return rec
+
+
+def remember_denied(acc_id):
+    """AWS 机器扫描因权限被拒（UnauthorizedOperation / AccessDenied）全面失败时，持久化 denied 标记。"""
+    with _hint_lock:
+        allh = _hints_all()
+        allh[str(acc_id)] = {"regions": [], "ts": int(time.time()),
+                             "at": services.now_local().strftime("%Y-%m-%d %H:%M"),
+                             "partial": False, "denied": True}
+        core.set_setting(HINT_KEY, allh)
 
 
 def forget(acc_id):
@@ -109,10 +119,12 @@ def hint_fields(acc_id, allh=None, now=None):
     """GET /api/accounts 每行附加的字段：machine_regions = None（还没扫描过）/ [] （扫描过、没有机器）/ 区域列表。"""
     rec = (allh if allh is not None else _hints_all()).get(str(acc_id))
     if not rec:
-        return {"machine_regions": None, "machine_regions_at": None, "machine_regions_stale": True}
+        return {"machine_regions": None, "machine_regions_at": None, "machine_regions_stale": True,
+                "machine_regions_denied": False}
     age = (now if now is not None else time.time()) - int(rec.get("ts") or 0)
     return {"machine_regions": rec.get("regions") or [], "machine_regions_at": rec.get("at"),
-            "machine_regions_stale": bool(age >= FULL_TTL or rec.get("partial"))}
+            "machine_regions_stale": bool(age >= FULL_TTL or rec.get("partial")),
+            "machine_regions_denied": bool(rec.get("denied"))}
 
 
 def machine_region(acc_id):
@@ -124,6 +136,13 @@ def machine_region(acc_id):
 # ---------------- AWS ----------------
 def _has(row):
     return bool(row.get("ec2") or row.get("lightsail"))
+
+
+def _all_denied(rows):
+    scanned = [r for r in rows if not r.get("not_enabled")]
+    if not scanned:
+        return False
+    return all(bool(r.get("ec2_error")) and ("UnauthorizedOperation" in str(r["ec2_error"]) or "AccessDenied" in str(r["ec2_error"])) for r in scanned)
 
 
 def aws_full(acc_id, refresh=False):
@@ -253,8 +272,16 @@ def summary(acc_id, refresh=False):
             return dict(c["data"], cached=True)
         if pv == "aws":
             rows, scope = _aws_rows(acc, refresh)
-            data = dict(summarize_aws(rows, acc.get("region")), scope=scope,
-                        full_scan_at=(_full.get(acc_id) or {}).get("updated_at"))
+            try:
+                data = dict(summarize_aws(rows, acc.get("region")), scope=scope,
+                            full_scan_at=(_full.get(acc_id) or {}).get("updated_at"))
+            except RuntimeError:
+                if _all_denied(rows):
+                    try:
+                        remember_denied(acc_id)
+                    except Exception:
+                        pass
+                raise
         else:
             data = dict(_oci(acc) if pv == "oci" else _azure(acc), scope="all")
         data["regions"].sort(key=lambda r: (-r["count"], r["region"]))

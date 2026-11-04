@@ -193,7 +193,8 @@ const _t = (k, v) => {
   if (typeof window !== "undefined" && window.TCI18N) return window.TCI18N.t(k, v);
   let s = { "core.regions.brief": "{city} 等 {n} 个区域", "core.ov.count": "{total} 台（运行 {running}）",
     "core.ov.lsPartial": "（部分区域失败）", "core.ov.queryFailed": "查询失败", "core.ov.regionsFailed": "{n} 个区域查询失败",
-    "core.acc.noMachines": "无机器", "core.acc.noMachinesDefault": "无机器 · 默认 {d}", "core.acc.defaultRegion": "{d}（默认区域）" }[k] || k;
+    "core.acc.noMachines": "无机器", "core.acc.noMachinesDefault": "无机器 · 默认 {d}", "core.acc.defaultRegion": "{d}（默认区域）",
+    "core.acc.denied": "权限被拒" }[k] || k;
   for (const x in (v || {})) s = s.replaceAll("{" + x + "}", v[x]);
   return s;
 };
@@ -244,8 +245,9 @@ export const overviewCount = (o) => {
 // 机器最多的区域（Azure 按订阅管理，不用区域）
 export const machineRegion = (acc) => { const l = acc && acc.provider !== "azure" && acc.machine_regions; return l && l.length ? l[0].region : ""; };
 // 账号列表的区域文字：有机器 →「ap-northeast-1 · 东京」/「东京 等 2 个区域」；没有机器 →「无机器 · 默认 us-east-1 · 弗吉尼亚北部」；
-// 还没扫描过 →「us-east-1 · 弗吉尼亚北部（默认区域）」。Azure 没有默认区域：没机器显示「无机器」，没扫描过显示空
+// 还没扫描过 →「us-east-1 · 弗吉尼亚北部（默认区域）」；权限被拒 →「权限被拒」。Azure 没有默认区域：没机器显示「无机器」，没扫描过显示空
 export const accountRegionText = (acc) => {
+  if (acc.machine_regions_denied) return _t("core.acc.denied");
   const l = acc.machine_regions;
   if (l && l.length) return regionsBrief(l);
   if (acc.provider === "azure") return l ? _t("core.acc.noMachines") : "";
@@ -259,6 +261,7 @@ export function applyOverview(acc, o) {
   if (!acc || !o || !Array.isArray(o.regions)) return;
   acc.machine_regions = o.regions.filter((r) => r.count > 0).map((r) => ({ region: r.region, count: r.count, running: r.running || 0 }))
     .sort((a, b) => b.count - a.count || b.running - a.running || (a.region < b.region ? -1 : a.region > b.region ? 1 : 0));
+  acc.machine_regions_denied = false;
   acc.machine_regions_stale = !!(o.errors && o.errors.length);
 }
 // 账号列表懒加载：还没记录 / 记录过期的账号，一次只查一个 /overview（后端有缓存与每账号锁），查完回调更新那一行

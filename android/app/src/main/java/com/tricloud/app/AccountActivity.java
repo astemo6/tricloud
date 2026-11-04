@@ -19,6 +19,7 @@ public class AccountActivity extends BaseActivity {
     private String prov, tab;
     private int id;
     private JSONObject defaults = new JSONObject();
+    private boolean cfInvBtn;
 
     static String[][] tabs(String p) {
         switch (p) {
@@ -62,7 +63,7 @@ public class AccountActivity extends BaseActivity {
             @Override public void onTabUnselected(TabLayout.Tab t) { }
             @Override public void onTabReselected(TabLayout.Tab t) { refresh(); }
         });
-        Api.get(this, "/settings", r -> { defaults = Api.obj(r).optJSONObject("default_create"); if (defaults == null) defaults = new JSONObject(); });
+        Api.get(this, "/settings", r -> { defaults = Api.obj(r).optJSONObject("default_create"); if (defaults == null) defaults = new JSONObject(); cfInvBtn = Api.obj(r).optBoolean("cf_invalidate_btn"); });
         Api.quiet("/scripts", r -> scripts = Api.arr(r));
         refresh();
     }
@@ -664,28 +665,65 @@ public class AccountActivity extends BaseActivity {
         return i >= 0 ? cfTierNames()[i] : d.optString("plan");
     }
 
+    /** 与 Web cfBytes 等价：1024 进制、1 位小数并去掉尾随 .0。 */
+    static String cfBytes(long b) {
+        double v = b;
+        String[] u = {"B", "KB", "MB", "GB", "TB"};
+        int i = 0;
+        while (v >= 1024 && i < 4) { v /= 1024; i++; }
+        if (i == 0) return b + " B";
+        String s = String.format(Locale.US, "%.1f", v);
+        if (s.endsWith(".0")) s = s.substring(0, s.length() - 2);
+        return s + " " + u[i];
+    }
+
     private void cloudfront() {
-        bigButton(getString(R.string.s0190), v -> form(getString(R.string.s0191), getString(R.string.s0192), Arrays.asList(
+        bigButton(getString(R.string.s0190), v -> form(getString(R.string.s0191), getString(R.string.s0192) + "\n" + getString(R.string.s1247), Arrays.asList(
                 Field.text("origin", getString(R.string.s0193), ""),
                 Field.select("origin_protocol", getString(R.string.s0194), "http-only", new String[]{"http-only", "https-only", "match-viewer"}, new String[]{"HTTP", "HTTPS", getString(R.string.s0195)}),
                 Field.select("price_class", getString(R.string.s0196), "all", new String[]{"all", "200", "100"}, new String[]{getString(R.string.s0197), getString(R.string.s0198), getString(R.string.s0199)}),
+                Field.select("plan_tier", getString(R.string.s0155), "PAYGO", CF_TIERS, cfTierNames()),
                 Field.select("cache_mode", getString(R.string.s0200), "disabled", new String[]{"disabled", "optimized"}, new String[]{getString(R.string.s0201), getString(R.string.s0202)}),
                 Field.check("compress", getString(R.string.s0203), true),
+                Field.num("http_port", getString(R.string.s1240), "80"),
+                Field.num("https_port", getString(R.string.s1241), "443"),
+                Field.select("ip_address_type", getString(R.string.s1242), "ipv4", new String[]{"ipv4", "ipv6", "dualstack"}, new String[]{getString(R.string.s1243), getString(R.string.s1244), getString(R.string.s1245)}),
+                Field.check("ws_mode", getString(R.string.s1246), false),
                 Field.text("comment", getString(R.string.s0204), "")), getString(R.string.s0142), vals -> {
-            try { Api.post(this, "/accounts/" + id + "/cloudfront", vals.put("op", "create"), x -> { toast(getString(R.string.s0205, Api.obj(x).optString("domain"))); refresh(); }); }
+            try { Api.post(this, "/accounts/" + id + "/cloudfront", vals.put("op", "create"), x -> {
+                JSONObject o = Api.obj(x);
+                toast(getString(R.string.s0205, o.optString("domain")));
+                refresh();
+                // 选了包月套餐：分发建好后接着订阅（同 Web）；付费档先确认，订阅失败只提示、不影响已建分发
+                String tier = vals.optString("plan_tier");
+                if (tier.isEmpty() || "PAYGO".equals(tier)) return;
+                boolean paid = !"FREE".equals(tier);
+                int ti = Arrays.asList(CF_TIERS).indexOf(tier);
+                Runnable go = () -> {
+                    try { Api.post(this, "/accounts/" + id + "/cloudfront/plan", new JSONObject().put("distribution_id", o.optString("id")).put("plan_tier", tier).put("confirm", paid),
+                            y -> { toast(Api.obj(y).optString("message")); refresh(); }); }
+                    catch (Exception ignored) { }
+                };
+                if (paid) confirm(getString(R.string.s0235), getString(R.string.s0236, o.optString("id"), ti >= 0 ? cfTierNames()[ti] : tier), go);
+                else go.run();
+            }); }
             catch (Exception ignored) { }
         }));
         Api.get(this, "/accounts/" + id + "/cloudfront", r -> {
             JSONArray a = Api.arr(r);
             if (a.length() == 0) muted(card(getString(R.string.s0206)), "");
+            List<String> cfDids = new ArrayList<>();
+            List<LinearLayout> cfCards = new ArrayList<>();
             for (int i = 0; i < a.length(); i++) {
                 JSONObject d = a.optJSONObject(i);
                 String did = d.optString("id");
                 boolean en = d.optBoolean("enabled");
                 LinearLayout c = card(did + "  [" + d.optString("status") + "]");
+                cfDids.add(did);
+                cfCards.add(c);
                 text(c, getString(R.string.s0209, d.optString("domain"), join(d.optJSONArray("origins")), (en ? getString(R.string.s0207) : getString(R.string.s0208)), cfPlanName(d), str(d, "price_class", "-"), (d.optString("comment").isEmpty() ? "" : "\n" + d.optString("comment"))), 13, false);
                 LinearLayout row = row(c);
-                button(row, getString(R.string.s0210), v -> cfInvalidate(did));
+                if (cfInvBtn) button(row, getString(R.string.s0210), v -> cfInvalidate(did));
                 button(row, getString(R.string.s0211), v -> cfEdit(did));
                 button(row, en ? getString(R.string.s0212) : getString(R.string.s0213), v -> confirm(en ? getString(R.string.s0214) : getString(R.string.s0215), en ? getString(R.string.s0216) : getString(R.string.s0217, did), () -> {
                     try { Api.post(this, "/accounts/" + id + "/cloudfront/toggle", new JSONObject().put("distribution_id", did).put("enabled", !en), x -> { toast(Api.obj(x).optString("message")); refresh(); }); }
@@ -700,6 +738,18 @@ public class AccountActivity extends BaseActivity {
                     refresh();
                 })));
             }
+            // 已用流量：异步给每个分发卡片补一行（拉不到就静默不显示，同 Web）
+            Api.quiet("/accounts/" + id + "/cloudfront/traffic", tr -> {
+                JSONObject items = Api.obj(tr).optJSONObject("items");
+                if (items == null) return;
+                for (int i = 0; i < cfDids.size(); i++) {
+                    JSONObject it = items.optJSONObject(cfDids.get(i));
+                    if (it == null) continue;
+                    long total = it.optLong("total"), quota = it.optLong("quota_bytes");
+                    String main = quota > 0 ? cfBytes(total) + " / " + cfBytes(quota) : cfBytes(total);
+                    muted(cfCards.get(i), getString(R.string.s1249, main) + "  " + getString(R.string.s1250, cfBytes(it.optLong("down")), cfBytes(it.optLong("up"))));
+                }
+            });
         });
     }
 
@@ -724,8 +774,16 @@ public class AccountActivity extends BaseActivity {
                     Field.text("default_root_object", getString(R.string.s0231), c.optString("default_root_object"))));
             if (!c.optString("origin_protocol").isEmpty())
                 f.add(Field.select("origin_protocol", getString(R.string.s0194), c.optString("origin_protocol"), new String[]{"http-only", "https-only", "match-viewer"}, null));
-            form(getString(R.string.s0232, did), getString(R.string.s0233), f, getString(R.string.s0089), v ->
-                    Api.async(this, "PUT", "/accounts/" + id + "/cloudfront/" + Api.enc(did), v, x -> { toast(Api.obj(x).optString("message")); refresh(); }));
+            int hp = c.optInt("http_port"), sp = c.optInt("https_port");
+            f.add(Field.num("http_port", getString(R.string.s1240), hp > 0 ? String.valueOf(hp) : "80"));
+            f.add(Field.num("https_port", getString(R.string.s1241), sp > 0 ? String.valueOf(sp) : "443"));
+            f.add(Field.select("ip_address_type", getString(R.string.s1242), str(c, "ip_address_type", "ipv4"), new String[]{"ipv4", "ipv6", "dualstack"}, new String[]{getString(R.string.s1243), getString(R.string.s1244), getString(R.string.s1245)}));
+            boolean wsOn = c.optBoolean("ws_mode");
+            f.add(Field.check("ws_mode", getString(wsOn ? R.string.s1248 : R.string.s1246), wsOn));
+            form(getString(R.string.s0232, did), getString(R.string.s0233) + "\n" + getString(R.string.s1247), f, getString(R.string.s0089), v -> {
+                    if (wsOn) { try { v.put("ws_mode", true); } catch (Exception ignored) { } }   // ws 只能开不能关（后端同语义）：已开启时强制保持
+                    Api.async(this, "PUT", "/accounts/" + id + "/cloudfront/" + Api.enc(did), v, x -> { toast(Api.obj(x).optString("message")); refresh(); });
+            });
         });
     }
 
@@ -1219,8 +1277,18 @@ public class AccountActivity extends BaseActivity {
             boolean aws = "aws".equals(prov);
             if (aws) {
                 muted(c, getString(R.string.s0368, b.optString("next_refresh"), b.optInt("ce_calls_this_month")));
+                JSONObject mc = b.optJSONObject("manual_ce");
+                muted(c, getString(R.string.s1251, mc == null ? 0 : mc.optInt("used"), mc == null ? 2 : mc.optInt("budget")));
                 LinearLayout rr = row(c);
                 button(rr, getString(R.string.s0369), v -> confirm(getString(R.string.s0370), getString(R.string.s0371), () -> { header(); billing(true); }));
+                button(rr, getString(R.string.s1252), v -> form(getString(R.string.s1253), null, Arrays.asList(
+                        Field.num("add", getString(R.string.s1254), "2")), getString(R.string.s0089), vals -> {
+                    int n = -1;
+                    try { n = Integer.parseInt(vals.optString("add")); } catch (Exception ignored) { }
+                    if (n < 1 || n > 20) { toast(getString(R.string.s1255)); return; }
+                    try { Api.post(this, "/accounts/" + id + "/billing/allowance", new JSONObject().put("add", n), x -> { header(); billing(false); }); }
+                    catch (Exception ignored) { }
+                }));
             }
             LinearLayout s = card(getString(R.string.s0372));
             JSONArray sv = b.optJSONArray("services");

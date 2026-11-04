@@ -1324,4 +1324,20 @@
     <string name="rapi_code_first">请输入 6 位 Telegram 验证码</string>
     <string name="rapi_started">已开始切换，可以关闭窗口，进度见任务日志</string>
     <string name="rapi_task_name">切换受限 API</string>
+    <string name="s1240">HTTP 回源端口</string>
+    <string name="s1241">HTTPS 回源端口</string>
+    <string name="s1242">源站 IP 类型</string>
+    <string name="s1243">IPv4（默认）</string>
+    <string name="s1244">IPv6 only</string>
+    <string name="s1245">双栈</string>
+    <string name="s1246">WebSocket 节点模式</string>
+    <string name="s1247">开启后禁用缓存、转发全部请求头，适合 ws 节点套 CloudFront；回源端口只能是 80、443 或 1024–65535。</string>
+    <string name="s1248">WebSocket 节点模式（已开启，不可关闭）</string>
+    <string name="s1249">已用流量：%1$s</string>
+    <string name="s1250">↓ %1$s · ↑ %2$s</string>
+    <string name="s1251">本月手动刷新：已用 %1$d / 上限 %2$d 次调用</string>
+    <string name="s1252">增加次数</string>
+    <string name="s1253">增加手动刷新次数</string>
+    <string name="s1254">增加次数（1–20 次调用）</string>
+    <string name="s1255">请输入 1–20 的整数</string>
 </resources>

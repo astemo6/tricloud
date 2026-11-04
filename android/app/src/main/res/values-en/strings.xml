@@ -1324,4 +1324,20 @@
     <string name="rapi_code_first">Enter the 6-digit Telegram code</string>
     <string name="rapi_started">Switch started; you can close this window. Progress is in the task log.</string>
     <string name="rapi_task_name">Switch to restricted API</string>
+    <string name="s1240">HTTP origin port</string>
+    <string name="s1241">HTTPS origin port</string>
+    <string name="s1242">Origin IP type</string>
+    <string name="s1243">IPv4 (default)</string>
+    <string name="s1244">IPv6 only</string>
+    <string name="s1245">Dual-stack</string>
+    <string name="s1246">WebSocket node mode</string>
+    <string name="s1247">When on: caching disabled and all viewer headers forwarded — for fronting WebSocket proxy nodes with CloudFront. Origin ports must be 80, 443, or 1024–65535.</string>
+    <string name="s1248">WebSocket node mode (on, cannot be turned off)</string>
+    <string name="s1249">Traffic used: %1$s</string>
+    <string name="s1250">↓ %1$s · ↑ %2$s</string>
+    <string name="s1251">Manual refreshes this month: %1$d used / %2$d calls allowed</string>
+    <string name="s1252">Add calls</string>
+    <string name="s1253">Add manual refresh calls</string>
+    <string name="s1254">Calls to add (1–20)</string>
+    <string name="s1255">Enter a whole number from 1 to 20</string>
 </resources>

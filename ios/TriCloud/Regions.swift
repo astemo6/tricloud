@@ -252,9 +252,10 @@ enum Regions {
         return m.isEmpty ? str(acc, "region", "") : m
     }
 
-    /// 账号列表的区域文字，与 core.js accountRegionText 相同：
+    /// 账号列表的区域文字，与 core.js accountRegionText 相同：权限被拒「权限被拒」（最高优先级）；
     /// 有机器「ap-northeast-1 · 东京」/「东京 等 2 个区域」；没有机器「无机器 · 默认 us-east-1 · 弗吉尼亚北部」；还没扫描过「us-east-1 · 弗吉尼亚北部（默认区域）」。
     static func accountText(_ acc: JObj) -> String {
+        if acc.optBoolean("machine_regions_denied") { return L10n.isEN ? "Access denied" : "权限被拒" }
         let l = machineRegions(acc)
         if let l = l, !l.isEmpty { return brief(l) }
         if acc.optString("provider") == "azure" { return l == nil ? "" : (L10n.isEN ? "No instances" : "无机器") }

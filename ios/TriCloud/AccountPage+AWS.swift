@@ -103,7 +103,7 @@ extension AccountPage {
                 }
             }
             // 已用流量：异步给每个分发卡片补一行（拉不到就静默不显示，同 Web）
-            Api.call("GET", "/accounts/\(id)/cloudfront/traffic", nil) { res in
+            Api.call("GET", "/accounts/\(self.id)/cloudfront/traffic", nil) { res in
                 guard self.cur(g) else { return }
                 switch res {
                 case .success(let tr):

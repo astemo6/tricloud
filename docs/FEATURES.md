@@ -118,5 +118,8 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 - 绑定域名：记录名只填前缀，自动补所选域名（`@` = 根域名，完整名仍可用），后端统一补全与校验。
 - App 切换语言立即生效（Android 重建页面栈停在设置页；iOS 已打开页面即时重绘）。
 
+## 1.6.1 build 31
+- App 功能补齐（Android / iOS）：CF 新建 / 编辑补双回源端口、创建选套餐、源站 IP 类型、WebSocket 节点模式（编辑只能开不能关）；分发已用流量显示；账单手动刷新次数显示 + 增加次数；App 缓存刷新按钮纳入 cf_invalidate_btn 开关（默认隐藏）。
+
 ## 1.6.1 build 30
 - OCI 一键切换受限 API（仅 OCI）：TG 验证码 + 强确认 → 后台任务创建 TriCloud 前缀的组 / 策略 / 用户和新 RSA 2048 Key，自检通过才替换面板凭证；失败回滚；云端原 Key 不删除不撤销。策略见 docs/api-credentials.md。

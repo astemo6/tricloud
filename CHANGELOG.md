@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.1（build 31）(2026-11-04)
+- 改进：Android / iOS 功能补齐，对齐网页版 2026-11-03/04 的 CloudFront 与账单更新。CloudFront 新建 / 编辑表单新增 HTTP / HTTPS 回源端口（分开）、新建时选包月套餐（付费档二次确认、订阅失败只提示）、源站 IP 类型（ipv4 / ipv6 / dualstack）、WebSocket 节点模式（编辑只能开不能关，后端同语义）；分发卡片异步显示本周期已用流量（有额度显示 已用 / 额度，附 ↓ 下行 · ↑ 上行）；AWS 账单页显示本月手动刷新已用 / 上限并新增「增加次数」入口（1–20，后端统一限额）；App 的「缓存刷新」按钮纳入 cf_invalidate_btn 设置开关，默认隐藏（与网页版一致）。
+- 版本：Android versionCode 31 / iOS build 31（versionName 1.6.1）。
+
 ## 1.6.1（build 30）(2026-10-30)
 - 新功能：OCI「一键切换受限 API」（仅 OCI，AWS / Azure 不变）。云账号页 OCI 账号新增「受限 API」按钮（Web / Android / iOS）：强确认（云端原 API Key 不删除不撤销需自行保管、新 Key 几分钟生效可关闭窗口、切换后不能管理 IAM / 身份域）+ Telegram 6 位验证码（5 分钟有效、最多输错 5 次、一次性；未绑定 TG 拒绝；API Token 调用 403）。后台任务用当前全权限 Key 预检（Default 域、有 IAM 管理权限）→ 在租户根区间创建 TriCloud 前缀的组 / 策略 / 用户（用户只允许 API Key）→ 内存生成 RSA 2048 上传公钥 → 最多约 10 分钟自检（实例、VCN、对象存储、Usage API 可用且 IAM 用户不可读）→ 通过才替换面板凭证并删除本地旧私钥；任一步失败 / 停止自动回滚本次创建的资源，旧凭证不变。账号显示「🔒 受限 API」，TG 账号详情显示受限状态；受限账号订阅区域给出友好提示。策略语句集中在 `app/providers/oci_restrict.py`，说明见 docs/api-credentials.md。
 - 合入 GitHub master 195a7af（v1.6.1 / build 29、账号手动排序等用户提交）；修正 test_structure 路由数与 test_build27 版本断言。

@@ -723,6 +723,14 @@ public class AccountActivity extends BaseActivity {
                 cfCards.add(c);
                 text(c, getString(R.string.s0209, d.optString("domain"), join(d.optJSONArray("origins")), (en ? getString(R.string.s0207) : getString(R.string.s0208)), cfPlanName(d), str(d, "price_class", "-"), (d.optString("comment").isEmpty() ? "" : "\n" + d.optString("comment"))), 13, false);
                 LinearLayout row = row(c);
+                final String dom = d.optString("domain");
+                button(row, getString(R.string.s0500), v -> {
+                    android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (cm != null) cm.setPrimaryClip(android.content.ClipData.newPlainText("domain", dom));
+                    android.widget.Button b = (android.widget.Button) v;
+                    b.setText(getString(R.string.s0098));
+                    v.postDelayed(() -> b.setText(getString(R.string.s0500)), 1200);
+                });
                 if (cfInvBtn) button(row, getString(R.string.s0210), v -> cfInvalidate(did));
                 button(row, getString(R.string.s0211), v -> cfEdit(did));
                 button(row, en ? getString(R.string.s0212) : getString(R.string.s0213), v -> confirm(en ? getString(R.string.s0214) : getString(R.string.s0215), en ? getString(R.string.s0216) : getString(R.string.s0217, did), () -> {

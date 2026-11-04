@@ -717,11 +717,12 @@ public class AccountActivity extends BaseActivity {
             for (int i = 0; i < a.length(); i++) {
                 JSONObject d = a.optJSONObject(i);
                 String did = d.optString("id");
+                String cmt = d.optString("comment");
                 boolean en = d.optBoolean("enabled");
-                LinearLayout c = card(did + "  [" + d.optString("status") + "]");
+                LinearLayout c = card((cmt.isEmpty() ? did : cmt) + "  [" + d.optString("status") + "]");
                 cfDids.add(did);
                 cfCards.add(c);
-                text(c, getString(R.string.s0209, d.optString("domain"), join(d.optJSONArray("origins")), (en ? getString(R.string.s0207) : getString(R.string.s0208)), cfPlanName(d), str(d, "price_class", "-"), (d.optString("comment").isEmpty() ? "" : "\n" + d.optString("comment"))), 13, false);
+                text(c, getString(R.string.s0209, d.optString("domain"), join(d.optJSONArray("origins")), (en ? getString(R.string.s0207) : getString(R.string.s0208)), cfPlanName(d), str(d, "price_class", "-"), (cmt.isEmpty() ? "" : "\n" + did)), 13, false);
                 LinearLayout row = row(c);
                 final String dom = d.optString("domain");
                 button(row, getString(R.string.s0500), v -> {

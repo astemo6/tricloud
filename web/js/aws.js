@@ -159,14 +159,22 @@ export async function tabCloudFront(acc, box) {
     <td data-cftraffic="${esc(d.id)}">—</td>
     <td><button class="btn sm" data-cf="inv" data-id="${esc(d.id)}">${t("aws.cfInv")}</button> <button class="btn sm" data-cf="edit" data-id="${esc(d.id)}">${t("common.edit")}</button>
     <button class="btn sm" data-cf="toggle" data-id="${esc(d.id)}">${d.enabled ? t("aws.cfDisable") : t("aws.cfEnable")}</button> <button class="btn sm" data-cf="plan" data-id="${esc(d.id)}">${t("aws.cfPlan")}</button>
-    <button class="btn sm danger" data-cf="delete" data-id="${esc(d.id)}">${t("common.delete")}</button></td></tr>`).join("")}</table>` : `<div class="empty">${t("aws.cfNone")}</div>`;
+    <button class="btn sm danger" data-cf="delete" data-id="${esc(d.id)}">${t("common.delete")}</button></td></tr>`).join("")}</table><p class="muted" data-cftraffic-note></p>` : `<div class="empty">${t("aws.cfNone")}</div>`;
   box.querySelectorAll("[data-cf]").forEach((b) => (b.onclick = () => cfOp(acc, list.find((x) => x.id === b.dataset.id), b.dataset.cf, b, reload)));
   api(`/accounts/${acc.id}/cloudfront/traffic`).then((tr) => {
     const items = (tr && tr.items) || {};
     box.querySelectorAll("[data-cftraffic]").forEach((td) => {
       const it = items[td.dataset.cftraffic];
-      if (it) td.textContent = cfTrafficText(it);
+      if (it) td.innerHTML = `${cfTrafficText(it)}<div class="muted">↓ ${cfBytes(it.down)} · ↑ ${cfBytes(it.up)}</div>`;
     });
+    const note = box.querySelector("[data-cftraffic-note]");
+    if (note && tr && tr.fetched_at) {
+      const dt = new Date(tr.fetched_at);
+      if (!isNaN(dt.getTime())) {
+        const p2 = (n) => String(n).padStart(2, "0");
+        note.textContent = t("aws.cfTrafficAsOf", { time: `${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}` });
+      }
+    }
   }).catch(() => {});
 }
 export async function cfOp(acc, d, op, btn, reload) {

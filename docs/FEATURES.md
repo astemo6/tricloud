@@ -118,6 +118,9 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 - 绑定域名：记录名只填前缀，自动补所选域名（`@` = 根域名，完整名仍可用），后端统一补全与校验。
 - App 切换语言立即生效（Android 重建页面栈停在设置页；iOS 已打开页面即时重绘）。
 
+## 1.6.1 build 32
+- 账号列表副标题「权限被拒」（Android / iOS，与 Web 一致）：machine_regions_denied 为 true（机器扫描因实例接口权限被拒全面失败，如精简策略账号）时优先显示，不再混同于无机器 / 未扫描。
+
 ## 1.6.1 build 31
 - App 功能补齐（Android / iOS）：CF 新建 / 编辑补双回源端口、创建选套餐、源站 IP 类型、WebSocket 节点模式（编辑只能开不能关）；分发已用流量显示；账单手动刷新次数显示 + 增加次数；App 缓存刷新按钮纳入 cf_invalidate_btn 开关（默认隐藏）。
 

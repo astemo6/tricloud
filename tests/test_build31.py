@@ -1,6 +1,6 @@
 """build 31：双端 App 功能补齐（对齐 2026-11-03/04 网页版）。纯静态检查，不连任何真实云。
 覆盖：CF 创建/编辑表单新字段（双端口/创建选套餐/IPv6 回源/ws_mode）、分发已用流量、
-账单手动刷新次数 + 增加入口、缓存刷新按钮纳入 cf_invalidate_btn 开关、版本号 31。"""
+账单手动刷新次数 + 增加入口、缓存刷新按钮纳入 cf_invalidate_btn 开关、版本号 >= 31（双端一致）。"""
 import os, re, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -11,7 +11,8 @@ def ok(name, cond):
     else: F += 1; print("FAIL", name)
 def rd(*p): return open(os.path.join(ROOT, *p), encoding="utf-8").read()
 
-ok("version 31", "versionCode 31" in rd("android", "app", "build.gradle") and 'CURRENT_PROJECT_VERSION: "31"' in rd("ios", "project.yml"))
+_vc = int(re.search(r"versionCode (\d+)", rd("android", "app", "build.gradle")).group(1))
+ok("version >= 31 and Android == iOS", _vc >= 31 and f'CURRENT_PROJECT_VERSION: "{_vc}"' in rd("ios", "project.yml"))
 
 # ---------------- Android ----------------
 A = rd("android", "app", "src", "main", "java", "com", "tricloud", "app", "AccountActivity.java")

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.1（build 32）(2026-11-04)
+- 改进：账号列表副标题新增最高优先级一态「权限被拒」：后端汇总（GET /api/accounts）新增 machine_regions_denied 标记——机器扫描因实例接口权限被拒全面失败（如 AWS 精简策略账号没有 EC2 / Lightsail 查询权限）时为 true，Web / Android / iOS 三端副标题优先显示「权限被拒」（en: Access denied），与「无机器」「还没扫描过（默认区域）」区分开。
+- 版本：Android versionCode 32 / iOS build 32（versionName 1.6.1）。
+
 ## 1.6.1（build 31）(2026-11-04)
 - 改进：Android / iOS 功能补齐，对齐网页版 2026-11-03/04 的 CloudFront 与账单更新。CloudFront 新建 / 编辑表单新增 HTTP / HTTPS 回源端口（分开）、新建时选包月套餐（付费档二次确认、订阅失败只提示）、源站 IP 类型（ipv4 / ipv6 / dualstack）、WebSocket 节点模式（编辑只能开不能关，后端同语义）；分发卡片异步显示本周期已用流量（有额度显示 已用 / 额度，附 ↓ 下行 · ↑ 上行）；AWS 账单页显示本月手动刷新已用 / 上限并新增「增加次数」入口（1–20，后端统一限额）；App 的「缓存刷新」按钮纳入 cf_invalidate_btn 设置开关，默认隐藏（与网页版一致）。
 - 版本：Android versionCode 31 / iOS build 31（versionName 1.6.1）。

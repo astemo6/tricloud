@@ -1340,4 +1340,5 @@
     <string name="s1253">Add manual refresh calls</string>
     <string name="s1254">Calls to add (1–20)</string>
     <string name="s1255">Enter a whole number from 1 to 20</string>
+    <string name="s1256">Last 30 days %1$s</string>
 </resources>

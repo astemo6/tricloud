@@ -1340,4 +1340,5 @@
     <string name="s1253">增加手动刷新次数</string>
     <string name="s1254">增加次数（1–20 次调用）</string>
     <string name="s1255">请输入 1–20 的整数</string>
+    <string name="s1256">近30天 %1$s</string>
 </resources>

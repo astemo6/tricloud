@@ -748,6 +748,7 @@ public class AccountActivity extends BaseActivity {
                     long total = it.optLong("total"), quota = it.optLong("quota_bytes");
                     String main = quota > 0 ? cfBytes(total) + " / " + cfBytes(quota) : cfBytes(total);
                     muted(cfCards.get(i), getString(R.string.s1249, main) + "  " + getString(R.string.s1250, cfBytes(it.optLong("down")), cfBytes(it.optLong("up"))));
+                    if (it.has("total30d")) muted(cfCards.get(i), getString(R.string.s1256, cfBytes(it.optLong("total30d"))));
                 }
             });
         });

@@ -152,7 +152,7 @@ export async function tabCloudFront(acc, box) {
   let list;
   try { list = await api(`/accounts/${acc.id}/cloudfront`); } catch (e) { $("#t", box).textContent = "❌ " + e.message; return; }
   $("#t", box).innerHTML = list.length ? `<table><tr><th>${t("aws.cfColId")}</th><th>${t("aws.cfOriginCol")}</th><th>${t("common.status")}</th><th>${t("aws.cfColPlan")}</th><th>${t("aws.cfColTraffic")}</th><th>${t("inst.colOps")}</th></tr>
-    ${list.map((d) => `<tr><td><b>${esc(d.comment || d.id)}</b><br><code>${esc(d.domain)}</code>${d.aliases.length ? "<br>" + d.aliases.map(esc).join(", ") : ""}${d.comment ? `
+    ${list.map((d) => `<tr><td><b>${esc(d.comment || d.id)}</b><br><code>${esc(d.domain)}</code> <button class="btn sm" data-copydomain="${esc(d.domain)}">${t("common.copy")}</button>${d.aliases.length ? "<br>" + d.aliases.map(esc).join(", ") : ""}${d.comment ? `
     <div class="muted">${esc(d.id)}</div>` : ""}</td><td class="mono">${d.origins.map(esc).join("<br>")}</td>
     <td><span class="badge ${esc(d.status)}">${esc(d.status)}</span><br>${d.enabled ? t("aws.cfOn") : t("aws.cfOff")}</td>
     <td>${d.plan == null ? t("aws.cfUnknown") : esc(cfPlanLabel(d.plan))}<div class="muted">${esc(d.price_class || "-")}</div></td>
@@ -161,6 +161,25 @@ export async function tabCloudFront(acc, box) {
     <button class="btn sm" data-cf="toggle" data-id="${esc(d.id)}">${d.enabled ? t("aws.cfDisable") : t("aws.cfEnable")}</button> <button class="btn sm" data-cf="plan" data-id="${esc(d.id)}">${t("aws.cfPlan")}</button>
     <button class="btn sm danger" data-cf="delete" data-id="${esc(d.id)}">${t("common.delete")}</button></td></tr>`).join("")}</table><p class="muted" data-cftraffic-note></p>` : `<div class="empty">${t("aws.cfNone")}</div>`;
   box.querySelectorAll("[data-cf]").forEach((b) => (b.onclick = () => cfOp(acc, list.find((x) => x.id === b.dataset.id), b.dataset.cf, b, reload)));
+  box.querySelectorAll("[data-copydomain]").forEach((b) => (b.onclick = async () => {
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(b.dataset.copydomain);
+      ok = true;
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = b.dataset.copydomain;
+      document.body.appendChild(ta);
+      ta.select();
+      try { ok = document.execCommand("copy"); } catch {}
+      ta.remove();
+    }
+    if (ok) {
+      const orig = b.textContent;
+      b.textContent = t("guard.copied");
+      setTimeout(() => (b.textContent = orig), 1200);
+    }
+  }));
   api(`/accounts/${acc.id}/cloudfront/traffic`).then((tr) => {
     const items = (tr && tr.items) || {};
     box.querySelectorAll("[data-cftraffic]").forEach((td) => {

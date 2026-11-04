@@ -71,12 +71,13 @@ extension AccountPage {
             for i in 0..<a.count {
                 let d = a.obj(i)
                 let did = d.optString("id")
+                let cmt = d.optString("comment")
                 let en = d.optBoolean("enabled")
-                let c = self.card(did + "  [" + d.optString("status") + "]")
+                let c = self.card((cmt.isEmpty ? did : cmt) + "  [" + d.optString("status") + "]")
                 cards[did] = c
                 c.text(d.optString("domain") + "\n源站：" + join(d.optJSONArray("origins"))
                        + "\n" + (en ? "已启用" : "已停用") + " · " + AccountPage.cfPlanName(d) + " · 价格等级 " + str(d, "price_class", "-")
-                       + (d.optString("comment").isEmpty ? "" : "\n" + d.optString("comment")), 13)
+                       + (cmt.isEmpty ? "" : "\n" + did), 13)
                 let row = c.row()
                 let dom = d.optString("domain")
                 let cpIdx = row.buttons.count

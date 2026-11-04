@@ -35,6 +35,9 @@ export async function pageSettings() {
   <div class="card" id="fg"><h3>${t("set.fgTitle")}</h3><p class="muted">${t("set.fgNote")}</p>
     <label><input type="checkbox" name="free_guard" ${s.free_guard === false ? "" : "checked"}> ${t("set.fgOn")}</label>
     <div class="bar" style="margin-top:12px"><button class="btn primary" id="saveFg">${t("common.save")}</button></div></div>
+  <div class="card" id="cfbtn"><h3>CloudFront</h3><p class="muted">${t("set.cfInvBtnNote")}</p>
+    <label><input type="checkbox" name="cf_invalidate_btn" style="width:auto" ${s.cf_invalidate_btn ? "checked" : ""}> ${t("set.cfInvBtn")}</label>
+    <div class="bar" style="margin-top:12px"><button class="btn primary" id="saveCfBtn">${t("common.save")}</button></div></div>
   <div class="card" id="v14"><h3>${t("set.v14Title")}</h3>
     <label>${t("set.autoIpLimit")}</label><input name="auto_ip_daily_limit" type="number" min="0" max="50" value="${esc(s.auto_ip_daily_limit ?? 3)}">
     <p class="muted">${t("set.autoIpNote")}</p>
@@ -53,6 +56,7 @@ export async function pageSettings() {
   if ($("#clrCf")) $("#clrCf").onclick = (e) => act(e.target, () => post("/settings", { cf_token_clear: true }), t("set.cleared")).then(pageSettings);
   $("#saveDc").onclick = (e) => { let v; try { v = JSON.parse($("#dc").value); } catch (_) { return toast(t("set.jsonErr"), true); } act(e.target, () => post("/settings", { default_create: v }), t("common.saved")); SETTINGS.default_create = v; };
   $("#saveFg").onclick = (e) => act(e.target, () => post("/settings", form($("#fg"))), t("common.saved"));
+  $("#saveCfBtn").onclick = (e) => act(e.target, () => post("/settings", form($("#cfbtn"))), t("common.saved"));
   $("#saveV14").onclick = (e) => act(e.target, () => post("/settings", { auto_ip_daily_limit: +$("[name=auto_ip_daily_limit]").value }), t("common.saved"));
   $("#compact").onchange = (e) => setCompact(e.target.checked);
   $("#savePw").onclick = (e) => act(e.target, () => post("/password", form($("#pw"))), t("set.pwChanged")).then((r) => r && setTimeout(() => (location.href = "/login"), 1200));

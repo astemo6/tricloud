@@ -12,7 +12,7 @@ router = APIRouter()
 
 # ---------------- 设置 ----------------
 SETTING_KEYS = ("tg_chat_id", "daily_report", "report_time", "monitor_interval", "timezone", "default_create", "free_guard",
-                "auto_ip_daily_limit")
+                "auto_ip_daily_limit", "cf_invalidate_btn")
 
 
 @router.get("/api/settings")

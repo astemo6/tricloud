@@ -157,7 +157,7 @@ export async function tabCloudFront(acc, box) {
     <td><span class="badge ${esc(d.status)}">${esc(d.status)}</span><br>${d.enabled ? t("aws.cfOn") : t("aws.cfOff")}</td>
     <td>${d.plan == null ? t("aws.cfUnknown") : esc(cfPlanLabel(d.plan))}<div class="muted">${esc(d.price_class || "-")}</div></td>
     <td data-cftraffic="${esc(d.id)}">—</td>
-    <td><button class="btn sm" data-cf="inv" data-id="${esc(d.id)}">${t("aws.cfInv")}</button> <button class="btn sm" data-cf="edit" data-id="${esc(d.id)}">${t("common.edit")}</button>
+    <td>${SETTINGS.cf_invalidate_btn ? `<button class="btn sm" data-cf="inv" data-id="${esc(d.id)}">${t("aws.cfInv")}</button> ` : ""}<button class="btn sm" data-cf="edit" data-id="${esc(d.id)}">${t("common.edit")}</button>
     <button class="btn sm" data-cf="toggle" data-id="${esc(d.id)}">${d.enabled ? t("aws.cfDisable") : t("aws.cfEnable")}</button> <button class="btn sm" data-cf="plan" data-id="${esc(d.id)}">${t("aws.cfPlan")}</button>
     <button class="btn sm danger" data-cf="delete" data-id="${esc(d.id)}">${t("common.delete")}</button></td></tr>`).join("")}</table><p class="muted" data-cftraffic-note></p>` : `<div class="empty">${t("aws.cfNone")}</div>`;
   box.querySelectorAll("[data-cf]").forEach((b) => (b.onclick = () => cfOp(acc, list.find((x) => x.id === b.dataset.id), b.dataset.cf, b, reload)));

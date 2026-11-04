@@ -1,5 +1,5 @@
 // TriCloud 前端 v1.6.0 · AWS：EC2 创建、Lightsail、区域、配额、闲置资源、CloudFront
-import { $, act, api, confirmBox, del, esc, form, modal, post, regionLabel, regionOf, regionOpt, regionSelect, rq, SETTINGS, toast } from "./core.js";
+import { $, act, api, confirmBox, del, esc, fmtBytes, form, modal, post, regionLabel, regionOf, regionOpt, regionSelect, rq, SETTINGS, toast } from "./core.js";
 import { go } from "./router.js";
 import { loginFields, showCreated, tabInstances } from "./instances.js";
 import { saveDefaultBtn } from "./settings.js";
@@ -100,6 +100,8 @@ export const cfPlanLabel = (p) => (CF_PLAN[p] ? t(CF_PLAN[p]) : p);
 // 选择界面专用标签：档位名后带月额度（流量 + 请求数）；PAYGO 无额度。列表列仍用 cfPlanLabel 保持简洁
 export const CF_PLAN_QUOTA = { FREE: "aws.cfQuotaFree", PRO: "aws.cfQuotaPro", BUSINESS: "aws.cfQuotaBusiness", PREMIUM: "aws.cfQuotaPremium" };
 export const cfPlanPickLabel = (p) => (CF_PLAN_QUOTA[p] ? `${cfPlanLabel(p)}（${t(CF_PLAN_QUOTA[p])}）` : cfPlanLabel(p));
+export const cfBytes = (b) => fmtBytes(b).replace(/\.0(?= )/, "");
+export const cfTrafficText = (it) => (it.quota_bytes ? `${cfBytes(it.total)} / ${cfBytes(it.quota_bytes)}` : cfBytes(it.total));
 // 端口框按回源协议置灰：https-only 只用 HTTPS 端口、http-only 只用 HTTP 端口、match-viewer 两个都用
 // 只切 disabled 不改值——form() 用 querySelectorAll 取值，disabled 字段照常提交
 export const cfPortsOnOpen = (bg) => {
@@ -149,15 +151,23 @@ export async function tabCloudFront(acc, box) {
   };
   let list;
   try { list = await api(`/accounts/${acc.id}/cloudfront`); } catch (e) { $("#t", box).textContent = "❌ " + e.message; return; }
-  $("#t", box).innerHTML = list.length ? `<table><tr><th>${t("aws.cfColId")}</th><th>${t("aws.cfOriginCol")}</th><th>${t("common.status")}</th><th>${t("aws.cfColPlan")}</th><th>${t("inst.colOps")}</th></tr>
+  $("#t", box).innerHTML = list.length ? `<table><tr><th>${t("aws.cfColId")}</th><th>${t("aws.cfOriginCol")}</th><th>${t("common.status")}</th><th>${t("aws.cfColPlan")}</th><th>${t("aws.cfColTraffic")}</th><th>${t("inst.colOps")}</th></tr>
     ${list.map((d) => `<tr><td><b>${esc(d.comment || d.id)}</b><br><code>${esc(d.domain)}</code>${d.aliases.length ? "<br>" + d.aliases.map(esc).join(", ") : ""}${d.comment ? `
     <div class="muted">${esc(d.id)}</div>` : ""}</td><td class="mono">${d.origins.map(esc).join("<br>")}</td>
     <td><span class="badge ${esc(d.status)}">${esc(d.status)}</span><br>${d.enabled ? t("aws.cfOn") : t("aws.cfOff")}</td>
     <td>${d.plan == null ? t("aws.cfUnknown") : esc(cfPlanLabel(d.plan))}<div class="muted">${esc(d.price_class || "-")}</div></td>
+    <td data-cftraffic="${esc(d.id)}">—</td>
     <td><button class="btn sm" data-cf="inv" data-id="${esc(d.id)}">${t("aws.cfInv")}</button> <button class="btn sm" data-cf="edit" data-id="${esc(d.id)}">${t("common.edit")}</button>
     <button class="btn sm" data-cf="toggle" data-id="${esc(d.id)}">${d.enabled ? t("aws.cfDisable") : t("aws.cfEnable")}</button> <button class="btn sm" data-cf="plan" data-id="${esc(d.id)}">${t("aws.cfPlan")}</button>
     <button class="btn sm danger" data-cf="delete" data-id="${esc(d.id)}">${t("common.delete")}</button></td></tr>`).join("")}</table>` : `<div class="empty">${t("aws.cfNone")}</div>`;
   box.querySelectorAll("[data-cf]").forEach((b) => (b.onclick = () => cfOp(acc, list.find((x) => x.id === b.dataset.id), b.dataset.cf, b, reload)));
+  api(`/accounts/${acc.id}/cloudfront/traffic`).then((tr) => {
+    const items = (tr && tr.items) || {};
+    box.querySelectorAll("[data-cftraffic]").forEach((td) => {
+      const it = items[td.dataset.cftraffic];
+      if (it) td.textContent = cfTrafficText(it);
+    });
+  }).catch(() => {});
 }
 export async function cfOp(acc, d, op, btn, reload) {
   const base = `/accounts/${acc.id}/cloudfront`;

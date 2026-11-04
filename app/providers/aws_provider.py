@@ -2,6 +2,7 @@
 凭证: {access_key, secret_key, region}
 注意：Cost Explorer 每次调用 $0.01，只能经 app.billing 的缓存层调用 cost_explorer()。
 """
+import calendar
 import concurrent.futures as cf
 import datetime as dt
 import threading
@@ -14,7 +15,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from .. import hostname
-from ..core import LightsailRegionError
+from ..core import LightsailRegionError, get_setting, set_setting
 from .aws_credit import AWSCredit
 from .aws_more import AWSMore
 from ..cloudinit import cloud_init, gen_password
@@ -657,6 +658,180 @@ class AWSProvider(AWSMore, AWSCredit):
         except Exception:
             return None
 
+    CF_TRAFFIC_QUOTA_BYTES = {
+        "FREE": 100 * 1024**3,
+        "PRO": 50 * 1024**4,
+        "BUSINESS": 50 * 1024**4,
+        "PREMIUM": 50 * 1024**4,
+    }
+
+    def _cf_sub_starts(self):
+        """与 cf_plans 同款分页 list_subscriptions（过滤 planFamily=="CloudFront"、status ∈ ACTIVE/PENDING_APPROVAL），
+        返回 {dist_id: 订阅起始 datetime}。已用 botocore 模型核实：SubscriptionSummary 没有 startTime 字段，
+        真实字段是 createdAt / updatedAt（datetime 类型）。起始时间依次从 ("startTime","startDateTime","startDate","createdAt","createdTime")
+        里取第一个非空值；字符串则用 datetime.fromisoformat 解析，naive 的补 UTC。整体异常时返回 {}。
+        """
+        try:
+            out = {}
+            for page in self._ppm().get_paginator("list_subscriptions").paginate():
+                for sub in page.get("subscriptionSummaries", []):
+                    if sub.get("planFamily") != "CloudFront" or (sub.get("status") or "").upper() not in ("ACTIVE", "PENDING_APPROVAL"):
+                        continue
+                    st = None
+                    for k in ("startTime", "startDateTime", "startDate", "createdAt", "createdTime"):
+                        val = sub.get(k)
+                        if val is not None and val != "":
+                            st = val
+                            break
+                    if st is None:
+                        continue
+                    if isinstance(st, str):
+                        try:
+                            st = dt.datetime.fromisoformat(st)
+                        except Exception:
+                            continue
+                    if isinstance(st, dt.datetime):
+                        if st.tzinfo is None:
+                            st = st.replace(tzinfo=dt.timezone.utc)
+                        else:
+                            st = st.astimezone(dt.timezone.utc)
+                    else:
+                        continue
+                    for arn in sub.get("resourceArns", []):
+                        if ":distribution/" in arn:
+                            out[arn.split(":distribution/")[-1]] = st
+            return out
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _cf_period_start(plan, sub_start, now):
+        """计算套餐月周期起点：
+        plan 在额度表内且 sub_start 非空 → 计算套餐月周期起点：
+        取 now 所在年月、day=min(sub_start.day, 当月最后一天)、时间为 00:00 UTC；
+        若该日期 > now 则回退一个月（同样 clamp 日）；返回 (起点, "plan")。
+        否则返回 (now 当月 1 日 00:00 UTC, "month")。
+        """
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=dt.timezone.utc)
+        else:
+            now = now.astimezone(dt.timezone.utc)
+
+        if plan in CF_TRAFFIC_QUOTA_BYTES and sub_start is not None:
+            if isinstance(sub_start, dt.date) and not isinstance(sub_start, dt.datetime):
+                sub_start = dt.datetime(sub_start.year, sub_start.month, sub_start.day, 0, 0, 0, tzinfo=dt.timezone.utc)
+            if isinstance(sub_start, dt.datetime):
+                if sub_start.tzinfo is None:
+                    sub_start = sub_start.replace(tzinfo=dt.timezone.utc)
+                else:
+                    sub_start = sub_start.astimezone(dt.timezone.utc)
+                y, m = now.year, now.month
+                last_day = calendar.monthrange(y, m)[1]
+                target_day = min(sub_start.day, last_day)
+                cand = dt.datetime(y, m, target_day, 0, 0, 0, tzinfo=dt.timezone.utc)
+                if cand > now:
+                    if m == 1:
+                        prev_y, prev_m = y - 1, 12
+                    else:
+                        prev_y, prev_m = y, m - 1
+                    prev_last_day = calendar.monthrange(prev_y, prev_m)[1]
+                    prev_target_day = min(sub_start.day, prev_last_day)
+                    cand = dt.datetime(prev_y, prev_m, prev_target_day, 0, 0, 0, tzinfo=dt.timezone.utc)
+                return cand, "plan"
+
+        return dt.datetime(now.year, now.month, 1, 0, 0, 0, tzinfo=dt.timezone.utc), "month"
+
+    def cf_traffic(self, acc_id):
+        """获取 CloudFront 各分发本周期已用流量。
+        - 缓存：key = f"cf_traffic_{acc_id}"；get_setting 读到 {"ts": epoch, "data": {...}} 且 time.time()-ts < 3600 时直接返回 data。缓存读写都包 try/except，失败不影响主流程。
+        - 主流程包 try/except：任何异常 → 返回 {"items": {}, "fetched_at": now_iso, "error": str(e)}，绝不抛异常。
+        - 数据：dists = self.cf_list()；starts = self._cf_sub_starts()；cw = self.c("cloudwatch", "us-east-1")。
+        - 每个分发：period_start, basis = _cf_period_start(plan, starts.get(id), now)；对 BytesDownloaded / BytesUploaded 各调一次 cw.get_metric_statistics(...)，Sum 累加后 int()。
+        - 单个分发异常：跳过该分发、把首个错误记进结果顶层 "error" 字段；有任何 error 时不写缓存。
+        - item = {"down": int, "up": int, "total": down+up, "quota_bytes": 额度表.get(plan), "plan": plan, "period_start": period_start.isoformat(), "period_basis": basis}。
+        - 成功（无 error）时 set_setting 写缓存 {"ts": time.time(), "data": result}。
+        - 只能用 get_metric_statistics，禁止 get_metric_data。
+        """
+        cache_key = f"cf_traffic_{acc_id}"
+        try:
+            cached = get_setting(cache_key)
+            if isinstance(cached, dict) and "ts" in cached and "data" in cached:
+                if time.time() - cached["ts"] < 3600:
+                    return cached["data"]
+        except Exception:
+            pass
+
+        now = dt.datetime.now(dt.timezone.utc)
+        now_iso = now.isoformat()
+
+        try:
+            dists = self.cf_list()
+            starts = self._cf_sub_starts()
+            cw = self.c("cloudwatch", "us-east-1")
+            items = {}
+            first_err = None
+
+            for d in dists:
+                did = d.get("id")
+                if not did:
+                    continue
+                plan = d.get("plan")
+                try:
+                    period_start, basis = self._cf_period_start(plan, starts.get(did), now)
+                    r_down = cw.get_metric_statistics(
+                        Namespace="AWS/CloudFront",
+                        MetricName="BytesDownloaded",
+                        StartTime=period_start,
+                        EndTime=now,
+                        Period=86400,
+                        Statistics=["Sum"],
+                        Dimensions=[
+                            {"Name": "DistributionId", "Value": did},
+                            {"Name": "Region", "Value": "Global"},
+                        ],
+                    )
+                    r_up = cw.get_metric_statistics(
+                        Namespace="AWS/CloudFront",
+                        MetricName="BytesUploaded",
+                        StartTime=period_start,
+                        EndTime=now,
+                        Period=86400,
+                        Statistics=["Sum"],
+                        Dimensions=[
+                            {"Name": "DistributionId", "Value": did},
+                            {"Name": "Region", "Value": "Global"},
+                        ],
+                    )
+                    down = int(sum(dp.get("Sum", 0) for dp in r_down.get("Datapoints", [])))
+                    up = int(sum(dp.get("Sum", 0) for dp in r_up.get("Datapoints", [])))
+                    total = down + up
+                    quota_bytes = CF_TRAFFIC_QUOTA_BYTES.get(plan)
+                    items[did] = {
+                        "down": down,
+                        "up": up,
+                        "total": total,
+                        "quota_bytes": quota_bytes,
+                        "plan": plan,
+                        "period_start": period_start.isoformat(),
+                        "period_basis": basis,
+                    }
+                except Exception as e:
+                    if first_err is None:
+                        first_err = str(e)
+                    continue
+
+            result = {"items": items, "fetched_at": now_iso}
+            if first_err is not None:
+                result["error"] = first_err
+            else:
+                try:
+                    set_setting(cache_key, {"ts": time.time(), "data": result})
+                except Exception:
+                    pass
+            return result
+        except Exception as e:
+            return {"items": {}, "fetched_at": now_iso, "error": str(e)}
+
     # ---------- CloudFront 套餐用 WAF：自动关联 / 解绑 / 删除 ----------
     PANEL_WAF_PREFIX = "tricloud-cf-"   # 面板为套餐准入自动建的 WAF 命名前缀；只有带此前缀的 ACL 才归面板清理
 
@@ -1058,3 +1233,6 @@ class AWSProvider(AWSMore, AWSCredit):
             res[key] = round(sum(pts) / 1024 ** 3, 3)
         res["period"] = f"{start:%Y-%m-%d %H:%M} ~ {now:%Y-%m-%d %H:%M} UTC" if win else f"{start:%Y-%m-%d} ~ {now:%Y-%m-%d}"
         return res
+
+
+CF_TRAFFIC_QUOTA_BYTES = AWSProvider.CF_TRAFFIC_QUOTA_BYTES

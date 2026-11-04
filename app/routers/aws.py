@@ -65,6 +65,12 @@ async def cf_list(acc_id: int):
     return await run(services.provider(acc_id).cf_list)
 
 
+@router.get("/api/accounts/{acc_id}/cloudfront/traffic")
+async def cf_traffic(acc_id: int):
+    need_acc(acc_id, "aws")
+    return await run(services.provider(acc_id).cf_traffic, acc_id)
+
+
 @router.post("/api/accounts/{acc_id}/cloudfront")
 async def cf_op(acc_id: int, body: dict = Body(...)):
     need_acc(acc_id, "aws")

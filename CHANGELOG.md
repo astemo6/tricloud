@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.3（build 37）(2026-11-04)
+- 新功能：账号手动排序（Android / iOS）：云账号列表支持通过上移/下移调整账号顺序并持久化（POST /accounts/reorder）。
+- 新功能：OCI 系统版本动态下拉（Android / iOS）：创建与迁移表单支持按所选规格动态拉取对应系统版本列表，网络失败自动回退内置列表。
+- 改进：CloudFront 缓存刷新按钮开关可在 App 内修改（Android / iOS）：设置页新增「CloudFront 缓存刷新按钮」开关（cf_invalidate_btn），防误触。
+- 改进：Android 支持保存为默认创建参数（Android）：创建实例时可勾选保存当前参数为该云厂商默认值（不含名称、密码、脚本），对齐 iOS 既有功能。
+- 新功能：OCI 实例级安全列表（Android / iOS）：实例更多操作菜单新增「安全列表」入口，可查看所属安全列表规则并支持确认删除单个规则。
+- 新功能：账号快速切换器（Android / iOS）：账号详情页提供快捷切换入口，支持搜索与按云厂商分组，选中后平滑切至新账号详情页。
+- 版本：Android versionCode 37 / iOS build 37（versionName 1.6.3）。
+
 ## 1.6.2（build 36）(2026-11-04)
 - 版本：显示版本由 1.6.1 升至 1.6.2（用户拍板：以后版本要动起来）；功能内容与 build 35 完全一致，无功能变更。新建 Release v1.6.2，原 v1.6.1 保留不动。
 - 版本：Android versionCode 36 / iOS build 36（versionName 1.6.2）。

@@ -118,6 +118,14 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 - 绑定域名：记录名只填前缀，自动补所选域名（`@` = 根域名，完整名仍可用），后端统一补全与校验。
 - App 切换语言立即生效（Android 重建页面栈停在设置页；iOS 已打开页面即时重绘）。
 
+## 1.6.3 build 37
+- 账号手动排序（Android / iOS）：云账号列表支持通过上移/下移调整排序并提交全量 ID 列表持久化（POST /accounts/reorder）。
+- OCI 系统版本动态下拉（Android / iOS）：创建与迁移表单选定规格后动态拉取对应平台镜像系统版本，网络异常自动降级回退内置静态列表。
+- CF 缓存刷新按钮开关（Android / iOS）：设置页新增「CloudFront 缓存刷新按钮」开关（cf_invalidate_btn），可在 App 内直接修改，关闭防误触。
+- Android 保存为默认创建参数（Android）：补齐创建实例时保存当前参数为默认值（不含名称、密码、脚本），对齐 iOS 既有能力。
+- 安全列表（实例级）（Android / iOS）：OCI 实例操作菜单新增「安全列表」入口，可查看所属安全列表规则并支持确认删除单个规则。
+- 账号快速切换器（Android / iOS）：账号详情页提供快捷切换入口，支持搜索与按云厂商分组，选中后直接停留在账号详情页换为新账号。
+
 ## 1.6.2 build 36
 - 显示版本升至 1.6.2（Android versionName / iOS MARKETING_VERSION），构建号 36；功能内容与 build 35 完全一致，仅升版本号。发布标签由 ios/project.yml 派生，新建 Release v1.6.2。
 

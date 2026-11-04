@@ -118,6 +118,9 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 - 绑定域名：记录名只填前缀，自动补所选域名（`@` = 根域名，完整名仍可用），后端统一补全与校验。
 - App 切换语言立即生效（Android 重建页面栈停在设置页；iOS 已打开页面即时重绘）。
 
+## 1.6.2 build 36
+- 显示版本升至 1.6.2（Android versionName / iOS MARKETING_VERSION），构建号 36；功能内容与 build 35 完全一致，仅升版本号。发布标签由 ios/project.yml 派生，新建 Release v1.6.2。
+
 ## 1.6.1 build 35
 - 分发卡片改显备注（Android / iOS，与 Web 一致）：卡片标题优先显示备注（空回退 ID）+ 状态，原备注行改为显示 ID（仅备注非空时显示）。
 

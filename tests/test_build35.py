@@ -1,7 +1,7 @@
 """build 35：CloudFront 分发卡片备注/ID 互换。纯静态检查。
 Android / iOS 在 CloudFront 分发卡片标题优先显示备注（空回退 ID），
 原备注行改为显示 ID（仅备注非空时显示）。与网页版一致。"""
-import os, sys
+import os, re, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 P = F = 0
@@ -14,7 +14,8 @@ def rd(*p): return open(os.path.join(ROOT, *p), encoding="utf-8").read()
 # 1. version 35
 bg = rd("android", "app", "build.gradle")
 py = rd("ios", "project.yml")
-ok("version 35", "versionCode 35" in bg and 'CURRENT_PROJECT_VERSION: "35"' in py)
+_vc = int(re.search(r"versionCode (\d+)", bg).group(1))
+ok("version >= 35 and Android == iOS", _vc >= 35 and f'CURRENT_PROJECT_VERSION: "{_vc}"' in py)
 
 # 2. Android CF 段
 A = rd("android", "app", "src", "main", "java", "com", "tricloud", "app", "AccountActivity.java")

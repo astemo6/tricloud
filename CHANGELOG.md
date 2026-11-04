@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.2（build 36）(2026-11-04)
+- 版本：显示版本由 1.6.1 升至 1.6.2（用户拍板：以后版本要动起来）；功能内容与 build 35 完全一致，无功能变更。新建 Release v1.6.2，原 v1.6.1 保留不动。
+- 版本：Android versionCode 36 / iOS build 36（versionName 1.6.2）。
+
 ## 1.6.1（build 35）(2026-11-04)
 - 改进：CloudFront 分发卡片标题改显备注（Android / iOS，与网页版一致）：卡片标题大字优先显示备注，无备注时回退显示分发 ID；下方原备注行改为在有备注时显示分发 ID，无备注时不显示（标题已是 ID）。其余行、按钮与流量逻辑保持不变。
 - 版本：Android versionCode 35 / iOS build 35（versionName 1.6.1）。

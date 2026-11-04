@@ -11,7 +11,8 @@ def ok(name, cond):
     else: F += 1; print("FAIL", name)
 def rd(*p): return open(os.path.join(ROOT, *p), encoding="utf-8").read()
 
-ok("version 32", "versionCode 32" in rd("android", "app", "build.gradle") and 'CURRENT_PROJECT_VERSION: "32"' in rd("ios", "project.yml"))
+_vc = int(re.search(r"versionCode (\d+)", rd("android", "app", "build.gradle")).group(1))
+ok("version >= 32 and Android == iOS", _vc >= 32 and f'CURRENT_PROJECT_VERSION: "{_vc}"' in rd("ios", "project.yml"))
 
 A = rd("android", "app", "src", "main", "java", "com", "tricloud", "app", "Regions.java")
 abody = A.split("accountText", 1)[1]

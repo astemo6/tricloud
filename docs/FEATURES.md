@@ -118,6 +118,9 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 - 绑定域名：记录名只填前缀，自动补所选域名（`@` = 根域名，完整名仍可用），后端统一补全与校验。
 - App 切换语言立即生效（Android 重建页面栈停在设置页；iOS 已打开页面即时重绘）。
 
+## 1.6.1 build 33
+- 分发卡片流量双行（Android / iOS，与 Web 一致）：周期已用（看套餐额度）+ 近30天总量（total30d，实际跑量），item 无 total30d 时只显示周期行。
+
 ## 1.6.1 build 32
 - 账号列表副标题「权限被拒」（Android / iOS，与 Web 一致）：machine_regions_denied 为 true（机器扫描因实例接口权限被拒全面失败，如精简策略账号）时优先显示，不再混同于无机器 / 未扫描。
 

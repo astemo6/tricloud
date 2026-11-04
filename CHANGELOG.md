@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.1（build 33）(2026-11-04)
+- 改进：CloudFront 分发卡片流量行新增一行近 30 天总量。后端 traffic 接口每个 item 新增 total30d（近 30 天下行 + 上行总字节），Android / iOS 在周期「已用流量」行下方以小字显示「近30天 X」/「Last 30 days X」；item 无 total30d（旧后端 / 旧缓存）时不显示这一行。周期 down/up/total/quota_bytes 语义不变。
+- 版本：Android versionCode 33 / iOS build 33（versionName 1.6.1）。
+
 ## 1.6.1（build 32）(2026-11-04)
 - 改进：账号列表副标题新增最高优先级一态「权限被拒」：后端汇总（GET /api/accounts）新增 machine_regions_denied 标记——机器扫描因实例接口权限被拒全面失败（如 AWS 精简策略账号没有 EC2 / Lightsail 查询权限）时为 true，Web / Android / iOS 三端副标题优先显示「权限被拒」（en: Access denied），与「无机器」「还没扫描过（默认区域）」区分开。
 - 版本：Android versionCode 32 / iOS build 32（versionName 1.6.1）。

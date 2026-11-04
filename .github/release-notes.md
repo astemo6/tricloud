@@ -1,3 +1,8 @@
+### 1.6.1 build 35 更新内容
+
+- **分发卡片改显备注**（Android / iOS，与网页版一致）：CloudFront 分发卡片标题改显备注（无备注时回退显示分发 ID），分发 ID 移到下方小字（仅当有备注时显示），与网页版保持一致。
+- 版本：Android versionCode 35 / iOS build 35（versionName 1.6.1），需同时更新面板到最新版。
+
 ### 1.6.1 build 34 更新内容
 
 - **分发域名一键复制**（Android / iOS，与网页版一致）：CloudFront 分发卡片新增「复制」按钮，点一下把分发域名（如 dxxxx.cloudfront.net）复制到剪贴板，按钮短暂显示「已复制」后自动恢复。

@@ -1,7 +1,7 @@
 """build 34：CloudFront 分发卡片加「复制域名」按钮。纯静态检查。
 Android / iOS 在 CloudFront 分发卡片按钮行首位新增「复制」按钮，点击只复制分发域名（dom），
 按钮文案短暂切换为「已复制」（约 1.2 秒）后恢复。复用既有词条与剪贴板惯例，未新增资源。"""
-import os, sys
+import os, re, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 P = F = 0
@@ -11,10 +11,9 @@ def ok(name, cond):
     else: F += 1; print("FAIL", name)
 def rd(*p): return open(os.path.join(ROOT, *p), encoding="utf-8").read()
 
-# 1. version 34
-bg = rd("android", "app", "build.gradle")
-py = rd("ios", "project.yml")
-ok("version 34", "versionCode 34" in bg and 'CURRENT_PROJECT_VERSION: "34"' in py)
+# 1. version >= 34
+_vc = int(re.search(r"versionCode (\d+)", rd("android", "app", "build.gradle")).group(1))
+ok("version >= 34 and Android == iOS", _vc >= 34 and f'CURRENT_PROJECT_VERSION: "{_vc}"' in rd("ios", "project.yml"))
 
 # 2. Android 复制接线
 A = rd("android", "app", "src", "main", "java", "com", "tricloud", "app", "AccountActivity.java")

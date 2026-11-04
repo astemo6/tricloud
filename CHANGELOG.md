@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.1（build 35）(2026-11-04)
+- 改进：CloudFront 分发卡片标题改显备注（Android / iOS，与网页版一致）：卡片标题大字优先显示备注，无备注时回退显示分发 ID；下方原备注行改为在有备注时显示分发 ID，无备注时不显示（标题已是 ID）。其余行、按钮与流量逻辑保持不变。
+- 版本：Android versionCode 35 / iOS build 35（versionName 1.6.1）。
+
 ## 1.6.1（build 34）(2026-11-04)
 - 改进：CloudFront 分发卡片新增「复制」按钮（Android / iOS，与网页版一致）：点击只复制分发域名本身到剪贴板，按钮文案短暂切换为「已复制」约 1.2 秒后恢复。Android 复用既有 strings s0500「复制」/ s0098「已复制」与文件内 ClipboardManager 内联惯例；iOS 复用全局 copyText() 与 Localizable 既有「复制」/「已复制」键，均未新增词条。
 - 版本：Android versionCode 34 / iOS build 34（versionName 1.6.1）。

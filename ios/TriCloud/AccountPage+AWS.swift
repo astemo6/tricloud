@@ -78,6 +78,19 @@ extension AccountPage {
                        + "\n" + (en ? "已启用" : "已停用") + " · " + AccountPage.cfPlanName(d) + " · 价格等级 " + str(d, "price_class", "-")
                        + (d.optString("comment").isEmpty ? "" : "\n" + d.optString("comment")), 13)
                 let row = c.row()
+                let dom = d.optString("domain")
+                let cpIdx = row.buttons.count
+                row.button("复制") {
+                    copyText(dom)
+                    if row.buttons.indices.contains(cpIdx) {
+                        row.buttons[cpIdx].0 = "已复制"
+                        self.changed()
+                        self.later(1.2) {
+                            if row.buttons.indices.contains(cpIdx) { row.buttons[cpIdx].0 = "复制" }
+                            self.changed()
+                        }
+                    }
+                }
                 if self.cfInvBtn { row.button("缓存刷新") { self.cfInvalidate(did) } }
                 row.button("编辑") { self.cfEdit(did) }
                 row.button(en ? "停用" : "启用") {

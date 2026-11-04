@@ -151,7 +151,7 @@ export async function tabCloudFront(acc, box) {
   };
   let list;
   try { list = await api(`/accounts/${acc.id}/cloudfront`); } catch (e) { $("#t", box).textContent = "❌ " + e.message; return; }
-  $("#t", box).innerHTML = list.length ? `<table><tr><th>${t("aws.cfColId")}</th><th>${t("aws.cfOriginCol")}</th><th>${t("common.status")}</th><th>${t("aws.cfColPlan")}</th><th>${t("aws.cfColTraffic")}</th><th>${t("inst.colOps")}</th></tr>
+  $("#t", box).innerHTML = list.length ? `<table><tr><th>${t("aws.cfColId")}</th><th>${t("aws.cfOriginCol")}</th><th>${t("common.status")}</th><th>${t("aws.cfColPlan")}</th><th>${t("aws.cfColTraffic")} <span class="muted" data-cftraffic-note></span></th><th>${t("inst.colOps")}</th></tr>
     ${list.map((d) => `<tr><td><b>${esc(d.comment || d.id)}</b><br><code>${esc(d.domain)}</code> <button class="btn sm" data-copydomain="${esc(d.domain)}">${t("common.copy")}</button>${d.aliases.length ? "<br>" + d.aliases.map(esc).join(", ") : ""}${d.comment ? `
     <div class="muted">${esc(d.id)}</div>` : ""}</td><td class="mono">${d.origins.map(esc).join("<br>")}</td>
     <td><span class="badge ${esc(d.status)}">${esc(d.status)}</span><br>${d.enabled ? t("aws.cfOn") : t("aws.cfOff")}</td>
@@ -159,7 +159,7 @@ export async function tabCloudFront(acc, box) {
     <td data-cftraffic="${esc(d.id)}">—</td>
     <td>${SETTINGS.cf_invalidate_btn ? `<button class="btn sm" data-cf="inv" data-id="${esc(d.id)}">${t("aws.cfInv")}</button> ` : ""}<button class="btn sm" data-cf="edit" data-id="${esc(d.id)}">${t("common.edit")}</button>
     <button class="btn sm" data-cf="toggle" data-id="${esc(d.id)}">${d.enabled ? t("aws.cfDisable") : t("aws.cfEnable")}</button> <button class="btn sm" data-cf="plan" data-id="${esc(d.id)}">${t("aws.cfPlan")}</button>
-    <button class="btn sm danger" data-cf="delete" data-id="${esc(d.id)}">${t("common.delete")}</button></td></tr>`).join("")}</table><p class="muted" data-cftraffic-note></p>` : `<div class="empty">${t("aws.cfNone")}</div>`;
+    <button class="btn sm danger" data-cf="delete" data-id="${esc(d.id)}">${t("common.delete")}</button></td></tr>`).join("")}</table>` : `<div class="empty">${t("aws.cfNone")}</div>`;
   box.querySelectorAll("[data-cf]").forEach((b) => (b.onclick = () => cfOp(acc, list.find((x) => x.id === b.dataset.id), b.dataset.cf, b, reload)));
   box.querySelectorAll("[data-copydomain]").forEach((b) => (b.onclick = async () => {
     let ok = false;
@@ -191,7 +191,7 @@ export async function tabCloudFront(acc, box) {
       const dt = new Date(tr.fetched_at);
       if (!isNaN(dt.getTime())) {
         const p2 = (n) => String(n).padStart(2, "0");
-        note.textContent = t("aws.cfTrafficAsOf", { time: `${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}` });
+        note.textContent = t("aws.cfAsOf", { time: `${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}` });
       }
     }
   }).catch(() => {});

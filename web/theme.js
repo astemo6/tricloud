@@ -16,3 +16,17 @@
   window.addEventListener("storage", function (e) { if (e.key === KEY) apply(); });
   apply();
 })();
+
+// 侧栏宽度尽早应用防闪烁
+(function () {
+  try {
+    var raw = localStorage.getItem("tc_side_w");
+    if (raw) {
+      var w = parseInt(raw, 10);
+      if (w >= 200 && w <= 480) {
+        document.documentElement.style.setProperty("--side-w", w + "px");
+      }
+    }
+  } catch (e) {}
+})();
+

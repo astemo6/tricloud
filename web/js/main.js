@@ -40,6 +40,40 @@ const applyAll = () => { applyI18n(document); syncAria(); };
     route();
   };
   $("#menuBtn").onclick = () => $("#side").classList.toggle("open");
+  // 侧栏可拖拽调整宽度
+  const rz = $("#sideResizer");
+  const sideEl = $("#side");
+  if (rz && sideEl) {
+    const clampW = (w) => Math.min(480, Math.max(200, Math.round(w)));
+    rz.onpointerdown = (e) => {
+      e.preventDefault();
+      rz.setPointerCapture(e.pointerId);
+      document.body.classList.add("side-dragging");
+      let w = clampW(sideEl.getBoundingClientRect().width);
+      const onmove = (ev) => {
+        w = clampW(ev.clientX - sideEl.getBoundingClientRect().left);
+        document.documentElement.style.setProperty("--side-w", w + "px");
+      };
+      const onup = () => {
+        rz.removeEventListener("pointermove", onmove);
+        rz.removeEventListener("pointerup", onup);
+        rz.removeEventListener("pointercancel", onup);
+        document.body.classList.remove("side-dragging");
+        try {
+          localStorage.setItem("tc_side_w", String(clampW(w)));
+        } catch (_) {}
+      };
+      rz.addEventListener("pointermove", onmove);
+      rz.addEventListener("pointerup", onup);
+      rz.addEventListener("pointercancel", onup);
+    };
+    rz.ondblclick = () => {
+      document.documentElement.style.removeProperty("--side-w");
+      try {
+        localStorage.removeItem("tc_side_w");
+      } catch (_) {}
+    };
+  }
   // 手机抽屉遮罩：点击关闭
   let scrim = $(".drawer-scrim");
   if (!scrim) { scrim = document.createElement("div"); scrim.className = "drawer-scrim"; $("#side").after(scrim); }

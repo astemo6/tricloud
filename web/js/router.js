@@ -57,7 +57,7 @@ export function renderSide(p) {
     const list = ACCOUNTS.filter((a) => a.provider === prov);
     if (!list.length) continue;
     html += `<div class="grp prov">${PLOGO[prov]}${PNAME[prov]}</div>`;
-    for (const a of list) html += `<a href="#/${prov}/${a.id}/${mapTab(curTab, prov)}" data-acc="${a.id}" draggable="true" class="${cur === `#/${prov}/${a.id}` ? "on" : ""}"><span class="dot ${prov}"></span>${esc(a.name)}</a>`;
+    for (const a of list) html += `<a href="#/${prov}/${a.id}/${mapTab(curTab, prov)}" data-acc="${a.id}" draggable="true" title="${esc(a.name)}" class="${cur === `#/${prov}/${a.id}` ? "on" : ""}"><span class="dot ${prov}"></span><span class="sname">${esc(a.name)}</span></a>`;
   }
   html += `<div class="grp">${t("nav.manage")}</div>` + link("#/accounts", `🔑 ${t("nav.accounts")}`) + link("#/health", `🩺 ${t("nav.health")}`) + link("#/freecheck", `🆓 ${t("nav.freecheck")}`) + link("#/traffic", `📈 ${t("nav.traffic")}`) + link("#/tasks", `⏱ ${t("nav.tasks")}`) +
     link("#/monitors", `📡 ${t("nav.monitors")}`) + link("#/secrets", `🔐 ${t("nav.secrets")}`) + link("#/scripts", `📜 ${t("nav.scripts")}`) +

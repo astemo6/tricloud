@@ -35,7 +35,8 @@ final class AccountPage: Page {
     }
 
     override var menu: [(String, () -> Void)] {
-        return [("测活", { self.testNow() }),
+        return [("切换账号", { self.push(AccountSwitchPage(self)) }),
+         ("测活", { self.testNow() }),
          ("账号类型", { self.accountType(false) }),
          ("账号信息 / 日期", { self.accountInfo() })]
     }
@@ -256,6 +257,7 @@ final class AccountPage: Page {
             more.append(("引导卷", { self.bootVolume(inst) }))
             more.append(("附加 IP", { self.push(OciIpsPage(self, inst)) }))
             more.append(("500M 下行", { self.net500(inst, kind) }))
+            more.append(("安全列表", { self.push(OciInstSecurityPage(self, inst)) }))
         }
         if kind != "lightsail" { more.append(("开放端口", { self.openPort(inst, kind) })) }
         more.append(("流量守护", { self.traffic(inst, kind) }))
@@ -483,6 +485,83 @@ final class AccountPage: Page {
                            "auto_start": v.optBoolean("auto_start"), "public_ip": inst.optString("public_ip"),
                            "check_port": v.optString("check_port", "0"), "auto_change_ip": v.optBoolean("auto_change_ip")]
             self.post("/monitors", b) { _ in self.toast("已加入监控") }
+        }
+    }
+}
+
+final class AccountSwitchPage: Page {
+    weak var owner: AccountPage?
+    var query = ""
+    var all: [JObj] = []
+
+    init(_ owner: AccountPage) {
+        self.owner = owner
+        super.init()
+        title = "切换账号"
+    }
+
+    override func refresh() {
+        if !AppState.shared.accounts.isEmpty {
+            self.all = AppState.shared.accounts
+            self.render()
+        }
+        get("/accounts") { r in
+            let a = jarr(r)
+            self.all = (0..<a.count).map { a.obj($0) }
+            self.render()
+        }
+    }
+
+    func render() {
+        clear()
+        let sc = card(nil)
+        if !query.isEmpty {
+            sc.muted("当前搜索：" + query)
+        }
+        let sr = sc.row()
+        sr.button("搜索") {
+            self.form("搜索账号", nil, [Field.text("q", "账号名称", self.query)], "搜索") { v in
+                self.query = v.optString("q").trimmingCharacters(in: .whitespacesAndNewlines)
+                self.render()
+            }
+        }
+        if !query.isEmpty {
+            sr.button("清除") {
+                self.query = ""
+                self.render()
+            }
+        }
+
+        let curId = owner?.id ?? -1
+        let lower = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        for prov in ["oci", "aws", "azure"] {
+            let matched = all.filter { acc in
+                guard acc.optString("provider") == prov else { return false }
+                if lower.isEmpty { return true }
+                return acc.optString("name").lowercased().contains(lower)
+            }
+            if !matched.isEmpty {
+                let c = card(MainPage.pname(prov))
+                for a in matched {
+                    let aid = a.optInt("id")
+                    let isCur = (aid == curId)
+                    let label = a.optString("name") + (isCur ? " ✓" : "")
+                    c.row().button(label) {
+                        if isCur {
+                            self.finish()
+                            return
+                        }
+                        let target = UIHub.shared.account(a)
+                        if let o = self.owner, let host = o.parent {
+                            host.pushed = target
+                            target.parent = host
+                            host.changed()
+                        } else {
+                            self.owner?.push(target)
+                        }
+                    }
+                }
+            }
         }
     }
 }

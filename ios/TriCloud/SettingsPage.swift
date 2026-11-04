@@ -44,6 +44,11 @@ final class SettingsPage: Page {
                 cr.button("清除") { self.post("/settings", ["cf_token_clear": true]) { _ in self.toast("已清除"); self.refresh() } }
             }
 
+            let cfb = self.card("CloudFront 缓存刷新按钮")
+            let cfon = s.optBoolean("cf_invalidate_btn")
+            cfb.muted("默认关。关时 CloudFront 分发列表不显示「缓存刷新」按钮，防误点。当前：" + (cfon ? "开" : "关"))
+            cfb.row().button(cfon ? "关闭" : "开启") { self.post("/settings", ["cf_invalidate_btn": !cfon]) { _ in self.refresh() } }
+
             let pc = self.card("IP 质量检测")
             pc.muted("风险分来自 proxycheck.io：不填 Key 每天 100 次，免费注册的 Key 每天 1000 次。只发送要检测的公网 IP。\n当前 Key：" + (s.optBoolean("proxycheck_key_set") ? "已设置" : "未设置"))
             let pr = pc.row()

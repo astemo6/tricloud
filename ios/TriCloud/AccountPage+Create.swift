@@ -14,18 +14,41 @@ extension AccountPage {
     // v1.5：OCI「系统 + 版本」—— 列出全部组合（如「Ubuntu 22.04」），提交时拆成 os / os_version（"" = 最新）
     static let OCI_OS: [[String]] = [["Canonical Ubuntu", "Ubuntu", "", "24.04", "22.04", "20.04"], ["Oracle Linux", "Oracle Linux", "", "9", "8"]]
 
-    static func osImageField(_ os: String, _ ver: String?) -> Field {
+    private static func buildOsImageField(_ os: String, _ ver: String?, _ rows: [[String]]) -> Field {
         var opts: [String] = [], labels: [String] = []
-        for o in OCI_OS {
+        for o in rows {
             for i in 2..<o.count { opts.append(o[0] + "|" + o[i]); labels.append(o[1] + " " + (o[i].isEmpty ? "最新" : o[i])) }
         }
         var def = os + "|" + (ver ?? "")
         if !opts.contains(def) {
-            let known = OCI_OS.contains { $0[0] == os }
+            let known = rows.contains { $0[0] == os }
             if known { opts.append(def); labels.append(os + " " + (ver ?? "")) }   // 默认值里的版本不在列表里：临时加一个选项
-            else { def = opts[0] }                                                // 已移除的系统（如 CentOS）回落到 Ubuntu 最新
+            else if !opts.isEmpty { def = opts[0] }                               // 已移除的系统（如 CentOS）回落到第一个
         }
         return Field.select("os_image", "系统 / 版本", def, opts, labels)
+    }
+
+    static func osImageField(_ os: String, _ ver: String?) -> Field {
+        buildOsImageField(os, ver, OCI_OS)
+    }
+
+    static func osImageField(_ os: String, _ ver: String?, _ osv: [String: [String]]?) -> Field {
+        guard let osv = osv, !osv.isEmpty else { return osImageField(os, ver) }
+        var systems = osv.keys.filter { !(osv[$0]?.isEmpty ?? true) }
+        if systems.isEmpty { return osImageField(os, ver) }
+        systems.sort { a, b in
+            let pa = a == "Canonical Ubuntu" ? 0 : a == "Oracle Linux" ? 1 : 2
+            let pb = b == "Canonical Ubuntu" ? 0 : b == "Oracle Linux" ? 1 : 2
+            if pa != pb { return pa < pb }
+            return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
+        }
+        var rows: [[String]] = []
+        for sys in systems {
+            let shortLabel = sys == "Canonical Ubuntu" ? "Ubuntu" : sys == "Oracle Linux" ? "Oracle Linux" : sys
+            let versions = osv[sys] ?? []
+            rows.append([sys, shortLabel, ""] + versions)
+        }
+        return buildOsImageField(os, ver, rows)
     }
 
     static func splitOsImage(_ c: JObj) -> JObj {
@@ -81,6 +104,29 @@ extension AccountPage {
     }
 
     // MARK: - 开机脚本模板 / 保存为默认（与 Web loginFields、saveDefaultBtn 一致）
+
+    func loadOciVersions(_ accId: Int, _ shape: String, _ region: String, _ cb: @escaping ([String: [String]]?) -> Void) {
+        setBusy(true)
+        Api.call("GET", "/accounts/\(accId)/oci/os-versions?shape=" + enc(shape) + (region.isEmpty ? "" : "&region=" + enc(region)), nil) { res in
+            self.setBusy(false)
+            var map: [String: [String]] = [:]
+            switch res {
+            case .success(let x):
+                let obj = jobj(x)
+                for (k, v) in obj {
+                    if let arr = v as? [Any] {
+                        let versions = arr.compactMap { jsonText($0) }
+                        if !versions.isEmpty {
+                            map[k] = versions
+                        }
+                    }
+                }
+            case .failure(let e):
+                if let ae = e as? ApiError, ae.code == 401 { self.toLogin(); return }
+            }
+            cb(map.isEmpty ? nil : map)
+        }
+    }
 
     func loadScripts(_ cb: @escaping ([String], [String]) -> Void) {
         Api.call("GET", "/scripts", nil) { res in
@@ -214,40 +260,53 @@ extension AccountPage {
             : "免费号 2 OCPU / 12 GB，PAYG 4 OCPU / 24 GB（未识别账号类型，可在右上角「账号类型」刷新）"
         c.muted("A1 免费额度：" + a1Note + "，超出部分计费。")
         let freeA1 = basis != "paid"   // 免费号 / 未知按 2 OCPU / 12 GB 给默认值
-        var f: [Field] = [
-            Field.text("name", "实例名称", "oci-" + base36Now()),
-            Field.select("shape", "规格", d.optString("shape", AccountPage.SHAPES[0]), AccountPage.SHAPES, shapeLabels()),
-            Field.num("ocpus", "OCPU", d.optString("ocpus", freeA1 ? "2" : "4")),
-            Field.num("memory_gb", "内存 GB", d.optString("memory_gb", freeA1 ? "12" : "24")),
-            Field.num("disk_gb", "引导卷 GB", d.optString("disk_gb", "50")),
-            AccountPage.osImageField(d.optString("os", "Canonical Ubuntu"), str(d, "os_version", "")),
-            Field.text("ad", "可用域（留空=第一个）", str(d, "ad", "")),
-            Field.text("subnet_id", "子网 OCID（留空=自动）", str(d, "subnet_id", "")),
-            Field.multi("ssh_key", "SSH 公钥", str(d, "ssh_key", "")),
-            Field.check("ipv6", "分配 IPv6", d.optBoolean("ipv6", false)),
-            Field.check("password_login", "生成随机 root 密码（加密保存，可在「开机密码」查看）", true)]
-        if snatch {
-            f.append(Field.num("interval", "重试间隔秒（≥30）", "60"))
-            f.append(Field.num("max_attempts", "最大次数（0=不限）", "0"))
-        }
-        let fields = f
-        c.row().button(snatch ? "填写参数并开始抢机" : "填写参数并创建") {
-            self.loadScripts { ids, names in
-            let all = fields + AccountPage.scriptFields(ids, names, "script") + [AccountPage.saveDefaultField("OCI")]
-            self.form(snatch ? "抢机参数" : "创建参数", nil, all, snatch ? "开始" : "创建") { vals0 in
-                let vals = self.handleSaveDefault("oci", AccountPage.splitOsImage(vals0))
-                var create = vals
-                let interval = create.removeValue(forKey: "interval")
-                let maxa = create.removeValue(forKey: "max_attempts")
-                var b: JObj = ["region": self.region(), "create": create]
-                if snatch {
-                    b["interval"] = interval
-                    b["max_attempts"] = maxa
-                    self.post("/accounts/\(self.id)/oci/snatch", b) { x in self.taskOrToast(x, "抢机任务已启动") }
-                } else {
-                    self.post("/accounts/\(self.id)/oci/create", b) { x in self.created(jobj(x)) }
-                }
+
+        func buildMainFields(_ curD: JObj, _ osv: [String: [String]]?) -> [Field] {
+            var f: [Field] = [
+                Field.text("name", "实例名称", "oci-" + base36Now()),
+                Field.num("ocpus", "OCPU", curD.optString("ocpus", freeA1 ? "2" : "4")),
+                Field.num("memory_gb", "内存 GB", curD.optString("memory_gb", freeA1 ? "12" : "24")),
+                Field.num("disk_gb", "引导卷 GB", curD.optString("disk_gb", "50")),
+                AccountPage.osImageField(curD.optString("os", "Canonical Ubuntu"), str(curD, "os_version", ""), osv),
+                Field.text("ad", "可用域（留空=第一个）", str(curD, "ad", "")),
+                Field.text("subnet_id", "子网 OCID（留空=自动）", str(curD, "subnet_id", "")),
+                Field.multi("ssh_key", "SSH 公钥", str(curD, "ssh_key", "")),
+                Field.check("ipv6", "分配 IPv6", curD.optBoolean("ipv6", false)),
+                Field.check("password_login", "生成随机 root 密码（加密保存，可在「开机密码」查看）", true)]
+            if snatch {
+                f.append(Field.num("interval", "重试间隔秒（≥30）", "60"))
+                f.append(Field.num("max_attempts", "最大次数（0=不限）", "0"))
             }
+            return f
+        }
+
+        c.row().button(snatch ? "填写参数并开始抢机" : "填写参数并创建") {
+            let curD = self.defaults.optJSONObject("oci") ?? [:]
+            self.form(snatch ? "抢机参数" : "创建参数", nil,
+                      [Field.select("shape", "规格", curD.optString("shape", AccountPage.SHAPES[0]), AccountPage.SHAPES, self.shapeLabels())],
+                      "下一步") { sVals in
+                let shape = sVals.optString("shape", AccountPage.SHAPES[0])
+                self.loadOciVersions(self.id, shape, self.region()) { osv in
+                    self.loadScripts { ids, names in
+                        let all = buildMainFields(curD, osv) + AccountPage.scriptFields(ids, names, "script") + [AccountPage.saveDefaultField("OCI")]
+                        self.form(snatch ? "抢机参数" : "创建参数", nil, all, snatch ? "开始" : "创建") { vals0 in
+                            var v0 = vals0
+                            v0["shape"] = shape
+                            let vals = self.handleSaveDefault("oci", AccountPage.splitOsImage(v0))
+                            var create = vals
+                            let interval = create.removeValue(forKey: "interval")
+                            let maxa = create.removeValue(forKey: "max_attempts")
+                            var b: JObj = ["region": self.region(), "create": create]
+                            if snatch {
+                                b["interval"] = interval
+                                b["max_attempts"] = maxa
+                                self.post("/accounts/\(self.id)/oci/snatch", b) { x in self.taskOrToast(x, "抢机任务已启动") }
+                            } else {
+                                self.post("/accounts/\(self.id)/oci/create", b) { x in self.created(jobj(x)) }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

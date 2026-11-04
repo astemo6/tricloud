@@ -13,35 +13,56 @@ extension AccountPage {
             self.choose("迁移到哪个账号", labels) { idx in
                 let to = ts[idx]
                 let tp = to.optString("provider")
-                var f: [Field] = [Field.text("name", "新实例名称", inst.optString("name") + "-new")]
                 if tp == "oci" {
-                    f.append(Field.select("shape", "规格", "VM.Standard.A1.Flex", ["VM.Standard.A1.Flex", "VM.Standard.E2.1.Micro"],
-                                          [AccountPage.SHAPE_LABELS[0], AccountPage.SHAPE_LABELS[1]]))
-                    f.append(Field.num("ocpus", "OCPU", "1"))
-                    f.append(Field.num("memory_gb", "内存 GB", "6"))
-                    f.append(Field.num("disk_gb", "系统盘 GB", "50"))
-                    f.append(AccountPage.osImageField("Canonical Ubuntu", ""))
-                } else if tp == "aws" {
-                    f.append(Field.text("type", "实例类型", "t3.micro"))
-                    f.append(Field.select("os", "系统", "debian-12", ["debian-12", "ubuntu-24.04"], ["Debian 12", "Ubuntu 24.04"]))
-                    f.append(Field.num("disk_gb", "系统盘 GB", "10"))
+                    let mShapes = ["VM.Standard.A1.Flex", "VM.Standard.E2.1.Micro"]
+                    let mLabels = [AccountPage.SHAPE_LABELS[0], AccountPage.SHAPE_LABELS[1]]
+                    self.form("选择规格", nil, [Field.select("shape", "规格", mShapes[0], mShapes, mLabels)], "下一步") { shapeVal in
+                        let shape = shapeVal.optString("shape", mShapes[0])
+                        self.loadOciVersions(to.optInt("id"), shape, Regions.current(to)) { osv in
+                            var f: [Field] = [Field.text("name", "新实例名称", inst.optString("name") + "-new")]
+                            f.append(Field.num("ocpus", "OCPU", "1"))
+                            f.append(Field.num("memory_gb", "内存 GB", "6"))
+                            f.append(Field.num("disk_gb", "系统盘 GB", "50"))
+                            f.append(AccountPage.osImageField("Canonical Ubuntu", "", osv))
+                            f.append(Field.check("switch_dns", "完成后把域名切到新 IP", true))
+                            f.append(Field.check("copy_monitor", "复制监控设置", true))
+                            f.append(Field.check("stop_source", "完成后停掉源实例（不删除）", false))
+                            self.form("迁移到 " + to.optString("name"), "用开机脚本在目标账号重建，⚠️ 不复制磁盘数据。", f, "开始迁移") { v in
+                                var create = AccountPage.splitOsImage(v)
+                                create["shape"] = shape
+                                for k in ["switch_dns", "copy_monitor", "stop_source"] { create.removeValue(forKey: k) }
+                                var b: JObj = ["from_account_id": self.id, "from_region": self.region(), "instance_id": inst.optString("id"),
+                                               "name": inst.optString("name"), "to_account_id": to.optInt("id"), "create": create,
+                                               "switch_dns": v.optBoolean("switch_dns"), "copy_monitor": v.optBoolean("copy_monitor"), "stop_source": v.optBoolean("stop_source")]
+                                b["region"] = Regions.current(to)
+                                self.post("/migrate", b) { x in self.taskOrToast(x, "已提交") }
+                            }
+                        }
+                    }
                 } else {
-                    f.append(Field.text("location", "区域", "eastasia"))
-                    f.append(Field.text("size", "大小", "Standard_B1s"))
-                    f.append(Field.select("disk_type", "磁盘", "Premium_LRS", ["Premium_LRS", "StandardSSD_LRS"], ["Premium SSD（免费 P6）", "Standard SSD"]))
-                    f.append(Field.num("disk_gb", "系统盘 GB", "64"))
-                }
-                f.append(Field.check("switch_dns", "完成后把域名切到新 IP", true))
-                f.append(Field.check("copy_monitor", "复制监控设置", true))
-                f.append(Field.check("stop_source", "完成后停掉源实例（不删除）", false))
-                self.form("迁移到 " + to.optString("name"), "用开机脚本在目标账号重建，⚠️ 不复制磁盘数据。", f, "开始迁移") { v in
-                    var create = AccountPage.splitOsImage(v)
-                    for k in ["switch_dns", "copy_monitor", "stop_source"] { create.removeValue(forKey: k) }
-                    var b: JObj = ["from_account_id": self.id, "from_region": self.region(), "instance_id": inst.optString("id"),
-                                   "name": inst.optString("name"), "to_account_id": to.optInt("id"), "create": create,
-                                   "switch_dns": v.optBoolean("switch_dns"), "copy_monitor": v.optBoolean("copy_monitor"), "stop_source": v.optBoolean("stop_source")]
-                    if tp != "azure" { b["region"] = Regions.current(to) }
-                    self.post("/migrate", b) { x in self.taskOrToast(x, "已提交") }
+                    var f: [Field] = [Field.text("name", "新实例名称", inst.optString("name") + "-new")]
+                    if tp == "aws" {
+                        f.append(Field.text("type", "实例类型", "t3.micro"))
+                        f.append(Field.select("os", "系统", "debian-12", ["debian-12", "ubuntu-24.04"], ["Debian 12", "Ubuntu 24.04"]))
+                        f.append(Field.num("disk_gb", "系统盘 GB", "10"))
+                    } else {
+                        f.append(Field.text("location", "区域", "eastasia"))
+                        f.append(Field.text("size", "大小", "Standard_B1s"))
+                        f.append(Field.select("disk_type", "磁盘", "Premium_LRS", ["Premium_LRS", "StandardSSD_LRS"], ["Premium SSD（免费 P6）", "Standard SSD"]))
+                        f.append(Field.num("disk_gb", "系统盘 GB", "64"))
+                    }
+                    f.append(Field.check("switch_dns", "完成后把域名切到新 IP", true))
+                    f.append(Field.check("copy_monitor", "复制监控设置", true))
+                    f.append(Field.check("stop_source", "完成后停掉源实例（不删除）", false))
+                    self.form("迁移到 " + to.optString("name"), "用开机脚本在目标账号重建，⚠️ 不复制磁盘数据。", f, "开始迁移") { v in
+                        var create = AccountPage.splitOsImage(v)
+                        for k in ["switch_dns", "copy_monitor", "stop_source"] { create.removeValue(forKey: k) }
+                        var b: JObj = ["from_account_id": self.id, "from_region": self.region(), "instance_id": inst.optString("id"),
+                                       "name": inst.optString("name"), "to_account_id": to.optInt("id"), "create": create,
+                                       "switch_dns": v.optBoolean("switch_dns"), "copy_monitor": v.optBoolean("copy_monitor"), "stop_source": v.optBoolean("stop_source")]
+                        if tp != "azure" { b["region"] = Regions.current(to) }
+                        self.post("/migrate", b) { x in self.taskOrToast(x, "已提交") }
+                    }
                 }
             }
         }

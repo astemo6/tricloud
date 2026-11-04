@@ -159,6 +159,10 @@ final class UIHub: ObservableObject {
             if !v && self.alert != nil { self.alert = nil; self.didDismiss() }
         })
     }
+
+    func account(_ acc: JObj) -> Page {
+        AppState.shared.pages.account(acc)
+    }
 }
 
 // MARK: - 视图

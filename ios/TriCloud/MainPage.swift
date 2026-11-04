@@ -16,18 +16,70 @@ final class MainPage: Page {
         return p
     }
 
+    var sorting = false
+    var sortList: [JObj] = []
+
     override init() {
         super.init()
         title = "云账号"
     }
 
     override var menu: [(String, () -> Void)] {
-        [("添加云账号", { self.openAddAccount() }),
+        [("账号排序", { self.startSort() }),
+         ("添加云账号", { self.openAddAccount() }),
          ("批量添加账号", { self.openBatchAdd() }),
          ("已删账号", { self.push(DeletedPage()) })]
     }
 
+    func startSort() {
+        get("/accounts") { r in
+            let a = jarr(r)
+            self.sortList = (0..<a.count).map { a.obj($0) }
+            self.sorting = true
+            self.renderSort()
+        }
+    }
+
+    func renderSort() {
+        clear()
+        let top = card("账号排序")
+        top.muted("使用上移/下移调整账号顺序，完成后点完成。")
+        let tr = top.row()
+        tr.button("完成") {
+            let ids = self.sortList.map { $0.optInt("id") }
+            self.post("/accounts/reorder", ["ids": ids]) { _ in
+                self.sorting = false
+                self.toast("已保存")
+                self.refresh()
+            }
+        }
+        tr.button("取消") {
+            self.sorting = false
+            self.refresh()
+        }
+
+        for i in 0..<sortList.count {
+            let acc = sortList[i]
+            let c = card(acc.optString("name"))
+            c.muted(MainPage.pname(acc.optString("provider")))
+            let r = c.row()
+            if i > 0 {
+                r.button("上移") {
+                    self.sortList.swapAt(i, i - 1)
+                    self.renderSort()
+                }
+            }
+            if i < self.sortList.count - 1 {
+                r.button("下移") {
+                    self.sortList.swapAt(i, i + 1)
+                    self.renderSort()
+                }
+            }
+        }
+    }
+
     override func refresh() {
+        if sorting { renderSort(); return }
         get("/accounts") { r in
             self.clear()
             let a = jarr(r)

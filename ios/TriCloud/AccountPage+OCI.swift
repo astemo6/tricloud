@@ -282,3 +282,63 @@ struct SgRuleRow: View {
         }
     }
 }
+
+final class OciInstSecurityPage: Page {
+    let owner: AccountPage
+    let inst: JObj
+
+    init(_ owner: AccountPage, _ inst: JObj) {
+        self.owner = owner
+        self.inst = inst
+        super.init()
+        title = "安全列表"
+    }
+
+    override func refresh() {
+        get("/accounts/\(owner.id)/oci/security?instance_id=" + enc(inst.optString("id")) + "&" + owner.rq()) { r in
+            self.clear()
+            let arr = jarr(r)
+            if arr.isEmpty {
+                self.card("安全列表").muted("暂无规则")
+                return
+            }
+            for i in 0..<arr.count {
+                let sl = arr.obj(i)
+                let slId = sl.optString("id")
+                let slName = str(sl, "name", "安全列表")
+                let c = self.card(slName)
+                let rules = sl.optJSONArray("rules") ?? []
+                if rules.isEmpty {
+                    c.muted("暂无规则")
+                } else {
+                    for j in 0..<rules.count {
+                        let ru = rules.obj(j)
+                        let dir = ru.optString("direction")
+                        let dirText = dir == "ingress" ? "入站" : "出站"
+                        let proto = ru.optString("protocol")
+                        let cidr = ru.optString("cidr")
+                        let port = ru.optString("port")
+                        let idx = ru.optInt("idx")
+                        c.text(dirText + " · " + proto + " · " + cidr + " · " + port, 13)
+                        let warn22 = (dir == "ingress" && port == "22") ? "\n⚠️ 删除 22 端口规则可能导致无法 SSH 登录。" : ""
+                        c.row().button("删除") {
+                            self.confirm("删除规则", "删除这条规则？" + warn22) {
+                                let body: JObj = [
+                                    "op": "remove",
+                                    "region": self.owner.region(),
+                                    "sl_id": slId,
+                                    "direction": dir,
+                                    "idx": idx
+                                ]
+                                self.post("/accounts/\(self.owner.id)/oci/security", body) { _ in
+                                    self.toast("已删除")
+                                    self.refresh()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

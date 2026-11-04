@@ -6,8 +6,8 @@ options:
     iOS: "15.0"
 settings:
   base:
-    MARKETING_VERSION: "1.6.2"
-    CURRENT_PROJECT_VERSION: "36"
+    MARKETING_VERSION: "1.6.3"
+    CURRENT_PROJECT_VERSION: "37"
     SWIFT_VERSION: "5.0"
 targets:
   TriCloud:

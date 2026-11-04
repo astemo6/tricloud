@@ -1117,3 +1117,15 @@
 "增加手动刷新次数" = "Add manual refresh calls";
 "增加次数（1–20 次调用）" = "Calls to add (1–20)";
 "近30天 %@" = "Last 30 days %@";
+"账号排序" = "Account Sorting";
+"使用上移/下移调整账号顺序，完成后点完成。" = "Use Move Up/Down to reorder, click Done when finished.";
+"上移" = "Move Up";
+"下移" = "Move Down";
+"选择规格" = "Select Shape";
+"CloudFront 缓存刷新按钮" = "CloudFront Cache Invalidation Button";
+"安全列表" = "Security Lists";
+"暂无规则" = "No rules";
+"切换账号" = "Switch Account";
+"搜索账号" = "Search Accounts";
+"账号名称" = "Account Name";
+"搜索" = "Search";

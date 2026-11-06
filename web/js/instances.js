@@ -570,9 +570,8 @@ export async function lsPortsDialog(acc, inst) {
     if (f.protocol === "all") { body.from_port = 0; body.to_port = 65535; }
     try { await post(`/accounts/${acc.id}/lightsail/ports`, body); }
     catch (err) {
-      if (f.protocol === "all") return toast(err.message, true);   // all+公网是硬拦截（_public_guard），确认了也不放行，直接显示原因
       if (!/0\.0\.0\.0|整个互联网/.test(err.message)) return toast(err.message, true);
-      if (!(await confirmBox(t("inst.pubTitlePlain"), t("inst.pubConfirmMsg", { port: esc(f.protocol.startsWith("icmp") ? "ICMP" : f.port) }), true))) return;
+      if (!(await confirmBox(t("inst.pubTitlePlain"), t("inst.pubConfirmMsg", { port: esc(f.protocol === "all" ? "0-65535" : f.protocol.startsWith("icmp") ? "ICMP" : f.port) }), true))) return;
       if (!(await act(e.target, () => post(`/accounts/${acc.id}/lightsail/ports`, { ...body, confirm_public: true })))) return;
     }
     toast(t("inst.opened")); bg.remove(); lsPortsDialog(acc, inst);

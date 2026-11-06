@@ -89,16 +89,15 @@ def _truthy(v, default=True):
 
 
 def _public_guard(direction, protocol, cidr, port, confirmed):
-    """入站来源为 0.0.0.0/0 或 ::/0：不允许放行全部端口；单条规则需二次确认（409）。"""
+    """入站来源为 0.0.0.0/0 或 ::/0（含放行全部端口）：必须经二次确认（409 待确认）。
+    原先对「全部端口+公网」是硬拦截（err.all_ports_public），2026-11-06 用户明确不记得有此规则、要求全部打开可用，改为与普通公网放行一致的二次确认。"""
     if direction != "ingress" or str(cidr or "").replace(" ", "") not in PUBLIC_CIDRS:
         return
     from ..providers.oci_provider import OCIProvider
     try:
-        ranges = OCIProvider.parse_ports(port) if protocol in ("tcp", "udp") and str(port or "").strip() else []
+        OCIProvider.parse_ports(port) if protocol in ("tcp", "udp") and str(port or "").strip() else []
     except ValueError as e:
         raise HTTPException(400, str(e))
-    if protocol == "all" or (protocol in ("tcp", "udp") and (not ranges or any(a <= 1 and b >= 65535 for a, b in ranges))):
-        raise HTTPException(400, msg("err.all_ports_public"))
     if not confirmed:
         raise HTTPException(409, {"msg": msg("err.public_warn_msg"), "public_warning": True})
 

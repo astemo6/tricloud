@@ -174,7 +174,8 @@ export async function pageSecurity() {
   if ($("#on")) $("#on").onclick = async () => {
     const r = await post("/2fa/setup").catch((e) => toast(e.message, true));
     if (!r) return;
-    const ok = await modal(t("set.totpEnableTitle"), `<p>${t("set.totpManual2")}</p><input value="${esc(r.secret)}" readonly onclick="this.select()" class="mono">
+    const ok = await modal(t("set.totpEnableTitle"), `${r.qr_svg ? `<div style="background:#fff;padding:12px;border-radius:8px;text-align:center;margin-bottom:6px">${r.qr_svg}</div><p class="muted" style="text-align:center">${t("set.totpScan")}</p>` : ""}
+      <p>${t("set.totpManual2")}</p><input value="${esc(r.secret)}" readonly onclick="this.select()" class="mono">
       <p class="muted">${t("set.totpLink2")}</p><input value="${esc(r.uri)}" readonly onclick="this.select()" class="mono">
       <label>${t("set.totpCode2")}</label><input name="code" inputmode="numeric" maxlength="6">`, (bg) => post("/2fa/enable", form(bg)), t("set.turnOn"));
     if (ok) { toast(t("set.totpOnToast")); pageSecurity(); }

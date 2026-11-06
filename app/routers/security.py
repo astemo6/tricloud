@@ -16,7 +16,18 @@ router = APIRouter()
 def tfa_setup():
     sec = security.totp_new_secret()
     core.set_secret_setting("totp_pending", sec)
-    return {"secret": sec, "uri": security.totp_uri(sec)}
+    uri = security.totp_uri(sec)
+    out = {"secret": sec, "uri": uri}
+    try:   # 二维码只是便利：生成失败不挡开通，前端没 qr_svg 时回退纯手动输入
+        import io
+
+        import segno
+        buf = io.BytesIO()
+        segno.make(uri, error="m").save(buf, kind="svg", scale=5, border=2, xmldecl=False)
+        out["qr_svg"] = buf.getvalue().decode()
+    except Exception:
+        pass
+    return out
 
 
 @router.post("/api/2fa/enable")

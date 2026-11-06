@@ -10,3 +10,4 @@ azure-mgmt-compute>=33
 azure-mgmt-network>=27
 azure-mgmt-costmanagement>=4
 azure-mgmt-resource>=23,<25   # 25+ 把 SubscriptionClient 拆到独立包、26 改了 ResourceManagementClient 导入路径
+segno>=1.6             # 纯 Python 二维码生成（2FA 开通扫码绑定），无原生依赖

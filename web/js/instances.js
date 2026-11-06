@@ -231,10 +231,19 @@ export async function loginFields() {
   let scripts = [];
   try { scripts = await api("/scripts"); } catch (_) { /* ignore */ }
   return `<label><input type="checkbox" name="password_login" style="width:auto" checked> ${t("inst.loginPw")}</label>
-    <label>${t("inst.bootScript")}</label><select name="script_id"><option value="">${t("inst.noTemplate")}</option>${scripts.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select>
+    <label>${t("inst.bootScript")}</label>${scripts.length ? `<div class="picklist">${scripts.map((x) => `<label class="chk"><input type="checkbox" data-script-pick value="${x.id}" style="width:auto"> ${esc(x.name)}</label>`).join("")}</div>` : `<p class="muted">${t("inst.noTemplate")}</p>`}<input type="hidden" name="script_ids" value="">
     <textarea name="script" placeholder="${t("inst.scriptPh")}"></textarea>
 `;
 }
+// 开机脚本模板多选：勾选变化时把已选模板 id（按列表顺序）同步进同弹窗的 hidden script_ids；
+// 复选框本身不带 name（form() 只收 [name] 字段），拼接在后端 resolve_script 完成，自填脚本追加在模板之后
+document.addEventListener("change", (e) => {
+  const cb = e.target.closest("[data-script-pick]");
+  if (!cb) return;
+  const root = cb.closest(".modal") || document;
+  const hid = root.querySelector('[name="script_ids"]');
+  if (hid) hid.value = [...root.querySelectorAll("[data-script-pick]:checked")].map((x) => x.value).join(",");
+});
 export async function showCreated(r) {
   if (!r) return;
   const pw = r.password ? `<label>${t("inst.username")}</label><code>${esc(r.username)}</code><label>${t("inst.pwOnce")}</label>
@@ -248,18 +257,25 @@ export const publicWarn = (cidr, what, okText) => modal(t("inst.pubTitle"), `<p>
 export const OPEN_PORT_WHERE = { oci: "inst.whereOci", aws: "inst.whereAws", azure: "inst.whereAz" };
 // v1.5 实例操作「开放端口」：POST /instances/{id}/open-port，来源固定 0.0.0.0/0；先填端口，再弹公网警告二次确认
 export async function openPortDialog(acc, inst, base, btn) {
-  const v = await modal(t("op.openport"), `<p>${t("inst.openPortBody", { name: esc(inst.name), where: t(OPEN_PORT_WHERE[acc.provider] || "inst.whereDefault") })}</p>
+  const mp = modal(t("op.openport"), `<p>${t("inst.openPortBody", { name: esc(inst.name), where: t(OPEN_PORT_WHERE[acc.provider] || "inst.whereDefault") })}</p>
     <div class="row2"><div><label>${t("inst.portLabel")}</label><input name="port" placeholder="${t("inst.portPh")}"></div>
-    <div><label>${t("inst.protocol")}</label><select name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></div></div>
+    <div><label>${t("inst.protocol")}</label><select name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="all">${t("inst.protoAll")}</option></select></div></div>
     <p class="muted">${t("inst.openPortNote")}</p>`, (f) => {
     const x = form(f);
-    if (!x.port) throw new Error(t("inst.portRequired"));
+    if (x.protocol !== "all" && !x.port) throw new Error(t("inst.portRequired"));
     return x;
   }, t("inst.next"));
+  const bg0 = lastModal();   // 选「全部协议」= 全部端口一并放行，端口框禁用
+  if (bg0) {
+    const pSel = bg0.querySelector('[name="protocol"]'), pIn = bg0.querySelector('[name="port"]');
+    const syncP = () => { pIn.disabled = pSel.value === "all"; };
+    pSel.onchange = syncP; syncP();
+  }
+  const v = await mp;
   if (!v) return;
-  if (!(await publicWarn("0.0.0.0/0", `${v.protocol.toUpperCase()} ${t("inst.portWord")} <code>${esc(v.port)}</code>`, t("inst.pubConfirm")))) return;
+  if (!(await publicWarn("0.0.0.0/0", v.protocol === "all" ? t("inst.allProtoPorts") : `${v.protocol.toUpperCase()} ${t("inst.portWord")} <code>${esc(v.port)}</code>`, t("inst.pubConfirm")))) return;
   const r = await act(btn, () => post(`/accounts/${acc.id}/instances/${encodeURIComponent(inst.id)}/open-port`,
-    { port: v.port, protocol: v.protocol, region: base.region, kind: base.kind, confirm_public: true }));
+    { port: v.protocol === "all" ? "" : v.port, protocol: v.protocol, region: base.region, kind: base.kind, confirm_public: true }));
   if (r) {
     toast(t("inst.openedToast", { a: r.added, skip: r.skipped ? t("inst.skippedPart", { n: r.skipped }) : "" }));
     modal(t("inst.openPortResult"), `<ul>${(r.groups || []).map((g) => `<li>${t("inst.openPortGroup", { kind: esc(g.kind), name: esc(g.name), a: g.added, s: g.skipped })}</li>`).join("")}</ul>`, null, t("common.good"));

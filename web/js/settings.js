@@ -125,8 +125,9 @@ export const SCRIPT_PRESETS = {
   "关闭 OCI 系统防火墙": "#!/bin/bash\niptables -P INPUT ACCEPT; iptables -P FORWARD ACCEPT; iptables -P OUTPUT ACCEPT; iptables -F\nnetfilter-persistent save 2>/dev/null || true\nsystemctl disable --now firewalld 2>/dev/null || true",
   "时区上海 + 常用工具": "#!/bin/bash\ntimedatectl set-timezone Asia/Shanghai\n(apt-get update && apt-get install -y curl wget unzip htop) || (dnf install -y curl wget unzip htop)",
   "更新环境": "#!/bin/bash\nexport DEBIAN_FRONTEND=noninteractive\n(apt-get update && apt-get -y -o Dpkg::Options::=\"--force-confold\" upgrade && apt-get -y autoremove) || (dnf -y upgrade --refresh)",
+  "安装 Fail2ban": "#!/bin/bash\n(apt-get update && apt-get install -y fail2ban) || (dnf install -y fail2ban)\nprintf '[sshd]\\nenabled = true\\n' > /etc/fail2ban/jail.local\nsystemctl enable --now fail2ban",
 };
-const PRESET_LABEL = { "开启 BBR": "set.presetBbr", "2GB Swap": "set.presetSwap", "关闭 OCI 系统防火墙": "set.presetFw", "时区上海 + 常用工具": "set.presetTz", "更新环境": "set.presetUpdate" };
+const PRESET_LABEL = { "开启 BBR": "set.presetBbr", "2GB Swap": "set.presetSwap", "关闭 OCI 系统防火墙": "set.presetFw", "时区上海 + 常用工具": "set.presetTz", "更新环境": "set.presetUpdate", "安装 Fail2ban": "set.presetF2b" };
 
 export async function pageScripts() {
   loading();

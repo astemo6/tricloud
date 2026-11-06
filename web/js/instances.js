@@ -325,7 +325,7 @@ export const migSpec = (p) => ({
       <div><label>${t("inst.diskGb")}</label><input name="disk_gb" type="number" min="47" value="50"></div></div>`,
     aws: `<div class="row2"><div><label>${t("inst.instType")}</label><input name="type" value="t3.micro"></div>
       <div><label>${t("inst.os")}</label><select name="os"><option>debian-12</option><option>ubuntu-24.04</option><option>ubuntu-22.04</option></select></div>
-      <div><label>${t("inst.diskGb")}</label><input name="disk_gb" type="number" min="8" value="10"></div><div><label>${t("inst.extraPorts")}</label><input name="ports" placeholder="80,443"></div></div>`,
+      <div><label>${t("inst.diskGb")}</label><input name="disk_gb" type="number" min="8" value="8"></div><div><label>${t("inst.extraPorts")}</label><input name="ports" placeholder="80,443"></div></div>`,
     azure: `<div class="row2"><div><label>${t("core.region.title")}</label><input name="location" value="eastasia"></div><div><label>${t("inst.size")}</label><input name="size" value="Standard_B1s"></div>
       <div><label>${t("inst.os")}</label><select name="os"><option>debian-12</option><option>ubuntu-24.04</option></select></div>
       <div><label>${t("inst.diskType")}</label><select name="disk_type"><option>Premium_LRS</option><option>StandardSSD_LRS</option></select></div>

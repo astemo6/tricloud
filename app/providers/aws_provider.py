@@ -323,10 +323,13 @@ class AWSProvider(AWSMore, AWSCredit):
         password = gen_password() if p.get("password_login", True) else None
         hn = hostname.normalize(p.get("name") or "tricloud")   # v1.5：主机名默认 = 实例名（规范化后）
         ud = cloud_init(password, "root", p.get("script"), allow_password_ssh=bool(password), hostname=hn or None)
+        img = ec2.describe_images(ImageIds=[ami])["Images"][0]
+        floor = int(((img.get("BlockDeviceMappings") or [{}])[0].get("Ebs") or {}).get("VolumeSize") or 8)   # 镜像快照底线，低于它 AWS 会拒
+        disk = max(int(p.get("disk_gb") or 8), floor)   # 默认按最小（8），低于镜像底线自动抬到底线
         kw = dict(ImageId=ami, InstanceType=itype, MinCount=1, MaxCount=1, UserData=ud,
                   SecurityGroupIds=[self._sg(ports)],
-                  BlockDeviceMappings=[{"DeviceName": ec2.describe_images(ImageIds=[ami])["Images"][0]["RootDeviceName"],
-                                        "Ebs": {"VolumeSize": int(p.get("disk_gb") or 10), "VolumeType": "gp3",
+                  BlockDeviceMappings=[{"DeviceName": img["RootDeviceName"],
+                                        "Ebs": {"VolumeSize": disk, "VolumeType": "gp3",
                                                 "DeleteOnTermination": True}}],
                   TagSpecifications=[{"ResourceType": "instance", "Tags": [{"Key": "Name", "Value": p.get("name") or "tricloud"}]}],
                   MetadataOptions={"HttpTokens": "required"})

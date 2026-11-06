@@ -2,6 +2,7 @@
 停止 = deallocate（释放计算资源，不再计费）；换 IP = 重建 Public IP。
 """
 import base64
+import re
 import threading
 import uuid
 
@@ -375,7 +376,19 @@ class AzureProvider(AzureMore, AzureFoundry):
         qd = QueryDefinition(type="ActualCost", timeframe="MonthToDate", dataset=QueryDataset(
             granularity="None", aggregation={"totalCost": QueryAggregation(name="Cost", function="Sum")},
             grouping=[QueryGrouping(type="Dimension", name="ServiceName")]))
-        r = cm.query.usage(scope=f"/subscriptions/{self.sub}", parameters=qd)
+        from azure.core.exceptions import HttpResponseError
+        try:
+            r = cm.query.usage(scope=f"/subscriptions/{self.sub}", parameters=qd)
+        except HttpResponseError as e:
+            m = re.search(r"offer (MS-AZR-\w+) is not supported", str(e))
+            if m or "Cost management data is unavailable" in str(e):
+                from ..core import CloudUnsupportedError
+                from ..i18n import msg
+                offer = m.group(1) if m else "-"
+                if offer == "MS-AZR-0170P":
+                    offer += " Azure for Students"
+                raise CloudUnsupportedError(msg("err.azure_cost_unsupported", offer=offer)) from None
+            raise
         cols = [c.name for c in r.columns]
         ic, isv = cols.index("Cost"), cols.index("ServiceName")
         icur = cols.index("Currency") if "Currency" in cols else None

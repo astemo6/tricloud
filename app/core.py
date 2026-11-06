@@ -380,6 +380,10 @@ def list_accounts():
     return rows
 
 
+class CloudUnsupportedError(ValueError):
+    """云端明确不支持某功能（如 Azure 学生订阅 MS-AZR-0170P 不支持成本管理 API）：main.py 按 400 返回友好提示。"""
+
+
 class LightsailRegionError(ValueError):
     """Lightsail 不支持该区域（如台北 ap-east-2）：main.py 按 400 返回友好提示，而不是 EndpointConnectionError 原文。
     放在 core 里，main 注册异常处理时不必提前导入 boto3。"""

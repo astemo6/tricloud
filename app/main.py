@@ -82,6 +82,7 @@ async def auth_mw(req: Request, call_next):
     return resp
 
 
+@app.exception_handler(core.CloudUnsupportedError)
 @app.exception_handler(core.LightsailRegionError)
 async def ls_region_err(req, exc):
     return JSONResponse({"detail": str(exc)}, status_code=400)

@@ -43,9 +43,15 @@ bash <(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercon
 
 ## 凭证与最小权限
 
-**OCI**：控制台右上角头像 → User settings（进入 Identity & Security → My profile）→ Tokens and keys 标签 → Add API key，填入 user / tenancy OCID、指纹、区域与私钥 PEM。账单需要 Usage 读权限（租户管理员默认具备）。
+### OCI
 
-**AWS**：控制台 → IAM → 用户 → 创建用户（用户名如 tricloud，不需要勾选控制台登录访问）→ 在创建向导的权限步骤或用户详情的「添加权限 → 创建内联策略 → JSON 标签页」把下方完整策略整段粘贴保存（只用账单 + CloudFront 的账号改用后面的精简策略）→ 建完后进该用户的「安全凭证」标签 → 创建访问密钥（用途选“其他”即可），得到 Access Key ID 和 Secret Access Key（Secret 只显示一次，当场保存）→ 把 Access Key ID 与 Secret Access Key 填进面板「添加账号 → AWS」的对应字段：
+控制台右上角头像 → User settings（进入 Identity & Security → My profile）→ Tokens and keys 标签 → Add API key，填入 user / tenancy OCID、指纹、区域与私钥 PEM。账单需要 Usage 读权限（租户管理员默认具备）。
+
+### AWS
+
+控制台 → IAM → 用户 → 创建用户（用户名如 tricloud，不需要勾选控制台登录访问）→ 在创建向导的权限步骤或用户详情的「添加权限 → 创建内联策略 → JSON 标签页」把下方完整策略整段粘贴保存（只用账单 + CloudFront 的账号改用后面的精简策略）→ 建完后进该用户的「安全凭证」标签 → 创建访问密钥（用途选“其他”即可），得到 Access Key ID 和 Secret Access Key（Secret 只显示一次，当场保存）→ 把 Access Key ID 与 Secret Access Key 填进面板「添加账号 → AWS」的对应字段：
+
+#### 完整策略（一般账号）
 
 ```json
 {
@@ -125,7 +131,9 @@ bash <(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercon
 
 CloudFront 包月套餐订阅时面板会自动为分发创建并关联一个配套 WAF，取消套餐后自动删除；缺 `wafv2:DeleteWebACL` 会导致残留 WAF 删不掉、按月白白付费。
 
-仅用账单 + CloudFront 的账号可用精简策略：
+#### 精简策略（仅账单 + CloudFront 的账号）
+
+仅用账单 + CloudFront 的老账号用这份：
 
 ```json
 {
@@ -154,9 +162,15 @@ CloudFront 包月套餐订阅时面板会自动为分发创建并关联一个配
 }
 ```
 
-精简策略已经过 2026-11-04 全量代码审计：含 `cloudwatch:GetMetricStatistics`（分发列表「已用流量」列）与 `cloudfront:CreateInvalidation`（缓存刷新；`*Distribution*` 通配符不覆盖它）。精简策略定位老号的账单 + CloudFront，不含新号 Credit 的 freetier 权限（用 Credit 功能的是完整策略）。若账号是照早期版本贴的精简策略，请整段换成上面这版最终版。完整策略同日审计补齐 30 条（Credit 一键活动的 budgets/lambda/iam/rds/bedrock、EC2 重装系统的 CreateReplaceRootVolumeTask、缓存刷新等），老账号建议整段覆盖为新版。2026-11-06 完整策略再补 `pricing:GetProducts`（EC2 创建页机型月价查询；缺这条只是价格不显示，其余功能不受影响），完整策略现 62 条。
+#### 策略说明与变更记录
 
-**Azure**：`az ad sp create-for-rbac --name tricloud --role "Virtual Machine Contributor" --scopes /subscriptions/<SUB_ID>`，换 IP / 创建 VM / 资源组管理需在订阅上授予 Contributor（或 Virtual Machine Contributor + Network Contributor + 资源组写权限），账单需 Cost Management Reader。学生订阅部分账单 API 可能不可用，面板会显示错误而不影响其他功能。
+- **精简策略要点**：已经过 2026-11-04 全量代码审计。含 `cloudwatch:GetMetricStatistics`（分发列表「已用流量」列）与 `cloudfront:CreateInvalidation`（缓存刷新；`*Distribution*` 通配符不覆盖它）。定位老号的账单 + CloudFront，不含新号 Credit 的 freetier 权限（用 Credit 功能的是完整策略）。
+- **整段覆盖**：若账号是照早期版本贴的精简策略，请整段换成上面这版最终版；完整策略同理，老账号建议整段覆盖为新版。
+- **变更记录**：2026-11-04 完整策略经全量审计补齐 30 条（Credit 一键活动的 budgets/lambda/iam/rds/bedrock、EC2 重装系统的 CreateReplaceRootVolumeTask、缓存刷新等）；2026-11-06 再补 `pricing:GetProducts`（EC2 创建页机型月价查询；缺这条只是价格不显示，其余功能不受影响），完整策略现 62 条。
+
+### Azure
+
+`az ad sp create-for-rbac --name tricloud --role "Virtual Machine Contributor" --scopes /subscriptions/<SUB_ID>`，换 IP / 创建 VM / 资源组管理需在订阅上授予 Contributor（或 Virtual Machine Contributor + Network Contributor + 资源组写权限），账单需 Cost Management Reader。学生订阅部分账单 API 可能不可用，面板会显示错误而不影响其他功能。
 
 > 三家云凭证的图文获取步骤（含 Azure Cloud Shell 一键命令）见 [docs/api-credentials.md](docs/api-credentials.md)。
 

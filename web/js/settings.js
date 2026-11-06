@@ -124,8 +124,9 @@ export const SCRIPT_PRESETS = {
   "2GB Swap": "#!/bin/bash\nfallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile\necho '/swapfile none swap sw 0 0' >> /etc/fstab",
   "关闭 OCI 系统防火墙": "#!/bin/bash\niptables -P INPUT ACCEPT; iptables -P FORWARD ACCEPT; iptables -P OUTPUT ACCEPT; iptables -F\nnetfilter-persistent save 2>/dev/null || true\nsystemctl disable --now firewalld 2>/dev/null || true",
   "时区上海 + 常用工具": "#!/bin/bash\ntimedatectl set-timezone Asia/Shanghai\n(apt-get update && apt-get install -y curl wget unzip htop) || (dnf install -y curl wget unzip htop)",
+  "更新环境": "#!/bin/bash\nexport DEBIAN_FRONTEND=noninteractive\n(apt-get update && apt-get -y -o Dpkg::Options::=\"--force-confold\" upgrade && apt-get -y autoremove) || (dnf -y upgrade --refresh)",
 };
-const PRESET_LABEL = { "开启 BBR": "set.presetBbr", "2GB Swap": "set.presetSwap", "关闭 OCI 系统防火墙": "set.presetFw", "时区上海 + 常用工具": "set.presetTz" };
+const PRESET_LABEL = { "开启 BBR": "set.presetBbr", "2GB Swap": "set.presetSwap", "关闭 OCI 系统防火墙": "set.presetFw", "时区上海 + 常用工具": "set.presetTz", "更新环境": "set.presetUpdate" };
 
 export async function pageScripts() {
   loading();

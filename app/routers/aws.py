@@ -243,6 +243,8 @@ async def ls_port_op(acc_id: int, body: dict = Body(...)):
         a, b = int(body.get("from_port")), int(body.get("to_port") or body.get("from_port"))
     except (TypeError, ValueError):
         raise HTTPException(400, msg("err.port_required"))
+    if proto in ("icmp", "icmpv6"):
+        a, b = 0, 0   # icmp 无端口概念：云端存值是 -1（全部类型），直接校验会误报「端口范围无效」；归一后由 provider 转回 -1
     if not (0 <= a <= b <= 65535):
         raise HTTPException(400, msg("err.port_range_invalid"))
     p = P(acc_id, body.get("region"))

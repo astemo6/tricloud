@@ -77,7 +77,7 @@ export async function tabRecycle(acc, box) {
 }
 export async function ec2Create(acc, reload) {
   let o;
-  try { o = await api(`/accounts/${acc.id}/aws/ec2-options`); } catch (e) { return toast(e.message, true); }
+  try { o = await api(`/accounts/${acc.id}/aws/ec2-options?${rq(acc)}`); } catch (e) { return toast(e.message, true); }
   const d = SETTINGS.default_create?.aws || {};
   const specs = o.specs || {};
   const cur = d.type === "__custom__" ? "" : (d.type || "t3.micro");

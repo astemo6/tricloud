@@ -12,9 +12,9 @@ router = APIRouter()
 
 # ---------------- AWS: EC2 创建 / 区域 ----------------
 @router.get("/api/accounts/{acc_id}/aws/ec2-options")
-async def ec2_opts(acc_id: int):
+async def ec2_opts(acc_id: int, region: str = None):
     need_acc(acc_id, "aws")
-    return await run(services.provider(acc_id).ec2_options)
+    return await run(services.provider(acc_id, region).ec2_options)
 
 
 @router.post("/api/accounts/{acc_id}/aws/ec2-create")

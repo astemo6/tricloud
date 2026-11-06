@@ -274,12 +274,13 @@ class AWSProvider(AWSMore, AWSCredit):
         return {"types": self.EC2_TYPES, "os": list(self.AMI_PARAMS.keys()), "specs": specs}
 
     def _ec2_prices(self):
-        """预置机型的官方按需月价（小时价×730）：Pricing API 查询，settings 缓存（有价 7 天 / 空结果 1 天）。
+        """预置机型的官方按需月价（小时价×730）：Pricing API 查询，settings 按区域缓存（有价 7 天 / 空结果 1 小时，
+        空多半是 IAM 还没给 pricing:GetProducts，授权后最多等 1 小时自动恢复）。需 pricing:GetProducts 权限。
         任何失败都返回已拿到的部分或 {}——创建页没价格照常打开，绝不因查价报错。"""
         key = f"ec2_prices:{self.region}"
         try:
             d = get_setting(key) or {}
-            ttl = 7 * 86400 if d.get("prices") else 86400
+            ttl = 7 * 86400 if d.get("prices") else 3600
             if d and time.time() - float(d.get("ts") or 0) < ttl:
                 return d.get("prices") or {}
         except Exception:

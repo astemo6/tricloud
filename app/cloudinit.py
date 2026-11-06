@@ -53,7 +53,29 @@ def cloud_init(password=None, user="root", script=None, ssh_key=None, allow_pass
 
 
 def resolve_script(p):
-    """创建参数里 script_id 优先，其次 script 原文。"""
+    """创建参数的开机脚本解析：
+    - script_ids（多选模板，逗号串或列表）：按所给顺序拼接，后段去掉各自的 #! 行并加 "# ===== 模板名 =====" 分隔；
+      自填 script 非空时作为最后一段追加。
+    - 旧 script_id（单选，App 仍在用）：取该模板原文。
+    - 都没有：script / user_data 原文。"""
+    ids = p.get("script_ids")
+    if isinstance(ids, str):
+        ids = [x for x in re.split(r"[,\s]+", ids) if x]
+    parts = []
+    for i in ids or []:
+        r = core.q("SELECT name, content FROM scripts WHERE id=?", (int(i),), one=True)
+        if r and (r["content"] or "").strip():
+            parts.append((r["name"], r["content"].strip()))
+    raw = (p.get("script") or "").strip()
+    if parts:
+        if raw:
+            parts.append(("自填脚本", raw))
+        out = []
+        for idx, (name, content) in enumerate(parts):
+            if idx and content.startswith("#!"):
+                content = content.split("\n", 1)[1].lstrip("\n") if "\n" in content else ""
+            out.append(content if idx == 0 else f"# ===== {name} =====\n{content}")
+        return "\n\n".join(out)
     if p.get("script_id"):
         r = core.q("SELECT content FROM scripts WHERE id=?", (int(p["script_id"]),), one=True)
         return r["content"] if r else None

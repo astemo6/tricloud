@@ -304,7 +304,8 @@ class AzureProvider(AzureMore, AzureFoundry):
                 name, i = base, 2
                 while name.lower() in names:
                     name, i = f"{base}-{i}", i + 1
-                rule = SecurityRule(protocol=protocol.capitalize(), source_port_range="*", destination_port_range=port,
+                rule = SecurityRule(protocol={"tcp": "Tcp", "udp": "Udp", "all": "*"}.get(protocol, protocol.capitalize()),
+                                    source_port_range="*", destination_port_range="*" if protocol == "all" else port,
                                     source_address_prefix="0.0.0.0/0", destination_address_prefix="*", access="Allow",
                                     priority=prio, direction="Inbound", description="TriCloud open port")
                 created = self.network.security_rules.begin_create_or_update(nrg, nname, name, rule).result()

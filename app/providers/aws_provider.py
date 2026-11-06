@@ -361,8 +361,12 @@ class AWSProvider(AWSMore, AWSCredit):
                 if "all" in have or (a, b) in have:
                     skipped += 1
                     continue
-                new.append({"IpProtocol": protocol, "FromPort": a, "ToPort": b,
-                            "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "TriCloud open port"}]})
+                if protocol == "all":   # 全部协议：IpProtocol=-1 且不带端口（AWS 语义即全部端口）
+                    new.append({"IpProtocol": "-1",
+                                "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "TriCloud open port"}]})
+                else:
+                    new.append({"IpProtocol": protocol, "FromPort": a, "ToPort": b,
+                                "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "TriCloud open port"}]})
             added = 0
             for perm in new:   # 逐条提交：个别规则并发重复时不影响其它
                 try:

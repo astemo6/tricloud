@@ -101,9 +101,10 @@ async def resize(acc_id: int, body: dict = Body(...)):
 
 @router.post("/api/accounts/{acc_id}/instances/{iid:path}/open-port")
 async def inst_open_port(acc_id: int, iid: str, body: dict = Body(...)):
-    """实例操作「开放端口」（三家云）：来源固定 0.0.0.0/0。port 可填 "8443" 或 "80, 443, 8000-8100"。
+    """实例操作「开放端口」（三家云）：来源固定 0.0.0.0/0。port 可填 "8443" 或 "80, 443, 8000-8100"；
+    protocol 可为 tcp / udp / all（all = 全部协议 + 全部端口，port 可空）。
     OCI 写子网安全列表；AWS 写实例全部安全组；Azure 写网卡 / 子网 NSG。已存在的规则跳过。
-    不带 confirm_public 返回 409（detail.public_warning）；空端口或 1-65535 返回 400。"""
+    不带 confirm_public 返回 409（detail.public_warning）。"""
     acc = need_acc(acc_id)
     iid = (body.get("instance_id") or "").strip() if iid.strip("/") in ("", "-", "_") else iid
     if not iid:
@@ -111,14 +112,14 @@ async def inst_open_port(acc_id: int, iid: str, body: dict = Body(...)):
     if acc["provider"] == "aws" and body.get("kind", "vm") != "vm":
         raise HTTPException(400, msg("err.ls_fw_console"))
     proto = str(body.get("protocol") or "tcp").strip().lower()
-    if proto not in ("tcp", "udp"):
+    if proto not in ("tcp", "udp", "all"):
         raise HTTPException(400, msg("err.proto_tcp_udp"))
     port = str(body.get("port") if body.get("port") is not None else "").strip()
-    if not port:
+    if proto != "all" and not port:
         raise HTTPException(400, msg("err.ports_hint"))
     from ..providers.oci_provider import OCIProvider
     try:
-        ranges = OCIProvider.parse_ports(port)
+        ranges = [(0, 65535)] if proto == "all" else OCIProvider.parse_ports(port)
     except ValueError as e:
         raise HTTPException(400, str(e))
     _public_guard("ingress", proto, "0.0.0.0/0", port, body.get("confirm_public"))
@@ -127,7 +128,7 @@ async def inst_open_port(acc_id: int, iid: str, body: dict = Body(...)):
     except (ValueError, LookupError) as e:
         raise HTTPException(400, str(e))
     parts = [f"{g['kind']} {g['name']}：新增 {g['added']} 条，跳过 {g['skipped']} 条（已存在）" for g in res.get("groups", [])]
-    res["msg"] = f"{proto.upper()} {port}（来源 0.0.0.0/0）\n" + "\n".join(parts)
+    res["msg"] = f"{proto.upper()} {port or '0-65535'}（来源 0.0.0.0/0）\n" + "\n".join(parts)
     return res
 
 

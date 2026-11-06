@@ -5,6 +5,7 @@
 import calendar
 import concurrent.futures as cf
 import datetime as dt
+import json
 import threading
 import time
 import uuid
@@ -260,8 +261,57 @@ class AWSProvider(AWSMore, AWSCredit):
         ec2.authorize_security_group_ingress(GroupId=gid, IpPermissions=perms)
         return gid
 
+    # 预置机型的规格（vCPU, 内存GB）：公开稳定参数，供创建页展示；价格走 _ec2_prices 实时查官方价目
+    EC2_TYPE_SPECS = {"t2.micro": (1, 1.0), "t3.micro": (2, 1.0), "t3.small": (2, 2.0), "t3.medium": (2, 4.0),
+                      "t4g.micro": (2, 1.0), "t4g.small": (2, 2.0), "t4g.medium": (2, 4.0),
+                      "c5.large": (2, 4.0), "c6g.large": (2, 4.0), "c7g.large": (2, 4.0),
+                      "m5.large": (2, 8.0), "m6g.large": (2, 8.0), "r6g.large": (2, 16.0)}
+
     def ec2_options(self):
-        return {"types": self.EC2_TYPES, "os": list(self.AMI_PARAMS.keys())}
+        prices = self._ec2_prices()
+        specs = {t: {"vcpu": v, "ram": r, **({"monthly": prices[t]} if t in prices else {})}
+                 for t, (v, r) in self.EC2_TYPE_SPECS.items()}
+        return {"types": self.EC2_TYPES, "os": list(self.AMI_PARAMS.keys()), "specs": specs}
+
+    def _ec2_prices(self):
+        """预置机型的官方按需月价（小时价×730）：Pricing API 查询，settings 缓存（有价 7 天 / 空结果 1 天）。
+        任何失败都返回已拿到的部分或 {}——创建页没价格照常打开，绝不因查价报错。"""
+        key = f"ec2_prices:{self.region}"
+        try:
+            d = get_setting(key) or {}
+            ttl = 7 * 86400 if d.get("prices") else 86400
+            if d and time.time() - float(d.get("ts") or 0) < ttl:
+                return d.get("prices") or {}
+        except Exception:
+            pass
+        prices = {}
+        try:
+            pr = self.c("pricing", "us-east-1")
+            for t in self.EC2_TYPES:
+                r = pr.get_products(ServiceCode="AmazonEC2", FormatVersion="aws_v1", MaxResults=10, Filters=[
+                    {"Type": "TERM_MATCH", "Field": "regionCode", "Value": self.region},
+                    {"Type": "TERM_MATCH", "Field": "instanceType", "Value": t},
+                    {"Type": "TERM_MATCH", "Field": "operatingSystem", "Value": "Linux"},
+                    {"Type": "TERM_MATCH", "Field": "tenancy", "Value": "Shared"},
+                    {"Type": "TERM_MATCH", "Field": "preInstalledSw", "Value": "NA"},
+                    {"Type": "TERM_MATCH", "Field": "capacitystatus", "Value": "Used"},
+                    {"Type": "TERM_MATCH", "Field": "marketoption", "Value": "OnDemand"}])
+                for item in r.get("PriceList") or []:
+                    doc = json.loads(item)
+                    for term in (doc.get("terms", {}).get("OnDemand") or {}).values():
+                        for dim in (term.get("priceDimensions") or {}).values():
+                            usd = float((dim.get("pricePerUnit") or {}).get("USD") or 0)
+                            if usd > 0:
+                                prices[t] = round(usd * 730, 2)
+                    if t in prices:
+                        break
+        except Exception:
+            return prices
+        try:
+            set_setting(key, {"ts": time.time(), "prices": prices})
+        except Exception:
+            pass
+        return prices
 
     def ec2_create(self, p):
         """p: name, type, os, disk_gb, ports(逗号分隔), password_login, script, key_name"""

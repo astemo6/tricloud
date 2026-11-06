@@ -79,13 +79,24 @@ export async function ec2Create(acc, reload) {
   let o;
   try { o = await api(`/accounts/${acc.id}/aws/ec2-options`); } catch (e) { return toast(e.message, true); }
   const d = SETTINGS.default_create?.aws || {};
-  const r = await modal(t("inst.createEc2"), `<div class="row2">
+  const specs = o.specs || {};
+  const cur = d.type === "__custom__" ? "" : (d.type || "t3.micro");
+  const isCustom = !!cur && !o.types.includes(cur);
+  const customVal = isCustom ? cur : (d.type_custom || "");
+  const mp = modal(t("inst.createEc2"), `<div class="row2">
     <div><label>${t("acc.colName")}</label><input name="name" value="ec2-${Date.now().toString(36)}"></div>
-    <div><label>${t("inst.instType")}</label><input name="type" list="ec2types" value="${esc(d.type || "t3.micro")}"><datalist id="ec2types">${o.types.map((x) => `<option>${x}</option>`).join("")}</datalist></div>
+    <div><label>${t("inst.instType")}</label><select name="type">${o.types.map((x) => { const s = specs[x]; return `<option value="${esc(x)}"${x === cur ? " selected" : ""}>${esc(x)}${s ? ` · ${s.vcpu}C/${s.ram}G` : ""}${s?.monthly ? ` · ≈$${s.monthly}/月` : ""}</option>`; }).join("")}<option value="__custom__"${isCustom || d.type === "__custom__" ? " selected" : ""}>${t("aws.ec2CustomType")}</option></select><input name="type_custom" value="${esc(customVal)}" placeholder="t3.large" style="display:none;margin-top:6px"></div>
     <div><label>${t("inst.os")}</label><select name="os">${o.os.map((x) => `<option ${x === d.os ? "selected" : ""}>${x}</option>`).join("")}</select></div>
     <div><label>${t("aws.ec2Disk")}</label><input name="disk_gb" type="number" min="8" value="${esc(d.disk_gb || 10)}"></div></div>
     <label>${t("aws.ec2Ports")}</label><input name="ports" placeholder="80,443" value="${esc(d.ports || "")}">
-    ${await loginFields()}<div class="bar">${saveDefaultBtn("aws")}</div>`, (bg) => post(`/accounts/${acc.id}/aws/ec2-create`, { ...form(bg), region: regionOf(acc) }), t("oci.create"));
+    ${await loginFields()}<div class="bar">${saveDefaultBtn("aws")}</div>`, (bg) => { const v = form(bg); if (v.type === "__custom__") v.type = (v.type_custom || "").trim(); delete v.type_custom; return post(`/accounts/${acc.id}/aws/ec2-create`, { ...v, region: regionOf(acc) }); }, t("oci.create"));
+  const bg0 = lastModal();   // 选「手动输入其他机型」时才显示机型文本框
+  if (bg0) {
+    const tSel = bg0.querySelector('[name="type"]'), cIn = bg0.querySelector('[name="type_custom"]');
+    const syncC = () => { cIn.style.display = tSel.value === "__custom__" ? "" : "none"; };
+    tSel.onchange = syncC; syncC();
+  }
+  const r = await mp;
   if (r) { showCreated(r); setTimeout(reload, 4000); }
 }
 

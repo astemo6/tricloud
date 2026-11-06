@@ -74,6 +74,8 @@ ok("web: type is a spec-labeled select with custom escape hatch", '<select name=
    and 'name="type_custom"' in web and "s.vcpu" in web and "s.monthly" in web and "aws.ec2CustomType" in web)
 i18n = open(os.path.join(ROOT, "web/js/i18n.js"), encoding="utf-8").read()
 ok("i18n: ec2CustomType in zh+en", i18n.count('"aws.ec2CustomType"') == 2)
+ok("web: cheapest type tagged", "specs[a].monthly - specs[b].monthly" in web and 'x === cheap' in web and "aws.ec2Cheapest" in web)
+ok("i18n: ec2Cheapest in zh+en", i18n.count('"aws.ec2Cheapest"') == 2)
 router = open(os.path.join(ROOT, "app/routers/aws.py"), encoding="utf-8").read()
 ok("router: ec2-options honors ?region (prices match UI region)", "async def ec2_opts(acc_id: int, region: str = None)" in router and "services.provider(acc_id, region).ec2_options" in router)
 ok("web: ec2-options called with rq(acc)", "aws/ec2-options?${rq(acc)}" in web)

@@ -80,12 +80,13 @@ export async function ec2Create(acc, reload) {
   try { o = await api(`/accounts/${acc.id}/aws/ec2-options?${rq(acc)}`); } catch (e) { return toast(e.message, true); }
   const d = SETTINGS.default_create?.aws || {};
   const specs = o.specs || {};
+  const cheap = o.types.filter((x) => specs[x]?.monthly).sort((a, b) => specs[a].monthly - specs[b].monthly)[0];
   const cur = d.type === "__custom__" ? "" : (d.type || "t3.micro");
   const isCustom = !!cur && !o.types.includes(cur);
   const customVal = isCustom ? cur : (d.type_custom || "");
   const mp = modal(t("inst.createEc2"), `<div class="row2">
     <div><label>${t("acc.colName")}</label><input name="name" value="ec2-${Date.now().toString(36)}"></div>
-    <div><label>${t("inst.instType")}</label><select name="type">${o.types.map((x) => { const s = specs[x]; return `<option value="${esc(x)}"${x === cur ? " selected" : ""}>${esc(x)}${s ? ` · ${s.vcpu}C/${s.ram}G` : ""}${s?.monthly ? ` · ≈$${s.monthly}/月` : ""}</option>`; }).join("")}<option value="__custom__"${isCustom || d.type === "__custom__" ? " selected" : ""}>${t("aws.ec2CustomType")}</option></select><input name="type_custom" value="${esc(customVal)}" placeholder="t3.large" style="display:none;margin-top:6px"></div>
+    <div><label>${t("inst.instType")}</label><select name="type">${o.types.map((x) => { const s = specs[x]; return `<option value="${esc(x)}"${x === cur ? " selected" : ""}>${esc(x)}${s ? ` · ${s.vcpu}C/${s.ram}G` : ""}${s?.monthly ? ` · ≈$${s.monthly}/月` : ""}${x === cheap ? ` · ${t("aws.ec2Cheapest")}` : ""}</option>`; }).join("")}<option value="__custom__"${isCustom || d.type === "__custom__" ? " selected" : ""}>${t("aws.ec2CustomType")}</option></select><input name="type_custom" value="${esc(customVal)}" placeholder="t3.large" style="display:none;margin-top:6px"></div>
     <div><label>${t("inst.os")}</label><select name="os">${o.os.map((x) => `<option ${x === d.os ? "selected" : ""}>${x}</option>`).join("")}</select></div>
     <div><label>${t("aws.ec2Disk")}</label><input name="disk_gb" type="number" min="8" value="${esc(d.disk_gb || 8)}"></div></div>
     <label>${t("aws.ec2Ports")}</label><input name="ports" placeholder="80,443" value="${esc(d.ports || "")}">

@@ -550,9 +550,9 @@ export async function lsPortsDialog(acc, inst) {
   const load = () => api(`/accounts/${acc.id}/lightsail/ports?instance=${encodeURIComponent(inst.id)}&${rq(acc)}`);
   let ports;
   try { ports = await load(); } catch (e) { return toast(e.message, true); }
-  modal(t("inst.fwTitle", { name: inst.name }), `<table><tr><th>${t("inst.protocol")}</th><th>${t("inst.port")}</th><th>${t("inst.source")}</th><th></th></tr>${ports.map((p, i) => `<tr><td>${esc(p.protocol)}</td><td>${p.from === p.to ? p.from : `${p.from}-${p.to}`}</td>
+  modal(t("inst.fwTitle", { name: inst.name }), `<table><tr><th>${t("inst.protocol")}</th><th>${t("inst.port")}</th><th>${t("inst.source")}</th><th></th></tr>${ports.map((p, i) => `<tr><td>${esc(p.protocol)}</td><td>${p.protocol.startsWith("icmp") ? "-" : (p.from === p.to ? p.from : `${p.from}-${p.to}`)}</td>
     <td class="mono">${esc([...p.cidrs, ...p.ipv6_cidrs].join(", ") || "-")}</td><td><button class="btn sm danger" data-close="${i}">${t("inst.closePort")}</button></td></tr>`).join("") || `<tr><td colspan=4 class="muted">${t("inst.noOpenPorts")}</td></tr>`}</table>
-    <div class="row2"><div><label>${t("inst.protocol")}</label><select name="protocol"><option>tcp</option><option>udp</option><option>icmp</option></select></div>
+    <div class="row2"><div><label>${t("inst.protocol")}</label><select name="protocol"><option>tcp</option><option>udp</option><option>icmp</option><option>icmpv6</option><option>all</option></select></div>
     <div><label>${t("inst.portRangeLabel")}</label><input name="port" placeholder="${t("inst.portPh")}"></div></div>
     <label>${t("inst.cidrLabel")}</label><input name="cidrs" value="0.0.0.0/0">
     <div class="bar"><button class="btn primary" id="lsOpen">${t("op.openport")}</button></div>`, null, t("common.close"));
@@ -564,13 +564,15 @@ export async function lsPortsDialog(acc, inst) {
   }));
   bg.querySelector("#lsOpen").onclick = async (e) => {
     const f = form(bg); const m = /^(\d+)(?:\s*-\s*(\d+))?$/.exec(f.port || "");
-    if (f.protocol !== "icmp" && !m) return toast(t("inst.portFormat"), true);
-    const body = { op: "open", instance: inst.id, region: regionOf(acc), protocol: f.protocol, from_port: m ? +m[1] : -1, to_port: m ? +(m[2] || m[1]) : -1, cidrs: f.cidrs };
-    if (f.protocol === "icmp") { body.from_port = 0; body.to_port = 0; }
+    const noPort = ["icmp", "icmpv6", "all"].includes(f.protocol);
+    if (!noPort && !m) return toast(t("inst.portFormat"), true);
+    const body = { op: "open", instance: inst.id, region: regionOf(acc), protocol: f.protocol, from_port: m ? +m[1] : 0, to_port: m ? +(m[2] || m[1]) : 0, cidrs: f.cidrs };
+    if (f.protocol === "all") { body.from_port = 0; body.to_port = 65535; }
     try { await post(`/accounts/${acc.id}/lightsail/ports`, body); }
     catch (err) {
+      if (f.protocol === "all") return toast(err.message, true);   // all+公网是硬拦截（_public_guard），确认了也不放行，直接显示原因
       if (!/0\.0\.0\.0|整个互联网/.test(err.message)) return toast(err.message, true);
-      if (!(await confirmBox(t("inst.pubTitlePlain"), t("inst.pubConfirmMsg", { port: esc(f.port || "ICMP") }), true))) return;
+      if (!(await confirmBox(t("inst.pubTitlePlain"), t("inst.pubConfirmMsg", { port: esc(f.protocol.startsWith("icmp") ? "ICMP" : f.port) }), true))) return;
       if (!(await act(e.target, () => post(`/accounts/${acc.id}/lightsail/ports`, { ...body, confirm_public: true })))) return;
     }
     toast(t("inst.opened")); bg.remove(); lsPortsDialog(acc, inst);

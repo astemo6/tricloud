@@ -13,7 +13,12 @@ router = APIRouter()
 @router.get("/api/accounts/{acc_id}/billing")
 async def billing(acc_id: int, force: bool = False):
     need_acc(acc_id)
-    return await run(services.billing, acc_id, force)
+    try:
+        return await run(services.billing, acc_id, force)
+    except core.CloudUnsupportedError:
+        raise   # 全局 handler 渲染「订阅不支持成本 API」的专门提示，别在这里吞掉
+    except ValueError as e:   # 如 Azure 429 限流：给用户看人话，不要冒 500
+        raise HTTPException(400, str(e))
 
 
 @router.post("/api/accounts/{acc_id}/billing/allowance")

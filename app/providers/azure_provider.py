@@ -389,7 +389,10 @@ class AzureProvider(AzureMore, AzureFoundry):
                 if offer == "MS-AZR-0170P":
                     offer += " Azure for Students"
                 raise CloudUnsupportedError(msg("err.azure_cost_unsupported", offer=offer)) from None
-            raise
+            from ..i18n import msg
+            if getattr(e, "status_code", None) == 429:   # Azure 成本接口限流很严，原样冒泡会被路由显示成 500
+                raise ValueError(msg("err.azure_throttled")) from None
+            raise ValueError(msg("err.azure_billing_failed", detail=str(e).splitlines()[0][:160])) from None
         cols = [c.name for c in r.columns]
         ic, isv = cols.index("Cost"), cols.index("ServiceName")
         icur = cols.index("Currency") if "Currency" in cols else None

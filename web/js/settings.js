@@ -157,7 +157,7 @@ export async function pageScripts() {
 // 安全与备份：2FA、API Token、审计、备份恢复
 export async function pageSecurity() {
   loading();
-  const [toks, logs] = await Promise.all([api("/tokens"), api("/audit?limit=100")]);
+  const [toks, logs, logins] = await Promise.all([api("/tokens"), api("/audit?limit=100"), api("/audit/logins")]);
   const s = await api("/settings");
   view.innerHTML = `<div class="grid">
   <div class="card"><h3>${t("set.totpTitle")}</h3>
@@ -169,8 +169,10 @@ export async function pageSecurity() {
     <p class="muted">${t("set.tokNote2")}</p>
     <table><tr><th>${t("acc.colName")}</th><th>${t("set.colPrefix")}</th><th>${t("set.colPerm")}</th><th>${t("set.colRecent")}</th><th></th></tr>${toks.map((tk) => `<tr><td>${esc(tk.name)}</td><td class="mono">${esc(tk.prefix)}…</td><td>${tk.scope === "read" ? t("set.scopeRead") : t("set.scopeFullShort")}</td>
     <td>${tk.last_used ? new Date(tk.last_used * 1000).toLocaleString() : t("set.never")}</td><td><button class="btn sm danger" data-rv="${tk.id}">${t("set.revoke")}</button></td></tr>`).join("") || `<tr><td colspan=5 class="muted">${t("common.none")}</td></tr>`}</table></div></div>
+  <div class="card"><h3>${t("set.loginTitle")}</h3><table><tr><th>${t("set.colTime")}</th><th>IP</th><th>${t("set.colResult")}</th></tr>
+    ${logins.map((l) => `<tr><td>${new Date(l.ts * 1000).toLocaleString()}</td><td class="mono">${esc(l.ip)}</td><td>${String(l.detail).includes("200") ? `<span class="badge running">${t("set.loginOk")}</span>` : `<span class="badge terminated">${t("set.loginFail")}</span>`}</td></tr>`).join("") || `<tr><td colspan=3 class="muted">${t("common.none")}</td></tr>`}</table></div>
   <div class="card"><div class="bar"><h3 class="grow" style="margin:0">${t("set.auditTitle2")}</h3><button class="btn sm danger" id="auClr">${t("set.auditClear2")}</button></div><table><tr><th>${t("set.colTime")}</th><th>IP</th><th>${t("set.colSource")}</th><th>${t("set.colAction")}</th><th>${t("set.colResult")}</th></tr>
-    ${logs.map((l) => `<tr><td>${new Date(l.ts * 1000).toLocaleString()}</td><td class="mono">${esc(l.ip)}</td><td>${esc(l.actor)}</td><td class="mono">${esc(l.action)}</td><td>${esc(l.detail)}</td></tr>`).join("") || `<tr><td colspan=5 class="muted">${t("common.none")}</td></tr>`}</table></div>`;
+    ${logs.map((l) => `<tr><td>${new Date(l.ts * 1000).toLocaleString()}</td><td class="mono">${esc(l.ip)}</td><td>${esc(l.actor)}</td><td class="mono">${l.action === "POST /api/login" ? "🔐 " + t("set.loginWord") : esc(l.action)}</td><td>${esc(l.detail)}</td></tr>`).join("") || `<tr><td colspan=5 class="muted">${t("common.none")}</td></tr>`}</table></div>`;
   if ($("#on")) $("#on").onclick = async () => {
     const r = await post("/2fa/setup").catch((e) => toast(e.message, true));
     if (!r) return;

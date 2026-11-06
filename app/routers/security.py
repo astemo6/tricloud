@@ -74,6 +74,13 @@ def audit_log(limit: int = 200):
     return core.q("SELECT * FROM audit ORDER BY id DESC LIMIT ?", (min(limit, 1000),))
 
 
+@router.get("/api/audit/logins")
+def audit_logins(limit: int = 50):
+    """登录记录专用：审计里只筛 POST /api/login（detail 含 HTTP 状态，200 成功 / 401 失败）。"""
+    return core.q("SELECT ts, ip, detail FROM audit WHERE action='POST /api/login' ORDER BY id DESC LIMIT ?",
+                  (min(limit, 200),))
+
+
 @router.delete("/api/audit")
 def audit_clear(req: Request, confirm: bool = False):
     """一键清空审计日志（不可恢复）。清空后立刻写一条 audit-clear，保留谁、何时、哪个 IP 清的痕迹。API Token 不能调用。"""

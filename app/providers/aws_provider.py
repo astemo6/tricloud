@@ -480,7 +480,9 @@ class AWSProvider(AWSMore, AWSCredit):
         bps = [{"id": b["blueprintId"], "name": f'{b["name"]} {b.get("version", "")}'.strip()}
                for b in ls.get_blueprints(includeInactive=False)["blueprints"]
                if b["type"] == "os" and b.get("platform") == "LINUX_UNIX"]
-        bundles = [{"id": b["bundleId"], "name": f'{b["name"]} · {b["cpuCount"]}C/{b["ramSizeInGb"]}G/{b["diskSizeInGb"]}G · ${b["price"]}/月'}
+        bundles = [{"id": b["bundleId"], "ipv6_only": "_ipv6_" in b["bundleId"],
+                    "family": "memory" if b["bundleId"].startswith("m_") else "compute" if b["bundleId"].startswith("c_") else "general",
+                    "name": f'{b["name"]} · {b["cpuCount"]}C/{b["ramSizeInGb"]}G/{b["diskSizeInGb"]}G · ${b["price"]}/月' + (" · 仅IPv6" if "_ipv6_" in b["bundleId"] else "")}
                    for b in ls.get_bundles(includeInactive=False)["bundles"]
                    if "LINUX_UNIX" in b.get("supportedPlatforms", [])]
         zones = [z["zoneName"] for r in ls.get_regions(includeAvailabilityZones=True)["regions"]
@@ -505,7 +507,12 @@ class AWSProvider(AWSMore, AWSCredit):
             kw["userData"] = ud
         if p.get("ip_type"):
             kw["ipAddressType"] = p["ip_type"]
-        ls.create_instances(**kw)
+        if "_ipv6_" in (p.get("bundle") or "") and p.get("ip_type") == "dualstack":
+            raise ValueError("所选套餐是「仅 IPv6」套餐，不能搭配 IPv4 + IPv6 网络；请把网络改成「仅 IPv6」，或换双栈套餐")
+        try:
+            ls.create_instances(**kw)
+        except ClientError as e:
+            raise self._aws_value_err(e)
         return {"ok": True, "id": p["name"], "name": p["name"], "password": password, "username": "root" if password else None}
 
     # ---------------- CloudFront ----------------

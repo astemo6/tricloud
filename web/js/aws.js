@@ -1,5 +1,5 @@
 // TriCloud 前端 v1.6.0 · AWS：EC2 创建、Lightsail、区域、配额、闲置资源、CloudFront
-import { $, act, api, confirmBox, del, esc, fmtBytes, form, modal, post, regionLabel, regionOf, regionOpt, regionSelect, rq, SETTINGS, toast } from "./core.js";
+import { $, act, api, confirmBox, del, esc, fmtBytes, form, lastModal, modal, post, regionLabel, regionOf, regionOpt, regionSelect, rq, SETTINGS, toast } from "./core.js";
 import { go } from "./router.js";
 import { loginFields, showCreated, tabInstances } from "./instances.js";
 import { saveDefaultBtn } from "./settings.js";
@@ -11,13 +11,30 @@ export async function lightsailCreate(acc, reload) {
   let o;
   try { toast(t("aws.readingLs")); o = await api(`/accounts/${acc.id}/lightsail/options?${rq(acc)}`); } catch (e) { return toast(e.message, true); }
   const d = SETTINGS.default_create?.lightsail || {};
-  const r = await modal(t("aws.createLs"), `<label>${t("acc.colName")}</label><input name="name" value="ls-${Date.now().toString(36)}">
+  const dBundle = o.bundles.find((b) => b.id === d.bundle);
+  const fam0 = d.family || dBundle?.family || "general";
+  const ip0 = dBundle ? (dBundle.ipv6_only ? "ipv6" : "dualstack") : (d.ip_type || "dualstack");
+  const mp = modal(t("aws.createLs"), `<label>${t("acc.colName")}</label><input name="name" value="ls-${Date.now().toString(36)}">
     <label>${t("inst.zone")}</label><select name="zone">${o.zones.map((z) => regionOpt(z, z === d.zone)).join("")}</select>
     <label>${t("aws.blueprint")}</label><select name="blueprint">${o.blueprints.map((b) => `<option value="${esc(b.id)}" ${b.id === d.blueprint ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
-    <label>${t("aws.bundle")}</label><select name="bundle">${o.bundles.map((b) => `<option value="${esc(b.id)}" ${b.id === d.bundle ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
-    <label>${t("aws.network")}</label><select name="ip_type"><option value="dualstack">IPv4 + IPv6</option><option value="ipv6" ${d.ip_type === "ipv6" ? "selected" : ""}>${t("aws.ipv6Only")}</option></select>
+    <label>${t("aws.planFamily")}</label><select name="family">${[["general", "aws.famGeneral"], ["memory", "aws.famMemory"], ["compute", "aws.famCompute"]].map(([v, k]) => `<option value="${v}"${v === fam0 ? " selected" : ""}>${t(k)}</option>`).join("")}</select>
+    <label>${t("aws.network")}</label><select name="ip_type"><option value="dualstack"${ip0 === "dualstack" ? " selected" : ""}>IPv4 + IPv6</option><option value="ipv6"${ip0 === "ipv6" ? " selected" : ""}>${t("aws.ipv6Only")}</option></select>
+    <label>${t("aws.bundle")}</label><select name="bundle"></select>
     ${await loginFields()}<div class="bar">${saveDefaultBtn("lightsail")}</div>`,
     (bg) => post(`/accounts/${acc.id}/lightsail/create`, { ...form(bg), region: regionOf(acc) }), t("oci.create"));
+  const bg0 = lastModal();   // 官网逻辑：先定套餐类型+网络，规格列表只列与两者都匹配的套餐
+  if (bg0) {
+    const famSel = bg0.querySelector('[name="family"]'), ipSel = bg0.querySelector('[name="ip_type"]'), bSel = bg0.querySelector('[name="bundle"]');
+    const rebuild = () => {
+      const keep = bSel.value, v6 = ipSel.value === "ipv6";
+      const list = o.bundles.filter((b) => b.family === famSel.value && b.ipv6_only === v6);
+      bSel.innerHTML = list.map((b) => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join("");
+      if (list.some((b) => b.id === keep)) bSel.value = keep;
+    };
+    famSel.onchange = ipSel.onchange = rebuild; rebuild();
+    if (dBundle && dBundle.family === famSel.value && dBundle.ipv6_only === (ipSel.value === "ipv6")) bSel.value = d.bundle;
+  }
+  const r = await mp;
   if (r) { showCreated(r); setTimeout(reload, 3000); }
 }
 

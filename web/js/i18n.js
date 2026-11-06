@@ -276,7 +276,7 @@ export const STR = {
     "aws.crFullLog": "查看完整日志", "aws.crTaskEnd": "任务结束",
     // ---- AWS ----
     "aws.readingLs": "正在读取镜像与套餐…", "aws.createLs": "创建 Lightsail 实例",
-    "aws.blueprint": "系统镜像", "aws.bundle": "套餐", "aws.network": "网络", "aws.ipv6Only": "仅 IPv6（更便宜）",
+    "aws.blueprint": "系统镜像", "aws.bundle": "套餐", "aws.planFamily": "套餐类型", "aws.famGeneral": "通用型", "aws.famMemory": "内存优化", "aws.famCompute": "计算优化", "aws.network": "网络", "aws.ipv6Only": "仅 IPv6（更便宜）",
     "aws.quotaLoading": "正在逐区域查询（串行，约 10–30 秒）…",
     "aws.quotaVcpu": "Standard vCPU 上限", "aws.quotaVcpuFrom": "全区域最大值，来自 {region}（L-1216C47A）",
     "aws.quotaCf": "CloudFront 分发数上限", "aws.quotaCfNote": "每账号（L-24B04930）", "aws.cfDefault": "· AWS 默认值",
@@ -1088,7 +1088,7 @@ export const STR = {
     "aws.crFullLog": "View full log", "aws.crTaskEnd": "Task finished",
     // ---- AWS ----
     "aws.readingLs": "Loading images & bundles…", "aws.createLs": "Create Lightsail instance",
-    "aws.blueprint": "Blueprint", "aws.bundle": "Bundle", "aws.network": "Network", "aws.ipv6Only": "IPv6 only (cheaper)",
+    "aws.blueprint": "Blueprint", "aws.bundle": "Bundle", "aws.planFamily": "Plan type", "aws.famGeneral": "General purpose", "aws.famMemory": "Memory-optimized", "aws.famCompute": "Compute-optimized", "aws.network": "Network", "aws.ipv6Only": "IPv6 only (cheaper)",
     "aws.quotaLoading": "Querying region by region (serial, ~10–30s)…",
     "aws.quotaVcpu": "Standard vCPU limit", "aws.quotaVcpuFrom": "Max across regions, from {region} (L-1216C47A)",
     "aws.quotaCf": "CloudFront distribution limit", "aws.quotaCfNote": "Per account (L-24B04930)", "aws.cfDefault": "· AWS default",

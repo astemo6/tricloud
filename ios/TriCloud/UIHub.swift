@@ -22,6 +22,8 @@ struct Field {
     static func pass(_ k: String, _ l: String) -> Field { Field(k, l, "", "password") }
     static func check(_ k: String, _ l: String, _ d: Bool) -> Field { Field(k, l, d ? "1" : "", "check") }
     static func select(_ k: String, _ l: String, _ d: String, _ opts: [String], _ labels: [String]?) -> Field { Field(k, l, d, "select", opts, labels) }
+    /// 多选（build 38）：def 为预选值的 JSON 数组字符串；提交时 values 里同 key 为 [String] 数组。
+    static func multiselect(_ k: String, _ l: String, _ d: String, _ opts: [String], _ labels: [String]?) -> Field { Field(k, l, d, "multiselect", opts, labels) }
 }
 
 struct FormSpec {
@@ -209,11 +211,23 @@ final class FormModel: ObservableObject {
     @Published var texts: [String]
     @Published var checks: [Bool]
     @Published var sels: [Int]
+    @Published var multis: [[Bool]]
 
     init(_ fields: [Field]) {
-        texts = fields.map { $0.type == "check" || $0.type == "select" ? "" : $0.def }
+        texts = fields.map { $0.type == "check" || $0.type == "select" || $0.type == "multiselect" ? "" : $0.def }
         checks = fields.map { !$0.def.isEmpty }
         sels = fields.map { f in f.options.firstIndex(of: f.def) ?? 0 }
+        multis = fields.map { f in
+            guard f.type == "multiselect" else { return [] }
+            var sel = Set<String>()
+            if let data = f.def.data(using: .utf8), let arr = (try? JSONSerialization.jsonObject(with: data)) as? [Any] {
+                for x in arr {
+                    if let s = x as? String { sel.insert(s) }
+                    else if let n = x as? NSNumber { sel.insert(n.stringValue) }
+                }
+            }
+            return f.options.map { sel.contains($0) }
+        }
     }
 }
 
@@ -266,6 +280,13 @@ struct FormSheet: View {
                     Text(L(f.label))
                 }
             }
+        case "multiselect":
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L(f.label)).font(.caption).foregroundColor(.secondary)
+                ForEach(f.options.indices, id: \.self) { j in
+                    Toggle(L(j < f.labels.count ? f.labels[j] : f.options[j]), isOn: $model.multis[i][j])
+                }
+            }
         case "multi":
             VStack(alignment: .leading, spacing: 4) {
                 Text(L(f.label)).font(.caption).foregroundColor(.secondary)
@@ -300,6 +321,8 @@ struct FormSheet: View {
             case "select":
                 let idx = model.sels[i]
                 o[f.key] = idx >= 0 && idx < f.options.count ? f.options[idx] : ""
+            case "multiselect":
+                o[f.key] = f.options.indices.filter { model.multis[i][$0] }.map { f.options[$0] }
             case "check":
                 o[f.key] = model.checks[i]
             default:

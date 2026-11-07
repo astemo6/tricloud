@@ -19,12 +19,17 @@ def tfa_setup():
     uri = security.totp_uri(sec)
     out = {"secret": sec, "uri": uri}
     try:   # 二维码只是便利：生成失败不挡开通，前端没 qr_svg 时回退纯手动输入
+        import base64 as _b64
         import io
 
         import segno
+        qr = segno.make(uri, error="m")
         buf = io.BytesIO()
-        segno.make(uri, error="m").save(buf, kind="svg", scale=5, border=2, xmldecl=False)
+        qr.save(buf, kind="svg", scale=5, border=2, xmldecl=False)
         out["qr_svg"] = buf.getvalue().decode()
+        png = io.BytesIO()   # build 38：App 端原生显示用（SVG 在 App 里渲染麻烦，PNG 解码即用）
+        qr.save(png, kind="png", scale=6, border=2)
+        out["qr_png"] = _b64.b64encode(png.getvalue()).decode()
     except Exception:
         pass
     return out

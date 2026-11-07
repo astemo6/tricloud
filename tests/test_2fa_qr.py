@@ -29,6 +29,9 @@ ok("pending secret stored for enable step", core.get_secret_setting("totp_pendin
 svg = r.get("qr_svg") or ""
 ok("qr_svg present and is an svg", svg.lstrip().startswith("<svg") and len(svg) > 500)
 ok("secret not leaked as text in svg", r["secret"] not in svg)
+import base64 as _b64
+png = _b64.b64decode(r.get("qr_png") or "")
+ok("qr_png present and is a png (app)", png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 300)
 
 req = open(os.path.join(ROOT, "requirements.txt"), encoding="utf-8").read()
 ok("requirements has segno", "segno" in req)

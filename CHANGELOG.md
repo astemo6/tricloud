@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.4（build 38）(2026-11-07)
+- 新功能：EC2 创建机型带规格与官方月价（Android / iOS）：机型下拉显示 vCPU/内存与 ≈$/月（与 Web 同源 specs），最低月价标「最便宜」，末尾可手动输入其他机型；系统盘默认改 8G（与 Web 一致）。
+- 新功能：Lightsail 创建改官网逻辑（Android / iOS）：先选套餐类型（通用/内存/计算）+ 网络（双栈/仅 IPv6），规格列表只列与两者都匹配的套餐（后端 bundles 已标注 family / ipv6_only）。
+- 改进：开放端口支持 ICMP / ICMPv6 / 全部协议（Android / iOS）：与 Web 同一接口，ICMP 与全部协议时端口可留空。
+- 新功能：开机脚本模板多选（Android / iOS）：创建表单新增 multiselect 字段类型，脚本可多选、后端按序拼接（script_ids）；所选脚本纳入「保存为默认」。
+- 新功能：2FA 扫码绑定（Android / iOS）：后端 /2fa/setup 新增 qr_png（base64 PNG，segno 生成），App 原生显示二维码扫码绑定，无图时回退手动输入。
+- 新功能：已登录设备与登录记录（Android / iOS）：安全页新增设备卡片（设备名/IP/登录时间/最后活跃，逐台退出、退出其他设备）与登录记录卡片；审计日志登录行标「🔐 登录」。脚本预设补「更新环境」「安装 Fail2ban」。
+- 版本：Android versionCode 38 / iOS build 38（versionName 1.6.4）。
+
 ## 1.6.3（build 37）(2026-11-04)
 - 新功能：账号手动排序（Android / iOS）：云账号列表支持通过上移/下移调整账号顺序并持久化（POST /accounts/reorder）。
 - 新功能：OCI 系统版本动态下拉（Android / iOS）：创建与迁移表单支持按所选规格动态拉取对应系统版本列表，网络失败自动回退内置列表。

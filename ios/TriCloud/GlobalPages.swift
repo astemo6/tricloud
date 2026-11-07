@@ -176,6 +176,8 @@ final class ScriptsPage: Page {
         ("2GB Swap", "#!/bin/bash\nfallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile\necho '/swapfile none swap sw 0 0' >> /etc/fstab"),
         ("关闭 OCI 系统防火墙", "#!/bin/bash\niptables -P INPUT ACCEPT; iptables -P FORWARD ACCEPT; iptables -P OUTPUT ACCEPT; iptables -F\nnetfilter-persistent save 2>/dev/null || true\nsystemctl disable --now firewalld 2>/dev/null || true"),
         ("时区上海 + 常用工具", "#!/bin/bash\ntimedatectl set-timezone Asia/Shanghai\n(apt-get update && apt-get install -y curl wget unzip htop) || (dnf install -y curl wget unzip htop)"),
+        ("更新环境", "#!/bin/bash\nexport DEBIAN_FRONTEND=noninteractive\n(apt-get update && apt-get -y -o Dpkg::Options::=\"--force-confold\" upgrade && apt-get -y autoremove) || (dnf -y upgrade --refresh)"),
+        ("安装 Fail2ban", "#!/bin/bash\n(apt-get update && apt-get install -y fail2ban) || (dnf install -y fail2ban)\nprintf '[sshd]\\nenabled = true\\n' > /etc/fail2ban/jail.local\nsystemctl enable --now fail2ban"),
     ]
 
     override init() {
@@ -271,12 +273,16 @@ final class SecurityPage: Page {
         get("/settings") { sr in
             let s = jobj(sr)
             self.get("/tokens") { tr in
-                self.get("/audit?limit=100") { lr in self.build(s, jarr(tr), jarr(lr)) }
+                self.get("/audit?limit=100") { lr in
+                    self.get("/audit/logins") { gr in
+                        self.get("/sessions") { dr in self.build(s, jarr(tr), jarr(lr), jarr(gr), jarr(dr)) }
+                    }
+                }
             }
         }
     }
 
-    private func build(_ s: JObj, _ toks: JArr, _ logs: JArr) {
+    private func build(_ s: JObj, _ toks: JArr, _ logs: JArr, _ logins: JArr, _ devs: JArr) {
         clear()
         let tf = card("二次验证（TOTP）")
         if s.optBoolean("totp_enabled") {
@@ -327,12 +333,53 @@ final class SecurityPage: Page {
             }
         }
 
+        // build 38：已登录设备（同 Web 安全页：设备名 / IP / 登录与活跃时间 / 可踢下线）
+        let dv = card("已登录设备")
+        dv.row().button("退出其他设备") {
+            self.confirm("退出其他设备", "其他设备将全部下线，只保留当前设备。") {
+                self.post("/sessions/kick-others", nil) { y in
+                    self.toast("已退出 \(jobj(y).optInt("kicked")) 台其他设备")
+                    self.refresh()
+                }
+            }
+        }
+        if devs.isEmpty { dv.muted("暂无") }
+        for i in 0..<devs.count {
+            let x = devs.obj(i)
+            let cur = x.optBoolean("current")
+            dv.text((x.optString("device").isEmpty ? "未知设备" : x.optString("device")) + (cur ? " · 当前设备" : ""), 14, true)
+            dv.muted("IP " + (x.optString("ip").isEmpty ? "—" : x.optString("ip"))
+                     + "\n登录时间 " + (x.optLong("created") > 0 ? fmtTime(x.optLong("created")) : "—")
+                     + " · 最后活跃 " + (x.optLong("last_seen") > 0 ? fmtTime(x.optLong("last_seen")) : "—"))
+            let sid = x.optString("id")
+            dv.row().button("退出") {
+                self.confirm("退出该设备？", cur ? "这是你当前使用的设备，退出后本机也要重新登录。" : "该设备将立即下线，需要重新登录。") {
+                    self.del("/sessions/\(sid)") { y in
+                        if jobj(y).optBoolean("self") { self.toLogin(); return }
+                        self.toast("已退出该设备"); self.refresh()
+                    }
+                }
+            }
+        }
+
+        // build 38：登录记录（同 Web 安全页）
+        let ln = card("登录记录")
+        var ll: [String] = []
+        for i in 0..<logins.count {
+            let l = logins.obj(i)
+            let okL = l.optString("detail").contains("200")
+            ll.append(fmtTime(l.optLong("ts"), "MM-dd HH:mm") + "  " + l.optString("ip") + "  " + (okL ? "✅ 成功" : "❌ 失败"))
+        }
+        ln.text(ll.isEmpty ? "暂无" : ll.joined(separator: "\n"), 12)
+
         let au = card("审计日志")
         au.muted("最近 100 条写操作，保留 180 天")
         var lines: [String] = []
         for i in 0..<logs.count {
             let l = logs.obj(i)
-            lines.append(fmtTime(l.optLong("ts"), "MM-dd HH:mm") + "  " + l.optString("action") + "  " + l.optString("detail")
+            var act = l.optString("action")
+            if act == "POST /api/login" { act = "🔐 登录" }
+            lines.append(fmtTime(l.optLong("ts"), "MM-dd HH:mm") + "  " + act + "  " + l.optString("detail")
                          + "\n    " + l.optString("ip") + " · " + l.optString("actor"))
         }
         au.text(lines.isEmpty ? "暂无" : lines.joined(separator: "\n"), 12)
@@ -351,13 +398,32 @@ final class SecurityPage: Page {
         post("/2fa/setup", nil) { r in
             let o = jobj(r)
             let secret = o.optString("secret"), uri = o.optString("uri")
+            // build 38：优先扫码绑定（后端 qr_png），无图时回退原来的手动流程
+            if let png = o["qr_png"] as? String, !png.isEmpty,
+               let data = Data(base64Encoded: png), let img = UIImage(data: data) {
+                let v = VStack(spacing: 16) {
+                    Text("开启二次验证").font(.headline)
+                    Image(uiImage: img).resizable().interpolation(.none).frame(width: 220, height: 220)
+                    Text("用验证器 App 扫码绑定，或手动输入密钥：\n" + secret)
+                        .font(.footnote).foregroundColor(.secondary).multilineTextAlignment(.center)
+                    Button("输入验证码") { UIHub.shared.closeSheet { self.codeForm2fa(secret, uri) } }
+                    Button("复制密钥") { copyText(secret); self.toast("已复制") }
+                    Button("取消", role: .cancel) { UIHub.shared.closeSheet(nil) }
+                }.padding()
+                UIHub.shared.custom(AnyView(v))
+                return
+            }
             self.message("开启二次验证", "在身份验证器 App 中「手动输入密钥」：\n\n" + secret + "\n\n复制后回到这里输入 App 显示的 6 位验证码完成绑定。",
                          primary: ("复制密钥并继续", {
                             copyText(secret)
-                            self.form("输入验证码", "密钥已复制。也可以把这个链接复制到支持的 App：\n" + uri, [Field.num("code", "6 位验证码", "")], "开启") { v in
-                                self.post("/2fa/enable", ["code": v.optString("code")]) { _ in self.toast("✅ 二次验证已开启"); self.refresh() }
-                            }
+                            self.codeForm2fa(secret, uri)
                          }), cancel: "取消")
+        }
+    }
+
+    private func codeForm2fa(_ secret: String, _ uri: String) {
+        self.form("输入验证码", "也可以把这个链接复制到支持的 App：\n" + uri, [Field.num("code", "6 位验证码", "")], "开启") { v in
+            self.post("/2fa/enable", ["code": v.optString("code")]) { _ in self.toast("✅ 二次验证已开启"); self.refresh() }
         }
     }
 

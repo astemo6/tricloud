@@ -39,7 +39,7 @@ async def login(req: Request, body: dict = Body(...)):
         await asyncio.sleep(1)
         raise HTTPException(401, msg("err.bad_credentials"))
     core.login_ok(ip)
-    token = core.new_session()
+    token = core.new_session(ip, req.headers.get("user-agent", ""), "app" if body.get("client") == "app" else "web")
     # Android App 使用 Bearer token；浏览器只拿 HttpOnly Cookie，不把 token 暴露给 JS
     resp = JSONResponse({"ok": True, "token": token} if body.get("client") == "app" else {"ok": True})
     resp.set_cookie("tc_session", token, max_age=core.SESSION_TTL, httponly=True, samesite="lax",

@@ -130,6 +130,12 @@ MIGRATIONS = [
     "CREATE TABLE IF NOT EXISTS guard_port_traffic(guard_id INTEGER, day TEXT, proto TEXT, port INTEGER, proc TEXT, "
     "bytes_in INTEGER DEFAULT 0, bytes_out INTEGER DEFAULT 0, updated INTEGER, PRIMARY KEY(guard_id, day, proto, port))",
     "CREATE INDEX IF NOT EXISTS idx_gpt_day ON guard_port_traffic(day)",
+    # ---- 已登录设备：会话补记创建时间 / 最后活跃 / IP / UA / 类型（web|app）----
+    "ALTER TABLE sessions ADD COLUMN created INTEGER DEFAULT 0",
+    "ALTER TABLE sessions ADD COLUMN last_seen INTEGER DEFAULT 0",
+    "ALTER TABLE sessions ADD COLUMN ip TEXT",
+    "ALTER TABLE sessions ADD COLUMN ua TEXT",
+    "ALTER TABLE sessions ADD COLUMN kind TEXT",
 ]
 
 
@@ -272,11 +278,45 @@ def _th(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def new_session() -> str:
+def new_session(ip="", ua="", kind="web") -> str:
     token = secrets.token_urlsafe(32)
-    ex("INSERT INTO sessions(token_hash, expires) VALUES(?,?)", (_th(token), int(time.time()) + SESSION_TTL))
-    ex("DELETE FROM sessions WHERE expires<?", (int(time.time()),))
+    now = int(time.time())
+    ex("INSERT INTO sessions(token_hash, expires, created, last_seen, ip, ua, kind) VALUES(?,?,?,?,?,?,?)",
+       (_th(token), now + SESSION_TTL, now, now, ip or "", (ua or "")[:400], kind or "web"))
+    ex("DELETE FROM sessions WHERE expires<?", (now,))
     return token
+
+
+def session_key(token):
+    return _th(token or "")
+
+
+def touch_session(token, ip="", ua=""):
+    """已登录设备：刷新最后活跃（60 秒节流）与当前 IP；UA 只在缺失时补记（老会话回填）。"""
+    if not token:
+        return
+    now = int(time.time())
+    ex("UPDATE sessions SET last_seen=?, ip=?, ua=CASE WHEN COALESCE(ua,'')='' THEN ? ELSE ua END "
+       "WHERE token_hash=? AND COALESCE(last_seen,0) < ?",
+       (now, ip or "", (ua or "")[:400], _th(token), now - 60))
+
+
+def list_sessions():
+    return q("SELECT token_hash, created, last_seen, expires, ip, ua, kind FROM sessions "
+             "WHERE expires>? ORDER BY COALESCE(last_seen,0) DESC, COALESCE(created,0) DESC", (int(time.time()),))
+
+
+def drop_session_by_key(key):
+    if key:
+        ex("DELETE FROM sessions WHERE token_hash=?", (key,))
+
+
+def drop_other_sessions(token) -> int:
+    if not token:
+        return 0
+    n = q("SELECT COUNT(*) c FROM sessions WHERE token_hash!=?", (_th(token),), one=True)["c"]
+    ex("DELETE FROM sessions WHERE token_hash!=?", (_th(token),))
+    return n
 
 
 def check_session(token) -> bool:

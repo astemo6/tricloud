@@ -2,11 +2,11 @@
 import base64
 
 from fastapi import APIRouter, Body, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 from .. import core, security, services
 from ..i18n import msg
-from .common import client_ip, run
+from .common import _token, client_ip, run
 
 router = APIRouter()
 
@@ -79,6 +79,65 @@ def audit_logins(limit: int = 50):
     """登录记录专用：审计里只筛 POST /api/login（detail 含 HTTP 状态，200 成功 / 401 失败）。"""
     return core.q("SELECT ts, ip, detail FROM audit WHERE action='POST /api/login' ORDER BY id DESC LIMIT ?",
                   (min(limit, 200),))
+
+
+# ---------------- 已登录设备 ----------------
+def device_label(ua, kind):
+    """UA → 人话设备名（系统 · 浏览器，都是专有名词不分语言）；认不出返回空串，前端显示「未知设备」。"""
+    if kind == "app":
+        return "TriCloud App"
+    ua = ua or ""
+    if not ua:
+        return ""
+    if "iPhone" in ua:
+        os_name = "iPhone"
+    elif "iPad" in ua:
+        os_name = "iPad"
+    elif "Android" in ua:
+        os_name = "Android"
+    elif "Windows" in ua:
+        os_name = "Windows"
+    elif "Macintosh" in ua or "Mac OS" in ua:
+        os_name = "macOS"
+    elif "Linux" in ua:
+        os_name = "Linux"
+    else:
+        os_name = ""
+    if "Edg/" in ua or "EdgA" in ua or "EdgiOS" in ua:
+        browser = "Edge"
+    elif "CriOS" in ua or "Chrome/" in ua:
+        browser = "Chrome"
+    elif "FxiOS" in ua or "Firefox/" in ua:
+        browser = "Firefox"
+    elif "Safari/" in ua:
+        browser = "Safari"
+    else:
+        browser = ""
+    return " · ".join(x for x in (os_name, browser) if x) or ua[:40]
+
+
+@router.get("/api/sessions")
+def sessions_list(req: Request):
+    cur = core.session_key(_token(req))
+    return [{"id": r["token_hash"], "device": device_label(r["ua"], r["kind"]), "ua": r["ua"] or "",
+             "ip": r["ip"] or "", "created": r["created"] or 0, "last_seen": r["last_seen"] or 0,
+             "kind": r["kind"] or "web", "current": r["token_hash"] == cur}
+            for r in core.list_sessions()]
+
+
+@router.delete("/api/sessions/{sid}")
+def sessions_kick(sid: str, req: Request):
+    is_self = sid == core.session_key(_token(req))
+    core.drop_session_by_key(sid)
+    resp = JSONResponse({"ok": True, "self": is_self})
+    if is_self:
+        resp.delete_cookie("tc_session", path="/")
+    return resp
+
+
+@router.post("/api/sessions/kick-others")
+def sessions_kick_others(req: Request):
+    return {"ok": True, "kicked": core.drop_other_sessions(_token(req))}
 
 
 @router.delete("/api/audit")

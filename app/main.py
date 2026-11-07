@@ -53,12 +53,15 @@ async def auth_mw(req: Request, call_next):
     if path.startswith("/api/") and path not in PUBLIC:
         tok = _token(req)
         if core.check_session(tok):
-            pass
+            try:
+                core.touch_session(tok, client_ip(req), req.headers.get("user-agent", ""))
+            except Exception:
+                pass
         elif tok and (tk := security.check_api_token(tok, req.method)):
             # v1.5：从旧版迁移来的 Token（不以 tc_ 开头）在审计里只记 id，不记 Token 片段
             actor = "api_token:" + (tok[:10] if tok.startswith("tc_") else f"legacy#{tk['id']}")
             # API Token 不能管理安全设置
-            if path.startswith(("/api/2fa", "/api/tokens", "/api/password", "/api/backup", "/api/restore", "/api/secrets")) \
+            if path.startswith(("/api/2fa", "/api/tokens", "/api/sessions", "/api/password", "/api/backup", "/api/restore", "/api/secrets")) \
                     or (path == "/api/audit" and req.method == "DELETE") \
                     or (path.startswith("/api/onedrive") and req.method != "GET" and path != "/api/onedrive/backup") \
                     or (req.method != "GET" and AGENT_RESET_RE.match(path)) or RESTRICT_RE.match(path):

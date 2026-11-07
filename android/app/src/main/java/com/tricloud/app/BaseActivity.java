@@ -574,6 +574,8 @@ public abstract class BaseActivity extends AppCompatActivity {
         public static Field pass(String k, String l) { return new Field(k, l, "", "password"); }
         public static Field check(String k, String l, boolean d) { return new Field(k, l, d ? "1" : "", "check"); }
         public static Field select(String k, String l, String d, String[] opts, String[] labels) { return new Field(k, l, d, "select", opts, labels); }
+        /** 多选（build 38）：def 为预选值的 JSON 数组字符串；提交时 values 里同 key 为 JSON 数组字符串，调用方转 JSONArray。 */
+        public static Field multiselect(String k, String l, String d, String[] opts, String[] labels) { return new Field(k, l, d, "multiselect", opts, labels); }
     }
 
     public interface FormCb { void ok(JSONObject values); }
@@ -596,10 +598,26 @@ public abstract class BaseActivity extends AppCompatActivity {
         if (note != null) muted(box, note);
         List<View> inputs = new ArrayList<>();
         for (Field f : fields) {
-            if ("select".equals(f.type)) muted(box, f.label);
+            if ("select".equals(f.type) || "multiselect".equals(f.type)) muted(box, f.label);
             View v;
             View shown = null;
             switch (f.type) {
+                case "multiselect": {
+                    LinearLayout g = new LinearLayout(this);
+                    g.setOrientation(LinearLayout.VERTICAL);
+                    java.util.Set<String> pre = new java.util.HashSet<>();
+                    try {
+                        JSONArray sel = new JSONArray(f.def.isEmpty() ? "[]" : f.def);
+                        for (int j = 0; j < sel.length(); j++) pre.add(sel.optString(j));
+                    } catch (Exception ignored) { }
+                    for (int j = 0; j < f.options.length; j++) {
+                        CheckBox cb3 = new CheckBox(this);
+                        cb3.setText(f.labels[j]);
+                        cb3.setChecked(pre.contains(f.options[j]));
+                        g.addView(cb3);
+                    }
+                    v = g; break;
+                }
                 case "select": {
                     Spinner sp = new Spinner(this);
                     sp.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, f.labels));
@@ -636,7 +654,14 @@ public abstract class BaseActivity extends AppCompatActivity {
                         for (int i = 0; i < fields.size(); i++) {
                             Field f = fields.get(i);
                             View v = inputs.get(i);
-                            if (v instanceof Spinner) o.put(f.key, f.options[((Spinner) v).getSelectedItemPosition()]);
+                            if ("multiselect".equals(f.type)) {
+                                JSONArray arr = new JSONArray();
+                                LinearLayout g = (LinearLayout) v;
+                                for (int j = 0; j < f.options.length; j++)
+                                    if (((CheckBox) g.getChildAt(j)).isChecked()) arr.put(f.options[j]);
+                                o.put(f.key, arr.toString());
+                            }
+                            else if (v instanceof Spinner) o.put(f.key, f.options[((Spinner) v).getSelectedItemPosition()]);
                             else if (v instanceof android.widget.CompoundButton) o.put(f.key, ((android.widget.CompoundButton) v).isChecked());
                             else o.put(f.key, ((EditText) v).getText().toString().trim());
                         }

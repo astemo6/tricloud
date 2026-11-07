@@ -221,13 +221,50 @@ public class AccountActivity extends BaseActivity {
 
     private JSONArray scripts = new JSONArray();
 
-    /** 开机脚本模板下拉（脚本模板页维护），与 Web loginFields 一致。 */
-    private Field scriptField() {
+    /** 开机脚本模板多选（build 38，与 Web loginFields 一致：可多选、后端按序拼接）；defIds 为默认值里的预选 JSON 数组字符串。 */
+    private Field scriptField(String defIds) {
         int n = scripts.length();
-        String[] ids = new String[n + 1], labels = new String[n + 1];
-        ids[0] = ""; labels[0] = getString(R.string.s0020);
-        for (int i = 0; i < n; i++) { ids[i + 1] = String.valueOf(scripts.optJSONObject(i).optInt("id")); labels[i + 1] = scripts.optJSONObject(i).optString("name"); }
-        return Field.select("script_id", getString(R.string.s0021), "", ids, labels);
+        String[] ids = new String[n], labels = new String[n];
+        for (int i = 0; i < n; i++) { ids[i] = String.valueOf(scripts.optJSONObject(i).optInt("id")); labels[i] = scripts.optJSONObject(i).optString("name"); }
+        return Field.multiselect("script_ids", getString(R.string.s0021), defIds == null ? "" : defIds, ids, labels);
+    }
+
+    /** 表单里的 script_ids 是 JSON 数组字符串，提交前转成真数组（后端 script_ids 语义）。 */
+    private static void convScriptIds(JSONObject b) {
+        try { b.put("script_ids", new JSONArray(b.optString("script_ids", "[]"))); } catch (Exception ignored) { }
+    }
+
+    private static String trimNum(double x) { return x == Math.floor(x) ? String.valueOf((long) x) : String.valueOf(x); }
+
+    /** build 38：EC2 机型下拉带规格 + 官方月价（与 Web 同源 specs），最低价标「最便宜」，末尾附手动输入项（与 type_custom 字段配合）。 */
+    private Field ec2TypeField(JSONObject o, JSONObject d) {
+        JSONArray types = o.optJSONArray("types");
+        JSONObject specs = o.optJSONObject("specs");
+        if (types == null || types.length() == 0) return Field.text("type", getString(R.string.s0136), d.optString("type", "t3.micro"));
+        String cheap = "";
+        double best = Double.MAX_VALUE;
+        for (int i = 0; i < types.length(); i++) {
+            JSONObject s = specs == null ? null : specs.optJSONObject(types.optString(i));
+            double m = s == null ? 0 : s.optDouble("monthly", 0);
+            if (m > 0 && m < best) { best = m; cheap = types.optString(i); }
+        }
+        JSONArray objs = new JSONArray();
+        try {
+            for (int i = 0; i < types.length(); i++) {
+                String tp = types.optString(i);
+                JSONObject s = specs == null ? null : specs.optJSONObject(tp);
+                StringBuilder lb = new StringBuilder(tp);
+                if (s != null) {
+                    if (s.optDouble("vcpu", 0) > 0) lb.append(" · ").append(trimNum(s.optDouble("vcpu"))).append("C/").append(trimNum(s.optDouble("ram"))).append("G");
+                    double m = s.optDouble("monthly", 0);
+                    if (m > 0) lb.append(" · ≈$").append(trimNum(m)).append("/月");
+                }
+                if (tp.equals(cheap)) lb.append(" · ").append(getString(R.string.s1272));
+                objs.put(new JSONObject().put("id", tp).put("name", lb.toString()));
+            }
+            objs.put(new JSONObject().put("id", "__custom__").put("name", getString(R.string.s1273)));
+        } catch (Exception ignored) { }
+        return sel("type", getString(R.string.s0136), d.optString("type", "t3.micro"), objs, true);
     }
 
     @Override
@@ -488,9 +525,11 @@ public class AccountActivity extends BaseActivity {
         String where = "oci".equals(prov) ? getString(R.string.s0099) : "aws".equals(prov) ? getString(R.string.s0100) : getString(R.string.s0101);
         form(getString(R.string.s0049), getString(R.string.s0102, inst.optString("name"), where),
                 Arrays.asList(Field.text("port", getString(R.string.s0103), ""),
-                        Field.select("protocol", getString(R.string.s0104), "tcp", new String[]{"tcp", "udp"}, new String[]{"TCP", "UDP"})), getString(R.string.s0105), v -> {
+                        Field.select("protocol", getString(R.string.s0104), "tcp", new String[]{"tcp", "udp", "icmp", "icmpv6", "all"}, new String[]{"TCP", "UDP", "ICMP", "ICMPv6", getString(R.string.s0273)})), getString(R.string.s0105), v -> {
+            String proto0 = v.optString("protocol", "tcp");
             String port = v.optString("port").trim();
-            if (port.isEmpty()) { toast(getString(R.string.s0106)); return; }
+            if (port.isEmpty() && ("tcp".equals(proto0) || "udp".equals(proto0))) { toast(getString(R.string.s0106)); return; }
+            if (port.isEmpty()) port = "0";
             String proto = v.optString("protocol", "tcp");
             confirm(getString(R.string.s0107), getString(R.string.s0108, proto.toUpperCase(Locale.ROOT), port), () -> {
                 try {
@@ -591,7 +630,7 @@ public class AccountActivity extends BaseActivity {
         if (save) {
             try {
                 JSONObject copy = new JSONObject(v.toString());
-                for (String k : new String[]{"name", "interval", "max_attempts", "script", "script_id", "user_data", "password_login", "region", "location_hint"}) {
+                for (String k : new String[]{"name", "interval", "max_attempts", "script", "user_data", "password_login", "region", "location_hint"}) {
                     copy.remove(k);
                 }
                 JSONObject body = new JSONObject().put("provider", provider).put("defaults", copy);
@@ -618,17 +657,21 @@ public class AccountActivity extends BaseActivity {
             JSONArray types = o.optJSONArray("types");
             List<Field> f = new ArrayList<>();
             f.add(Field.text("name", getString(R.string.s0135), "ec2-" + Long.toString(System.currentTimeMillis() / 1000, 36)));
-            f.add(types != null && types.length() > 0 ? sel("type", getString(R.string.s0136), d.optString("type", "t3.micro"), types, false) : Field.text("type", getString(R.string.s0136), d.optString("type", "t3.micro")));
+            f.add(ec2TypeField(o, d));
+            f.add(Field.text("type_custom", getString(R.string.s1274), ""));
             f.add(sel("os", getString(R.string.s0059), d.optString("os"), o.optJSONArray("os"), false));
-            f.add(Field.num("disk_gb", getString(R.string.s0137), d.optString("disk_gb", "10")));
+            f.add(Field.num("disk_gb", getString(R.string.s0137), d.optString("disk_gb", "8")));
             f.add(Field.text("ports", getString(R.string.s0138), d.optString("ports", "")));
             f.add(Field.check("password_login", getString(R.string.s0139), true));
-            f.add(scriptField());
+            f.add(scriptField(d.optString("script_ids", "")));
             f.add(Field.multi("script", getString(R.string.s0140), ""));
             f.add(saveDefaultField("AWS"));
             form(getString(R.string.s0141, Regions.label(region())), null, f, getString(R.string.s0142), v -> {
                 try {
                     JSONObject b = handleSaveDefault("aws", v);
+                    if ("__custom__".equals(b.optString("type"))) b.put("type", b.optString("type_custom"));
+                    b.remove("type_custom");
+                    convScriptIds(b);
                     Api.post(this, "/accounts/" + id + "/aws/ec2-create", b.put("region", region()), x -> { created(Api.obj(x)); body.postDelayed(this::refresh, 4000); });
                 }
                 catch (Exception ignored) { }
@@ -655,39 +698,75 @@ public class AccountActivity extends BaseActivity {
             f.add(Field.check("ipv6", getString(R.string.s0147), false));
             f.add(Field.multi("ssh_key", getString(R.string.s0148), d.optString("ssh_key", "")));
             f.add(Field.check("password_login", getString(R.string.s0149), true));
-            f.add(scriptField());
+            f.add(scriptField(d.optString("script_ids", "")));
             f.add(Field.multi("script", getString(R.string.s0140), ""));
             f.add(saveDefaultField("Azure"));
             form(getString(R.string.s0150), getString(R.string.s0151), f, getString(R.string.s0142), v -> {
                 JSONObject b = handleSaveDefault("azure", v);
+                convScriptIds(b);
                 Api.setPref("azloc_" + id, b.optString("location"));
                 Api.post(this, "/accounts/" + id + "/azure/create", b, x -> taskOrToast(x, getString(R.string.s0152)));
             });
         });
     }
 
-    // ---------------- Lightsail 创建 ----------------
+    // ---------------- Lightsail 创建（build 38：与 Web/官网同逻辑——先定套餐类型+网络，规格只列两者都匹配的） ----------------
     private void lightsailCreate() {
         Api.get(this, "/accounts/" + id + "/lightsail/options?" + rq(), r -> {
             JSONObject o = Api.obj(r);
             JSONObject d = defaults.optJSONObject("lightsail");
             if (d == null) d = new JSONObject();
-            List<Field> f = new ArrayList<>();
-            f.add(Field.text("name", getString(R.string.s0135), "ls-" + Long.toString(System.currentTimeMillis() / 1000, 36)));
-            f.add(regionSel("zone", getString(R.string.s0153), d.optString("zone"), o.optJSONArray("zones")));
-            f.add(sel("blueprint", getString(R.string.s0154), d.optString("blueprint"), o.optJSONArray("blueprints"), true));
-            f.add(sel("bundle", getString(R.string.s0155), d.optString("bundle"), o.optJSONArray("bundles"), true));
-            f.add(Field.select("ip_type", getString(R.string.s0156), "dualstack", new String[]{"dualstack", "ipv6"}, new String[]{"IPv4 + IPv6", getString(R.string.s0157)}));
-            f.add(Field.check("password_login", getString(R.string.s0158), true));
-            f.add(scriptField());
-            f.add(Field.multi("user_data", getString(R.string.s0159), ""));
-            f.add(saveDefaultField("Lightsail"));
-            form(getString(R.string.s0160), null, f, getString(R.string.s0142), v -> {
-                try {
-                    JSONObject b = handleSaveDefault("lightsail", v);
-                    Api.post(this, "/accounts/" + id + "/lightsail/create", b.put("region", region()), x -> { created(Api.obj(x)); body.postDelayed(this::refresh, 3000); });
+            JSONArray bundles0 = o.optJSONArray("bundles");
+            String dFam = d.optString("family", ""), dIp = d.optString("ip_type", "");
+            if (bundles0 != null) {
+                for (int i = 0; i < bundles0.length(); i++) {
+                    JSONObject b0 = bundles0.optJSONObject(i);
+                    if (b0.optString("id").equals(d.optString("bundle"))) {
+                        if (dFam.isEmpty()) dFam = b0.optString("family", "general");
+                        if (dIp.isEmpty()) dIp = b0.optBoolean("ipv6_only") ? "ipv6" : "dualstack";
+                        break;
+                    }
                 }
-                catch (Exception ignored) { }
+            }
+            if (dFam.isEmpty()) dFam = "general";
+            if (dIp.isEmpty()) dIp = "dualstack";
+            String title = getString(R.string.s0160);
+            List<Field> f1 = new ArrayList<>();
+            f1.add(Field.text("name", getString(R.string.s0135), "ls-" + Long.toString(System.currentTimeMillis() / 1000, 36)));
+            f1.add(regionSel("zone", getString(R.string.s0153), d.optString("zone"), o.optJSONArray("zones")));
+            f1.add(sel("blueprint", getString(R.string.s0154), d.optString("blueprint"), o.optJSONArray("blueprints"), true));
+            f1.add(Field.select("family", getString(R.string.s1275), dFam, new String[]{"general", "memory", "compute"},
+                    new String[]{getString(R.string.s1276), getString(R.string.s1277), getString(R.string.s1278)}));
+            f1.add(Field.select("ip_type", getString(R.string.s0156), dIp, new String[]{"dualstack", "ipv6"},
+                    new String[]{"IPv4 + IPv6", getString(R.string.s0157)}));
+            JSONObject dd = d;
+            form(title, null, f1, getString(R.string.s1298), v1 -> {
+                JSONArray filt = new JSONArray();
+                boolean v6 = "ipv6".equals(v1.optString("ip_type"));
+                if (bundles0 != null) {
+                    for (int i = 0; i < bundles0.length(); i++) {
+                        JSONObject b0 = bundles0.optJSONObject(i);
+                        if (b0.optString("family", "general").equals(v1.optString("family")) && b0.optBoolean("ipv6_only") == v6) filt.put(b0);
+                    }
+                }
+                if (filt.length() == 0) { toast(getString(R.string.s0584)); return; }
+                List<Field> f = new ArrayList<>();
+                f.add(sel("bundle", getString(R.string.s0155), dd.optString("bundle"), filt, true));
+                f.add(Field.check("password_login", getString(R.string.s0158), true));
+                f.add(scriptField(dd.optString("script_ids", "")));
+                f.add(Field.multi("user_data", getString(R.string.s0159), ""));
+                f.add(saveDefaultField("Lightsail"));
+                form(title, null, f, getString(R.string.s0142), v -> {
+                    try {
+                        JSONObject merged = new JSONObject(v1.toString());
+                        JSONArray keys = v.names();
+                        for (int i = 0; i < keys.length(); i++) merged.put(keys.getString(i), v.get(keys.getString(i)));
+                        JSONObject b = handleSaveDefault("lightsail", merged);
+                        convScriptIds(b);
+                        Api.post(this, "/accounts/" + id + "/lightsail/create", b.put("region", region()), x -> { created(Api.obj(x)); body.postDelayed(this::refresh, 3000); });
+                    }
+                    catch (Exception ignored) { }
+                });
             });
         });
     }
@@ -762,7 +841,7 @@ public class AccountActivity extends BaseActivity {
                             Field.multi("ssh_key", getString(R.string.s0174), str(curD, "ssh_key", "")),
                             Field.check("ipv6", getString(R.string.s0175), curD.optBoolean("ipv6", false)),
                             Field.check("password_login", getString(R.string.s0139), true),
-                            scriptField(),
+                            scriptField(curD.optString("script_ids", "")),
                             Field.multi("script", getString(R.string.s0140), "")));
                     if (snatch) {
                         f.add(Field.num("interval", getString(R.string.s0176), "60"));
@@ -774,6 +853,7 @@ public class AccountActivity extends BaseActivity {
                             JSONObject create = splitOsImage(new JSONObject(vals.toString()));
                             create.put("shape", shape);
                             handleSaveDefault("oci", create);
+                            convScriptIds(create);
                             Object interval = create.remove("interval"), maxa = create.remove("max_attempts");
                             JSONObject b = new JSONObject().put("region", region()).put("create", create);
                             if (snatch) {

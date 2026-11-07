@@ -527,9 +527,9 @@ public class AccountActivity extends BaseActivity {
                 Arrays.asList(Field.text("port", getString(R.string.s0103), ""),
                         Field.select("protocol", getString(R.string.s0104), "tcp", new String[]{"tcp", "udp", "icmp", "icmpv6", "all"}, new String[]{"TCP", "UDP", "ICMP", "ICMPv6", getString(R.string.s0273)})), getString(R.string.s0105), v -> {
             String proto0 = v.optString("protocol", "tcp");
-            String port = v.optString("port").trim();
-            if (port.isEmpty() && ("tcp".equals(proto0) || "udp".equals(proto0))) { toast(getString(R.string.s0106)); return; }
-            if (port.isEmpty()) port = "0";
+            String port0 = v.optString("port").trim();
+            if (port0.isEmpty() && ("tcp".equals(proto0) || "udp".equals(proto0))) { toast(getString(R.string.s0106)); return; }
+            final String port = port0.isEmpty() ? "0" : port0;
             String proto = v.optString("protocol", "tcp");
             confirm(getString(R.string.s0107), getString(R.string.s0108, proto.toUpperCase(Locale.ROOT), port), () -> {
                 try {

@@ -399,9 +399,11 @@ final class AccountPage: Page {
         let whereText = prov == "oci" ? "子网安全列表" : prov == "aws" ? "实例关联的全部安全组" : "网卡 / 子网的 NSG"
         form("开放端口", "在「" + inst.optString("name") + "」的" + whereText + "放行入站端口，来源 0.0.0.0/0。\n每个端口 / 范围一条规则，已存在的跳过；不支持 1-65535。",
              [Field.text("port", "端口（如 8443 或 80, 443, 8000-8100）", ""),
-              Field.select("protocol", "协议", "tcp", ["tcp", "udp"], ["TCP", "UDP"])], "下一步") { v in
-            let port = v.optString("port").trimmingCharacters(in: .whitespacesAndNewlines)
-            if port.isEmpty { self.toast("请填写端口"); return }
+              Field.select("protocol", "协议", "tcp", ["tcp", "udp", "icmp", "icmpv6", "all"], ["TCP", "UDP", "ICMP", "ICMPv6", "全部协议"])], "下一步") { v in
+            var port = v.optString("port").trimmingCharacters(in: .whitespacesAndNewlines)
+            let proto0 = v.optString("protocol", "tcp")
+            if port.isEmpty && (proto0 == "tcp" || proto0 == "udp") { self.toast("请填写端口"); return }
+            if port.isEmpty { port = "0" }
             let proto = v.optString("protocol", "tcp")
             self.confirm("⚠️ 对整个互联网开放", "来源 0.0.0.0/0 表示任何人都能访问 " + proto.uppercased() + " 端口 " + port
                          + "。\n请确认这些端口上的服务有密码 / 密钥保护并保持更新。") {

@@ -139,9 +139,46 @@ extension AccountPage {
         }
     }
 
-    static func scriptFields(_ ids: [String], _ names: [String], _ key: String) -> [Field] {
-        [Field.select("script_id", "开机脚本模板", "", [""] + ids, ["不使用模板"] + names),
+    /// build 38：脚本模板改多选（与 Web loginFields 一致，后端按序拼接）；defIds 为默认值里的预选。
+    static func scriptFields(_ ids: [String], _ names: [String], _ key: String, _ defIds: [String] = []) -> [Field] {
+        var def = ""
+        if !defIds.isEmpty, let data = try? JSONSerialization.data(withJSONObject: defIds),
+           let s = String(data: data, encoding: .utf8) { def = s }
+        return [Field.multiselect("script_ids", "开机脚本模板", def, ids, names),
          Field.multi(key, "或直接填写开机脚本（以 root 执行，日志在 /root/tricloud-init.log，可选）", "")]
+    }
+
+    static func strArr(_ o: JObj, _ k: String) -> [String] {
+        guard let a = o[k] as? [Any] else { return [] }
+        return a.compactMap { x in (x as? String) ?? (x as? NSNumber)?.stringValue }
+    }
+
+    static func trimNum(_ x: Double) -> String { x == x.rounded() ? String(Int(x)) : String(x) }
+
+    /// build 38：EC2 机型下拉带规格 + 官方月价（与 Web 同源 specs），最低价标「最便宜」，末尾附手动输入项（与 type_custom 字段配合）。
+    func ec2TypeField(_ o: JObj, _ d: JObj) -> Field {
+        let types = o.optJSONArray("types")
+        let specs = o.optJSONObject("specs") ?? [:]
+        guard let types = types, types.count > 0 else { return Field.text("type", "实例类型", d.optString("type", "t3.micro")) }
+        var cheap = "", best = Double.greatestFiniteMagnitude
+        for i in 0..<types.count {
+            let m = specs.optJSONObject(types.string(i))?.optDouble("monthly", 0) ?? 0
+            if m > 0 && m < best { best = m; cheap = types.string(i) }
+        }
+        var ids: [String] = [], labels: [String] = []
+        for i in 0..<types.count {
+            let tp = types.string(i)
+            var lb = tp
+            if let s = specs.optJSONObject(tp) {
+                if s.optDouble("vcpu", 0) > 0 { lb += " · " + AccountPage.trimNum(s.optDouble("vcpu")) + "C/" + AccountPage.trimNum(s.optDouble("ram")) + "G" }
+                let m = s.optDouble("monthly", 0)
+                if m > 0 { lb += " · ≈$" + AccountPage.trimNum(m) + "/月" }
+            }
+            if tp == cheap { lb += " · 最便宜" }
+            ids.append(tp); labels.append(lb)
+        }
+        ids.append("__custom__"); labels.append("手动输入其他机型…")
+        return Field.select("type", "实例类型", d.optString("type", "t3.micro"), ids, labels)
     }
 
     static func saveDefaultField(_ cloud: String) -> Field {
@@ -154,7 +191,7 @@ extension AccountPage {
         let save = (vals.removeValue(forKey: "save_default") as? Bool) ?? false
         if save {
             var d = vals
-            for k in ["name", "interval", "max_attempts", "script", "script_id", "user_data", "password_login", "region", "location_hint"] { d.removeValue(forKey: k) }
+            for k in ["name", "interval", "max_attempts", "script", "user_data", "password_login", "region", "location_hint"] { d.removeValue(forKey: k) }
             request("PUT", "/create-defaults", ["provider": provider, "defaults": d]) { r in
                 let nd = jobj(r).optJSONObject("defaults") ?? d
                 self.defaults[provider] = nd
@@ -170,20 +207,21 @@ extension AccountPage {
         get("/accounts/\(id)/aws/ec2-options") { r in
             let o = jobj(r)
             let d = self.defaults.optJSONObject("aws") ?? [:]
-            let types = o.optJSONArray("types")
             var f: [Field] = []
             f.append(Field.text("name", "名称", "ec2-" + base36Now()))
-            f.append((types?.count ?? 0) > 0 ? self.sel("type", "实例类型", d.optString("type", "t3.micro"), types, false)
-                     : Field.text("type", "实例类型", d.optString("type", "t3.micro")))
+            f.append(self.ec2TypeField(o, d))
+            f.append(Field.text("type_custom", "自定义机型", ""))
             f.append(self.sel("os", "系统", d.optString("os"), o.optJSONArray("os"), false))
-            f.append(Field.num("disk_gb", "系统盘 GB (gp3)", d.optString("disk_gb", "10")))
+            f.append(Field.num("disk_gb", "系统盘 GB (gp3)", d.optString("disk_gb", "8")))
             f.append(Field.text("ports", "额外放行端口（默认只开 22）", d.optString("ports", "")))
             f.append(Field.check("password_login", "生成随机 root 密码（加密保存，可在「开机密码」查看）", true))
             self.loadScripts { ids, names in
-            f += AccountPage.scriptFields(ids, names, "script")
+            f += AccountPage.scriptFields(ids, names, "script", AccountPage.strArr(d, "script_ids"))
             f.append(AccountPage.saveDefaultField("AWS"))
             self.form("创建 EC2（" + Regions.label(self.region()) + "）", nil, f, "创建") { v in
                 var b = self.handleSaveDefault("aws", v)
+                if b.optString("type") == "__custom__" { b["type"] = b.optString("type_custom") }
+                b.removeValue(forKey: "type_custom")
                 b["region"] = self.region()
                 self.post("/accounts/\(self.id)/aws/ec2-create", b) { x in
                     self.created(jobj(x))
@@ -210,7 +248,7 @@ extension AccountPage {
             f.append(Field.multi("ssh_key", "SSH 公钥（可选）", d.optString("ssh_key", "")))
             f.append(Field.check("password_login", "生成随机密码（加密保存，可在「开机密码」查看）", true))
             self.loadScripts { ids, names in
-                f += AccountPage.scriptFields(ids, names, "script")
+                f += AccountPage.scriptFields(ids, names, "script", AccountPage.strArr(d, "script_ids"))
                 f.append(AccountPage.saveDefaultField("Azure"))
                 self.form("创建 Azure VM", "学生订阅免费额度：B1s 750 小时/月 + 2×64GB P6 SSD。创建约 2–4 分钟，后台执行并推送通知。", f, "创建") { v in
                     let b = self.handleSaveDefault("azure", v)
@@ -223,26 +261,58 @@ extension AccountPage {
 
     // MARK: - Lightsail 创建
 
+    // build 38：与 Web/官网同逻辑——先定套餐类型 + 网络，规格只列两者都匹配的（后端已标注 family / ipv6_only）
     func lightsailCreate() {
         get("/accounts/\(id)/lightsail/options?" + rq()) { r in
             let o = jobj(r)
             let d = self.defaults.optJSONObject("lightsail") ?? [:]
-            var f: [Field] = []
-            f.append(Field.text("name", "名称", "ls-" + base36Now()))
-            f.append(self.regionSel("zone", "可用区", d.optString("zone"), o.optJSONArray("zones")))
-            f.append(self.sel("blueprint", "系统镜像", d.optString("blueprint"), o.optJSONArray("blueprints"), true))
-            f.append(self.sel("bundle", "套餐", d.optString("bundle"), o.optJSONArray("bundles"), true))
-            f.append(Field.select("ip_type", "网络", "dualstack", ["dualstack", "ipv6"], ["IPv4 + IPv6", "仅 IPv6"]))
-            f.append(Field.check("password_login", "生成随机 root 密码（加密保存，可在「开机密码」查看）", true))
-            self.loadScripts { ids, names in
-                f += AccountPage.scriptFields(ids, names, "user_data")
-                f.append(AccountPage.saveDefaultField("Lightsail"))
-                self.form("创建 Lightsail", nil, f, "创建") { v in
-                    var b = self.handleSaveDefault("lightsail", v)
-                    b["region"] = self.region()
-                    self.post("/accounts/\(self.id)/lightsail/create", b) { x in
-                        self.created(jobj(x))
-                        self.later(3) { self.refresh() }
+            let bundles = o.optJSONArray("bundles")
+            var dFam = d.optString("family", ""), dIp = d.optString("ip_type", "")
+            if let bundles = bundles {
+                for i in 0..<bundles.count {
+                    let b0 = bundles.obj(i)
+                    if b0.optString("id") == d.optString("bundle") {
+                        if dFam.isEmpty { dFam = b0.optString("family", "general") }
+                        if dIp.isEmpty { dIp = b0.optBoolean("ipv6_only") ? "ipv6" : "dualstack" }
+                        break
+                    }
+                }
+            }
+            if dFam.isEmpty { dFam = "general" }
+            if dIp.isEmpty { dIp = "dualstack" }
+            var f1: [Field] = []
+            f1.append(Field.text("name", "名称", "ls-" + base36Now()))
+            f1.append(self.regionSel("zone", "可用区", d.optString("zone"), o.optJSONArray("zones")))
+            f1.append(self.sel("blueprint", "系统镜像", d.optString("blueprint"), o.optJSONArray("blueprints"), true))
+            f1.append(Field.select("family", "套餐类型", dFam, ["general", "memory", "compute"], ["通用型", "内存型", "计算型"]))
+            f1.append(Field.select("ip_type", "网络", dIp, ["dualstack", "ipv6"], ["IPv4 + IPv6", "仅 IPv6"]))
+            self.form("创建 Lightsail", nil, f1, "下一步") { v1 in
+                var filt: [(String, String)] = []
+                let v6 = v1.optString("ip_type") == "ipv6"
+                if let bundles = bundles {
+                    for i in 0..<bundles.count {
+                        let b0 = bundles.obj(i)
+                        if b0.optString("family", "general") == v1.optString("family") && b0.optBoolean("ipv6_only") == v6 {
+                            filt.append((b0.optString("id"), b0.optString("name")))
+                        }
+                    }
+                }
+                if filt.isEmpty { self.toast("暂无数据"); return }
+                self.loadScripts { ids, names in
+                    var f: [Field] = []
+                    f.append(Field.select("bundle", "套餐", d.optString("bundle"), filt.map { $0.0 }, filt.map { $0.1 }))
+                    f.append(Field.check("password_login", "生成随机 root 密码（加密保存，可在「开机密码」查看）", true))
+                    f += AccountPage.scriptFields(ids, names, "user_data", AccountPage.strArr(d, "script_ids"))
+                    f.append(AccountPage.saveDefaultField("Lightsail"))
+                    self.form("创建 Lightsail", nil, f, "创建") { v in
+                        var merged = v1
+                        for (k2, val) in v { merged[k2] = val }
+                        var b = self.handleSaveDefault("lightsail", merged)
+                        b["region"] = self.region()
+                        self.post("/accounts/\(self.id)/lightsail/create", b) { x in
+                            self.created(jobj(x))
+                            self.later(3) { self.refresh() }
+                        }
                     }
                 }
             }
@@ -288,7 +358,7 @@ extension AccountPage {
                 let shape = sVals.optString("shape", AccountPage.SHAPES[0])
                 self.loadOciVersions(self.id, shape, self.region()) { osv in
                     self.loadScripts { ids, names in
-                        let all = buildMainFields(curD, osv) + AccountPage.scriptFields(ids, names, "script") + [AccountPage.saveDefaultField("OCI")]
+                        let all = buildMainFields(curD, osv) + AccountPage.scriptFields(ids, names, "script", AccountPage.strArr(curD, "script_ids")) + [AccountPage.saveDefaultField("OCI")]
                         self.form(snatch ? "抢机参数" : "创建参数", nil, all, snatch ? "开始" : "创建") { vals0 in
                             var v0 = vals0
                             v0["shape"] = shape

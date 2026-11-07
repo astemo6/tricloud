@@ -126,6 +126,13 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 - 安全列表（实例级）（Android / iOS）：OCI 实例操作菜单新增「安全列表」入口，可查看所属安全列表规则并支持确认删除单个规则。
 - 账号快速切换器（Android / iOS）：账号详情页提供快捷切换入口，支持搜索与按云厂商分组，选中后直接停留在账号详情页换为新账号。
 
+## 1.6.4 build 38
+- EC2 创建对齐 Web（Android / iOS）：机型下拉带规格（vCPU/内存）与官方月价（specs.monthly），最低价标「最便宜」，末尾「手动输入其他机型」配合 type_custom 字段；系统盘默认 8G。
+- Lightsail 创建官网逻辑（Android / iOS）：两步表单——先选套餐类型 family（general/memory/compute）+ 网络 ip_type，规格只列 family 与 ipv6_only 都匹配的 bundle（后端 ls_options 已标注）。
+- 开放端口全协议（Android / iOS）：协议增 icmp / icmpv6 / all，非 tcp/udp 时端口可空（提交 0，后端按协议归一）。
+- 脚本模板多选（Android / iOS）：表单框架新增 multiselect 字段（Android BaseActivity / iOS UIHub FormModel.multis），创建提交 script_ids 数组，后端 resolve_script 按序拼接；预设补「更新环境」「安装 Fail2ban」。
+- 安全页对齐 Web（Android / iOS）：2FA 开通显示二维码（后端 qr_png）；已登录设备卡片（GET /sessions、DELETE /sessions/{id}、POST /sessions/kick-others）；登录记录卡片（GET /audit/logins）；审计登录行标「🔐 登录」。
+
 ## 1.6.2 build 36
 - 显示版本升至 1.6.2（Android versionName / iOS MARKETING_VERSION），构建号 36；功能内容与 build 35 完全一致，仅升版本号。发布标签由 ios/project.yml 派生，新建 Release v1.6.2。
 

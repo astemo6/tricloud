@@ -85,6 +85,11 @@ CF_PLANS = {
     "BUSINESS": {"label": "Business", "price": "$200/月", "paid": True},
     "PREMIUM": {"label": "Premium", "price": "$1000/月起", "paid": True},
 }
+# 订阅的「现行」状态口径（cf_plans 显示、_cf_sub_starts 周期、cf_set_plan 切换校验三处共用）：
+# 刚 create_subscription 的单子先停在 SYNC_IN_PROGRESS 同步一阵才转 ACTIVE——漏掉它会出现
+# 列表显示按量付费、切换却拦「已是该套餐」的自相矛盾（2026-11-08 orakr201 实测）；FAILED 是终态废单，不算现行。
+# 状态全集以 botocore 模型为准：PENDING_APPROVAL / ACTIVE / SYNC_IN_PROGRESS / FAILED。
+CF_SUB_LIVE_STATUSES = ("ACTIVE", "PENDING_APPROVAL", "SYNC_IN_PROGRESS")
 CF_PRICE_CLASS = {"100": "PriceClass_100", "200": "PriceClass_200", "all": "PriceClass_All"}
 CF_CACHE_POLICY = {   # AWS 托管缓存策略
     "disabled": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",    # CachingDisabled：反代动态内容
@@ -714,7 +719,7 @@ class AWSProvider(AWSMore, AWSCredit):
             out = {}
             for page in self._ppm().get_paginator("list_subscriptions").paginate():
                 for sub in page.get("subscriptionSummaries", []):
-                    if sub.get("planFamily") != "CloudFront" or (sub.get("status") or "").upper() not in ("ACTIVE", "PENDING_APPROVAL"):
+                    if sub.get("planFamily") != "CloudFront" or (sub.get("status") or "").upper() not in CF_SUB_LIVE_STATUSES:
                         continue
                     for arn in sub.get("resourceArns", []):
                         if ":distribution/" in arn:   # arn:aws:cloudfront::<账号>:distribution/<ID>
@@ -731,7 +736,7 @@ class AWSProvider(AWSMore, AWSCredit):
     }
 
     def _cf_sub_starts(self):
-        """与 cf_plans 同款分页 list_subscriptions（过滤 planFamily=="CloudFront"、status ∈ ACTIVE/PENDING_APPROVAL），
+        """与 cf_plans 同款分页 list_subscriptions（过滤 planFamily=="CloudFront"、status ∈ CF_SUB_LIVE_STATUSES），
         返回 {dist_id: 订阅起始 datetime}。已用 botocore 模型核实：SubscriptionSummary 没有 startTime 字段，
         真实字段是 createdAt / updatedAt（datetime 类型）。起始时间依次从 ("startTime","startDateTime","startDate","createdAt","createdTime")
         里取第一个非空值；字符串则用 datetime.fromisoformat 解析，naive 的补 UTC。整体异常时返回 {}。
@@ -740,7 +745,7 @@ class AWSProvider(AWSMore, AWSCredit):
             out = {}
             for page in self._ppm().get_paginator("list_subscriptions").paginate():
                 for sub in page.get("subscriptionSummaries", []):
-                    if sub.get("planFamily") != "CloudFront" or (sub.get("status") or "").upper() not in ("ACTIVE", "PENDING_APPROVAL"):
+                    if sub.get("planFamily") != "CloudFront" or (sub.get("status") or "").upper() not in CF_SUB_LIVE_STATUSES:
                         continue
                     st = None
                     for k in ("startTime", "startDateTime", "startDate", "createdAt", "createdTime"):
@@ -1019,7 +1024,9 @@ class AWSProvider(AWSMore, AWSCredit):
             current = None
             for page in ppm.get_paginator("list_subscriptions").paginate():
                 for sub in page.get("subscriptionSummaries", []):
-                    if sub.get("planFamily") == "CloudFront" and arn in sub.get("resourceArns", []):
+                    if (sub.get("planFamily") == "CloudFront"
+                            and (sub.get("status") or "").upper() in CF_SUB_LIVE_STATUSES
+                            and arn in sub.get("resourceArns", [])):
                         current = sub
             if tier == "PAYGO":
                 if not current:

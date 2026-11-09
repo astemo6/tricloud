@@ -12,6 +12,10 @@ export const CRED_FIELDS = {
     ["proxy_user", "cred.proxyUser"], ["proxy_pass", "cred.proxyPass", "", "password"]],
   azure: [["tenant_id", "cred.tenantId"], ["client_id", "cred.clientId"], ["client_secret", "cred.clientSecret", "", "password"], ["subscription_id", "cred.subscriptionId"],
     ["proxy", "cred.proxy", "http://host:port"], ["proxy_user", "cred.proxyUser"], ["proxy_pass", "cred.proxyPass", "", "password"]],
+  solusvm: [["panel_url", "cred.panelUrl", "https://cp.greencloudvps.com"], ["key", "cred.apiKey"], ["hash", "cred.apiHash", "", "password"],
+    ["proxy", "cred.proxy", "http://host:port"], ["proxy_user", "cred.proxyUser"], ["proxy_pass", "cred.proxyPass", "", "password"]],
+  virtfusion: [["panel_url", "cred.panelUrl", "https://"], ["api_token", "cred.apiToken", "", "password"],
+    ["proxy", "cred.proxy", "http://host:port"], ["proxy_user", "cred.proxyUser"], ["proxy_pass", "cred.proxyPass", "", "password"]],
 };
 // build 25：区域列显示有机器的区域；与默认区域不同时下面小字注明默认区域
 export function accRegionCell(a) {
@@ -110,7 +114,7 @@ export async function addAccount() {
 document.addEventListener("change", (e) => {
   if (e.target.id !== "np") return;
   const p = e.target.value;
-  const hint = { oci: t("acc.hintOci"), aws: t("acc.hintAws"), azure: t("acc.hintAzure"), ...PROV_HINT }[p];
+  const hint = { oci: t("acc.hintOci"), aws: t("acc.hintAws"), azure: t("acc.hintAzure"), solusvm: t("acc.hintSolusvm"), virtfusion: t("acc.hintVirtfusion"), ...PROV_HINT }[p];
   $("#cf").innerHTML = CRED_FIELDS[p].map(credInput).join("");
   $("#hint").textContent = hint;
 });

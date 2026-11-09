@@ -624,6 +624,7 @@ export const STR = {
     "cred.proxy": "出口代理（可选）", "cred.proxyUser": "代理用户名（可选）", "cred.proxyPass": "代理密码（可选）",
     "cred.accessKey": "Access Key ID", "cred.secretKey": "Secret Access Key", "cred.defRegion": "默认区域",
     "cred.tenantId": "Tenant ID", "cred.clientId": "Client (App) ID", "cred.clientSecret": "Client Secret", "cred.subscriptionId": "Subscription ID",
+    "cred.panelUrl": "面板地址", "cred.apiKey": "API Key", "cred.apiHash": "API Hash", "cred.apiToken": "API Token（用户）",
     // ---- 云账号 ----
     "acc.addBtn": "添加云账号", "acc.batchBtn": "批量添加", "acc.testScope": "测活范围", "acc.allAccounts": "全部账号",
     "acc.testAll": "⚡ 一键测活", "acc.deletedLink": "🗑 已删账号", "acc.moveUp": "上移（调整左侧顺序）", "acc.moveDown": "下移（调整左侧顺序）",
@@ -668,6 +669,8 @@ export const STR = {
     "acc.hintOci": "OCI 控制台右上角头像 → User settings（进入 My profile）→ Tokens and keys 标签 → Add API key 生成。",
     "acc.hintAws": "建议使用仅含 EC2/Lightsail/CloudFront/Service Quotas/CE 权限的 IAM 用户。",
     "acc.hintAzure": "az ad sp create-for-rbac --role Contributor --scopes /subscriptions/<id> 生成。",
+    "acc.hintSolusvm": "在 SolusVM 面板打开这台 VPS → API 页生成 Key / Hash。一对凭证只对应一台 VPS，每台单独加一个账号。",
+    "acc.hintVirtfusion": "在 VirtFusion 面板 Account → API 里生成用户 API Token（需面板 ≥6.1 且管理员未关闭用户 API）。一个账号可管理名下全部服务器。",
     "acc.aliveDays": "已存活 {n} 天", "acc.ageDaysSuffix": " · {n} 天",
     "acc.untested": "未测", "acc.reachable": "连通", "acc.failed": "失败",
     "acc.infoTitle": "账号信息 · {name}",
@@ -1436,6 +1439,7 @@ export const STR = {
     "cred.proxy": "Egress proxy (optional)", "cred.proxyUser": "Proxy username (optional)", "cred.proxyPass": "Proxy password (optional)",
     "cred.accessKey": "Access Key ID", "cred.secretKey": "Secret Access Key", "cred.defRegion": "Default region",
     "cred.tenantId": "Tenant ID", "cred.clientId": "Client (App) ID", "cred.clientSecret": "Client Secret", "cred.subscriptionId": "Subscription ID",
+    "cred.panelUrl": "Panel URL", "cred.apiKey": "API Key", "cred.apiHash": "API Hash", "cred.apiToken": "API Token (user)",
     // ---- cloud accounts ----
     "acc.addBtn": "Add cloud account", "acc.batchBtn": "Batch add", "acc.testScope": "Test scope", "acc.allAccounts": "All accounts",
     "acc.testAll": "⚡ Test all", "acc.deletedLink": "🗑 Deleted accounts", "acc.moveUp": "Move up (sidebar order)", "acc.moveDown": "Move down (sidebar order)",
@@ -1480,6 +1484,8 @@ export const STR = {
     "acc.hintOci": "In the OCI console: avatar (top right) → User settings (My profile) → Tokens and keys tab → Add API key.",
     "acc.hintAws": "Use an IAM user with only EC2/Lightsail/CloudFront/Service Quotas/CE permissions.",
     "acc.hintAzure": "Generate with: az ad sp create-for-rbac --role Contributor --scopes /subscriptions/<id>",
+    "acc.hintSolusvm": "In the SolusVM panel, open this VPS → API tab to generate a Key / Hash. One credential pair covers one VPS; add one account per VPS.",
+    "acc.hintVirtfusion": "In the VirtFusion panel, create a user API token under Account → API (requires panel ≥ 6.1 and the admin not having disabled the user API). One account manages all your servers.",
     "acc.aliveDays": "Alive {n} days", "acc.ageDaysSuffix": " · {n} days",
     "acc.untested": "Untested", "acc.reachable": "Reachable", "acc.failed": "Failed",
     "acc.infoTitle": "Account info · {name}",

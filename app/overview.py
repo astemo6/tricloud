@@ -257,6 +257,17 @@ def _generic(rows, default_region):
             "regions": regions, "errors": errors, "scanned": len(rows), "default_region": default_region}
 
 
+# ---------------- 通用面板型（SolusVM / VirtFusion 等） ----------------
+def _panel(acc):
+    """没有区域概念的面板型 provider：直接用实例列表按 region 字段分组计数。"""
+    by = {}
+    for i in services.list_instances(acc["id"]):
+        r = by.setdefault(i.get("region") or "-", {"region": i.get("region") or "-", "count": 0, "running": 0})
+        r["count"] += 1
+        r["running"] += i.get("state") == "running"
+    return _generic(list(by.values()), None)
+
+
 # ---------------- 入口 ----------------
 def summary(acc_id, refresh=False):
     acc = core.get_account(acc_id)
@@ -283,7 +294,7 @@ def summary(acc_id, refresh=False):
                         pass
                 raise
         else:
-            data = dict(_oci(acc) if pv == "oci" else _azure(acc), scope="all")
+            data = dict(_oci(acc) if pv == "oci" else _azure(acc) if pv == "azure" else _panel(acc), scope="all")
         data["regions"].sort(key=lambda r: (-r["count"], r["region"]))
         data.update(account_id=acc_id, provider=pv, updated_at=services.now_local().strftime("%Y-%m-%d %H:%M:%S"))
         _sum[acc_id] = {"ts": time.time(), "data": data}

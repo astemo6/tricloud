@@ -5,7 +5,7 @@
   --bg: #f8fafd; --surface: #ffffff; --s-low: #f8fafd; --s-c: #f0f4f9; --s-high: #e9eef6; --s-highest: #dde3ea;
   --text: #1f1f1f; --muted: #444746; --outline: #747775; --border: #c4c7c5; --border-soft: #e1e3e1;
   --ok: #146c2e; --ok-c: #c4eed0; --warn: #8a5100; --warn-c: #ffdeae; --bad: #b3261e; --bad-c: #f9dedc;
-  --oci: #c74634; --aws: #ff9900; --azure: #0078d4;
+  --oci: #c74634; --aws: #ff9900; --azure: #0078d4; --solusvm: #7cb342; --virtfusion: #26a69a;
   --e1: 0 1px 2px rgba(0,0,0,.3), 0 1px 3px 1px rgba(0,0,0,.15);
   --e2: 0 1px 2px rgba(0,0,0,.3), 0 2px 6px 2px rgba(0,0,0,.15);
   --e3: 0 4px 8px 3px rgba(0,0,0,.15), 0 1px 3px rgba(0,0,0,.3);
@@ -94,6 +94,7 @@ label:has(input[type=checkbox]) { display: flex; align-items: center; font-size:
 .side .sname { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }   /* 账号名单行省略，长名不再换行撑高 */
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .dot.oci { background: var(--oci); } .dot.aws { background: var(--aws); } .dot.azure { background: var(--azure); }
+.dot.solusvm { background: var(--solusvm); } .dot.virtfusion { background: var(--virtfusion); }
 .side-resizer { width: 6px; flex-shrink: 0; cursor: col-resize; touch-action: none; background: var(--primary); opacity: 0; transition: opacity .15s; }
 .side-resizer:hover { opacity: .3; }
 body.side-dragging { user-select: none; cursor: col-resize; }

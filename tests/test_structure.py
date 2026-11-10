@@ -58,10 +58,12 @@ code = ("import os,sys,tempfile;os.environ['TRICLOUD_DATA']=tempfile.mkdtemp();s
         "print(sorted({m.split('.')[0] for m in sys.modules if m.split('.')[0] in ('boto3','botocore','oci','azure')}))") % ROOT
 out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120).stdout.splitlines()
 ok("lazy: importing app.main loads no cloud SDK", out[:1] == ["[]"])
-ok("lazy: PROVIDERS keys / order unchanged without importing", out[1:2] == ["['oci', 'aws', 'azure']"])
+ok("lazy: PROVIDERS keys / order unchanged without importing", out[1:2] == ["['oci', 'aws', 'azure', 'solusvm', 'virtfusion']"])
 ok("lazy: first use of AWS imports only boto3/botocore", out[2:3] == ["['boto3', 'botocore']"])
 ok("lazy: services.OCIProvider still resolvable", services.OCIProvider.__name__ == "OCIProvider"
    and services.PROVIDERS["azure"].__name__ == "AzureProvider")
+ok("lazy: panel providers resolvable (httpx only, no cloud SDK)", services.PROVIDERS["solusvm"].__name__ == "SolusVMProvider"
+   and services.PROVIDERS["virtfusion"].__name__ == "VirtFusionProvider")
 
 # ================= 3. 客户端复用 =================
 from app.providers.aws_provider import AWSProvider

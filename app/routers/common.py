@@ -15,6 +15,8 @@ REQUIRED = {
     "oci": ["user", "tenancy", "fingerprint", "key_content", "region"],
     "aws": ["access_key", "secret_key", "region"],
     "azure": ["tenant_id", "client_id", "client_secret", "subscription_id"],
+    "solusvm": ["panel_url", "key", "hash"],
+    "virtfusion": ["panel_url", "api_token"],
 }
 
 

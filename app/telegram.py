@@ -119,7 +119,7 @@ async def _reply(bot, chat_id, text, markup=None):
     await bot.call("sendMessage", body)
 
 
-PROV_NAME = {"oci": "Oracle Cloud", "aws": "AWS", "azure": "Azure"}
+PROV_NAME = {"oci": "Oracle Cloud", "aws": "AWS", "azure": "Azure", "solusvm": "SolusVM", "virtfusion": "VirtFusion"}
 # 危险操作：确认页加醒目警告（所有实例操作都要点「确认」按钮才执行）
 DANGER_KEYS = ("terminate", "stop", "changeip", "delipv6", "reboot")
 

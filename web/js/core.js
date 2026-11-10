@@ -103,16 +103,18 @@ export const TABS = {
   oci: [["instances", "tab.instances"], ["create", "tab.create"], ["snatch", "tab.snatch"], ["secgroup", "tab.secgroup"], ["storage", "tab.storage"], ["objects", "tab.objects"], ["traffic", "tab.traffic"], ["limits", "tab.limits"], ["billing", "tab.billing"]],   // 区域订阅收在「配额/网络」页底部的折叠区（防误点）
   aws: [["ec2", "tab.ec2"], ["lightsail", "tab.lightsail"], ["regions", "tab.regions"], ["cloudfront", "tab.cloudfront"], ["quota", "tab.quota"], ["recycle", "tab.recycle"], ["billing", "tab.billing"], ["credit", "tab.credit"]],
   azure: [["vms", "tab.vms"], ["azcreate", "tab.azcreate"], ["rgs", "tab.rgs"], ["azquota", "tab.azquota"], ["foundry", "tab.foundry"], ["subscription", "tab.subscription"], ["billing", "tab.billing"]],
+  solusvm: [["instances", "tab.instances"]],
+  virtfusion: [["instances", "tab.instances"]],
 };
 // 已移除的标签：旧链接跳到新位置（#/oci/1/regionsub → 配额/网络）
 export const TAB_ALIAS = { oci: { regionsub: "limits" } };
-export const PNAME = { oci: "Oracle Cloud", aws: "AWS", azure: "Azure" };
+export const PNAME = { oci: "Oracle Cloud", aws: "AWS", azure: "Azure", solusvm: "SolusVM", virtfusion: "VirtFusion" };
 // 扩展点（附加云厂商可在自己的代码块里登记）
-export const PROVS = ["oci", "aws", "azure"];          // 侧栏 / 切换器 / 下拉的顺序
+export const PROVS = ["oci", "aws", "azure", "solusvm", "virtfusion"];          // 侧栏 / 切换器 / 下拉的顺序
 export let META = { providers: PROVS.slice() };         // GET /api/meta：当前可添加的云厂商
-export const NO_REGION = new Set(["azure"]);            // 没有区域概念的云
-export const NO_CHANGE_IP = new Set();                  // 不能换 IP 的云（监控里不显示「不通自动换 IP」）
-export const NO_CREATE = new Set();                     // 不能创建实例的云（不能作为迁移目标）
+export const NO_REGION = new Set(["azure", "solusvm", "virtfusion"]);            // 没有区域概念的云
+export const NO_CHANGE_IP = new Set(["solusvm", "virtfusion"]);                  // 不能换 IP 的云（监控里不显示「不通自动换 IP」）
+export const NO_CREATE = new Set(["solusvm", "virtfusion"]);                     // 不能创建实例的云（不能作为迁移目标）
 export const TAB_FNS_EXTRA = {}, OP_NAMES = {}, TRAFFIC_DIALOG = {}, ADD_BODY = {}, PROV_HINT = {};
 export const TEXTAREA_FIELDS = new Set(["key_content"]);
 export const SETTINGS_CARDS = [];                       // [{ html(settings), bind(root) }]

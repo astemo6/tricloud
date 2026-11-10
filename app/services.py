@@ -11,7 +11,9 @@ from . import core
 
 # 三家云 SDK（oci / boto3 / azure-mgmt-*）都很大：用到哪家才导入哪家，没有该云账号就不占内存、不拖慢启动。
 _PROVIDER_CLASSES = {"oci": ("oci_provider", "OCIProvider"), "aws": ("aws_provider", "AWSProvider"),
-                     "azure": ("azure_provider", "AzureProvider")}
+                     "azure": ("azure_provider", "AzureProvider"),
+                     "solusvm": ("solusvm_provider", "SolusVMProvider"),
+                     "virtfusion": ("virtfusion_provider", "VirtFusionProvider")}
 
 
 class _LazyProviders(Mapping):

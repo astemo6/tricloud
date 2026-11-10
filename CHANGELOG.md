@@ -1,7 +1,7 @@
 # Changelog
 
 ## 未发布（2026-11-10 已合并 master 并部署 #15，真机联调已通过；VNC 与列表流量为同日晚追加）
-- 新功能：**VirtFusion VNC 控制台**（Web）：实例操作加「VNC」，弹窗内用内置 noVNC（vendored v1.5.0，web/vendor/novnc）直连面板 wss 端点；未开启时后端 POST 开启并轮询等就绪。新增接口 GET /api/accounts/{id}/instances/vnc，不支持的厂商返回友好错误。
+- 新功能：**VirtFusion VNC 控制台**（Web）：实例操作加「VNC」，弹窗内用内置 noVNC（vendored v1.5.0，web/vendor/novnc）显示画面；未开启时后端 POST 开启并轮询等就绪。新增接口 GET /api/accounts/{id}/instances/vnc（连接信息）与 websocket 中继 /api/accounts/{id}/instances/vnc-ws——浏览器直连绿云 wss 在用户网络下会被断开（服务端全链路握手与 DES 鉴权实测正常），故由后端经账号代理中继转发，浏览器只连面板域名；不支持的厂商返回友好错误。
 - 改进：**流量统计直接显示在实例列表**（SolusVM / VirtFusion，表格与卡片视图）：已用 / 总额 + 百分比，悬停看入/出明细，不必再点进「流量守护」；守护弹窗本身保留（阈值与自动关机设置）。VirtFusion 流量返回补 period 文案，守护弹窗的周期显示同步修好。
 - 备注：绿云 cp.green.cloud 前置 Cloudflare 会拦截甲骨文机房 IP 段（403），#15 上的面板需给 VirtFusion 账号配出口代理（已在 greensbank 上备好 tinyproxy 专用代理）才能调通 API——属部署配置，非代码问题。
 - 新功能：新增两类「面板型」云厂商 **SolusVM** 与 **VirtFusion**（绿云 GreenCloud 等 VPS 商走这两套面板），TriCloud 从三家云扩到五家：

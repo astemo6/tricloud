@@ -1,7 +1,7 @@
 """实例（三家云通用）：列表、开关机、换 IP、改配置、开放端口、改名、流量、重装系统、IP 质量。"""
 import re
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, WebSocket
 
 from .. import core, dns, hostname, net, overview, services, tasks
 from ..i18n import msg
@@ -180,6 +180,73 @@ async def inst_vnc(acc_id: int, instance_id: str, region: str = None):
     if not hasattr(p, "vnc"):
         raise HTTPException(400, msg("err.no_vnc"))
     return await run(p.vnc, instance_id)
+
+
+@router.websocket("/api/accounts/{acc_id}/instances/vnc-ws")
+async def inst_vnc_ws(websocket: WebSocket, acc_id: int, instance_id: str, region: str = None):
+    """VNC websocket 中继：浏览器只连面板自身域名，服务端经账号代理连面板 wss 并双向
+    转发字节流（浏览器直连 cp.green.cloud 的 wss 在用户网络下会断开，2026-11-10 实测
+    服务端全链路握手+鉴权都正常，问题在浏览器直连那一跳）。token 只在服务端出现。
+    auth_mw 是 http 中间件、不覆盖 websocket，这里手动验 session。"""
+    import asyncio
+
+    import websockets
+
+    tok = websocket.cookies.get("tc_session")
+    auth = websocket.headers.get("authorization", "")
+    if not tok and auth.lower().startswith("bearer "):
+        tok = auth[7:].strip()
+    if not core.check_session(tok):
+        await websocket.close(code=4401)
+        return
+    try:
+        need_acc(acc_id)
+        p = services.provider(acc_id, region)
+        if not hasattr(p, "vnc"):
+            raise ValueError("no vnc")
+        info = await run(p.vnc, instance_id)
+    except Exception:
+        await websocket.close(code=4403)
+        return
+    subs = websocket.scope.get("subprotocols") or []
+    await websocket.accept(subprotocol="binary" if "binary" in subs else None)
+    try:
+        async with websockets.connect(info["url"], proxy=(p.cred.get("proxy") or None),
+                                      origin="https://cp.green.cloud", subprotocols=["binary"],
+                                      max_size=None) as up:
+            async def to_up():
+                try:
+                    while True:
+                        m = await websocket.receive()
+                        if m["type"] == "websocket.disconnect":
+                            return
+                        if m.get("bytes") is not None:
+                            await up.send(m["bytes"])
+                        elif m.get("text") is not None:
+                            await up.send(m["text"])
+                except Exception:
+                    return
+
+            async def to_browser():
+                try:
+                    async for m in up:
+                        if isinstance(m, bytes):
+                            await websocket.send_bytes(m)
+                        else:
+                            await websocket.send_text(m)
+                except Exception:
+                    return
+
+            t1 = asyncio.create_task(to_up())
+            t2 = asyncio.create_task(to_browser())
+            _, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+            for t in pending:
+                t.cancel()
+    except Exception:
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
 
 
 # ================= 3. 重装系统（三家云，后台任务） =================

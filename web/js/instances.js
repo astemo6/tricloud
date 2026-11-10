@@ -51,7 +51,7 @@ export async function pageAccount(acc, tab) {
 export function instOps(acc, kind) {
   // 面板型 provider（客户 API 能力子集）：只给 API 真正支持的操作，其余不显示
   if (acc.provider === "solusvm") return [["start", t("op.start")], ["stop", t("op.stop")], ["reboot", t("op.reboot")], ["traffic", t("op.traffic")], ["monitor", t("op.monitor")]];
-  if (acc.provider === "virtfusion") return [["start", t("op.start")], ["stop", t("op.stop")], ["reboot", t("op.reboot")], ["rename", t("op.rename")], ["traffic", t("op.traffic")], ["monitor", t("op.monitor")]];   // 电源 / 流量 / 改名据官方 API 文档（2026-11-10）
+  if (acc.provider === "virtfusion") return [["start", t("op.start")], ["stop", t("op.stop")], ["reboot", t("op.reboot")], ["rename", t("op.rename")], ["vnc", t("op.vnc")], ["traffic", t("op.traffic")], ["monitor", t("op.monitor")]];   // 电源 / 流量 / 改名 / VNC 据官方 API 文档（2026-11-10）
   const ops = [["start", t("op.start")], ["stop", acc.provider === "azure" ? t("op.stopRelease") : t("op.stop")], ["reboot", t("op.reboot")], ["changeip", t("op.changeip")]];
   if (acc.provider === "oci") ops.push(["ipv6", t("op.ipv6")], ["delipv6", t("op.delipv6")], ["resize", t("op.resize")], ["rename", t("op.rename")], ["bootvol", t("op.bootvol")],
     ["security", t("op.security")]);
@@ -87,6 +87,7 @@ export function instCard(acc, i, kind) {
   else extra.push([t("inst.spec"), esc(i.shape)]);
   if (kind === "lightsail") extra.push([t("inst.blueprint"), esc(i.blueprint)], [t("inst.staticIp"), i.static_ip ? t("common.yes") : t("common.no")]);
   if (acc.provider === "azure") extra.push([t("inst.rg"), esc(i.resource_group)]);
+  if (["solusvm", "virtfusion"].includes(acc.provider)) extra.push([t("inst.traffic"), `<span data-traf="${esc(i.id)}" data-bare="1">…</span>`]);   // 流量统计直接显示在列表（tabInstances 渲染后异步填充）
   const ops = instOps(acc, kind);
   const inl = ops.filter(([o]) => INLINE_OPS.includes(o));
   const more = ops.length > inl.length;
@@ -137,6 +138,20 @@ export async function tabInstances(acc, box, kind = "vm") {
     const inst = list.find((x) => x.id === b.closest("[data-id]").dataset.id);
     b.onclick = (e) => { e.stopPropagation(); opsMenu(b, instOps(acc, kind).filter(([o]) => !INLINE_OPS.includes(o)), (op) => instOp(acc, inst, op, kind, b, reload)); };
   });
+  if (["solusvm", "virtfusion"].includes(acc.provider)) fillTraffic(acc, list, kind, box);
+}
+
+// 面板型 provider 的流量统计直接填充到列表占位处（已用 / 总额 + 百分比），不用再点进流量守护
+async function fillTraffic(acc, list, kind, box) {
+  for (const i of list) {
+    const els = () => box.querySelectorAll(`[data-traf="${CSS.escape(i.id)}"]`);
+    try {
+      const rgq = NOREG(acc) ? "" : `region=${encodeURIComponent(i.region || regionOf(acc))}`;
+      const td = await api(`/accounts/${acc.id}/traffic?instance_id=${encodeURIComponent(i.id)}&kind=${kind}&${rgq}`);
+      const nums = td.total_gb ? `${td.used_gb} / ${td.total_gb} GB（${Math.round(td.used_gb / td.total_gb * 100)}%）` : `${td.used_gb} GB`;
+      els().forEach((el) => { el.textContent = el.dataset.bare ? nums : `${t("inst.traffic")} ${nums}`; el.title = `${t("inst.dirIn")} ${td.in_gb} GB · ${t("inst.dirOut")} ${td.out_gb} GB`; });
+    } catch (_) { els().forEach((el) => { el.textContent = el.dataset.bare ? "-" : `${t("inst.traffic")} -`; }); }
+  }
 }
 
 export async function instOp(acc, inst, op, kind, btn, reload) {
@@ -200,6 +215,9 @@ export async function instOp(acc, inst, op, kind, btn, reload) {
     openSecurity(acc, inst, base);
   } else if (op === "traffic") {
     trafficDialog(acc, inst, kind);
+  } else if (op === "vnc") {
+    const m = await import("./vnc.js");
+    m.openVnc(acc, inst);
   } else if (op === "dns") {
     bindDns(acc, inst);
   } else if (op === "resize") {
@@ -419,7 +437,7 @@ export async function trafficDialog(acc, inst, kind, onSaved) {
 }
 
 // ---------- 实例表格视图 ----------
-export const INLINE_OPS = ["start", "stop", "reboot", "changeip"];
+export const INLINE_OPS = ["start", "stop", "reboot", "changeip", "vnc"];
 // 按实例状态禁用无意义的操作：运行中不能再启动，已停止不能停止/重启
 export function opOff(op, i) {
   const st = String(i.state || "").toLowerCase();
@@ -431,7 +449,8 @@ export function opOff(op, i) {
 export const opBtn = (o, l, i, cls = "") => { const off = opOff(o, i); return `<button class="btn sm ${cls}" data-op="${o}"${off ? ` disabled title="${off}"` : ""}>${l}</button>`; };
 export function instTable(acc, list, kind) {
   // v1.5：参照线上版——默认表格视图，列：名称/状态/规格/公网 IP/内网 IP/地域/创建时间，行内操作全部平铺
-  const spec = (i) => acc.provider === "oci" ? `${esc(i.shape)} ${i.ocpus ?? ""}C/${i.memory_gb ?? ""}G` : esc(i.shape || "-");
+  const spec = (i) => (acc.provider === "oci" ? `${esc(i.shape)} ${i.ocpus ?? ""}C/${i.memory_gb ?? ""}G` : esc(i.shape || "-"))
+    + (["solusvm", "virtfusion"].includes(acc.provider) ? `<div class="muted" data-traf="${esc(i.id)}">${t("inst.traffic")} …</div>` : "");   // 流量统计直接显示（异步填充）
   const when = (c) => { if (!c || c === "None") return "-"; const t = String(c).replace("T", " "); return esc(t.slice(0, 16)); };
   const ops = instOps(acc, kind);
   return `<table class="inst-table"><tr><th>${t("acc.colName")}</th><th>${t("common.status")}</th><th>${t("inst.spec")}</th><th>${t("inst.colPublic")}</th><th>${t("inst.colPrivate")}</th><th>${t("inst.colRegion")}</th><th>${t("inst.colCreated")}</th><th>${t("inst.colOps")}</th></tr>

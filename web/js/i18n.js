@@ -473,6 +473,9 @@ export const STR = {
     // ---- 流量守护弹窗 / 表格 / 重装 / 附加 IP / 质量 / 磁盘 / 防火墙 ----
     "inst.trafficFail": "读取流量失败：{msg}",
     "inst.trafficUse": "本月（{period}）出站 <b>{out} GB</b>，入站 {in} GB。",
+    "inst.traffic": "流量",
+    "op.vnc": "VNC",
+    "vnc.title": "VNC 控制台 · {name}", "vnc.connecting": "正在连接…（首次使用会先开启 VNC，稍等几秒）", "vnc.connected": "已连接，可直接键鼠操作", "vnc.disconnected": "连接已断开", "vnc.failed": "连接失败：{msg}",
     "inst.trafNote": "月度模式每 30 分钟、滚动窗口每 10 分钟查一次平台指标（免费，有 5~15 分钟延迟，建议留余量）。到预警比例推送 Telegram；到上限推送，可选自动停机。",
     "inst.trafTitle": "流量守护 · {name}",
     "inst.trafMode": "统计方式", "inst.trafMonthly": "本月累计", "inst.trafRolling": "滚动窗口（最近 N 小时）",
@@ -1288,6 +1291,9 @@ export const STR = {
     // ---- traffic dialog / table / reinstall / extra IPs / quality / disks / firewall ----
     "inst.trafficFail": "Failed to load traffic: {msg}",
     "inst.trafficUse": "This month ({period}): outbound <b>{out} GB</b>, inbound {in} GB.",
+    "inst.traffic": "Traffic",
+    "op.vnc": "VNC",
+    "vnc.title": "VNC console · {name}", "vnc.connecting": "Connecting… (first use enables VNC, give it a few seconds)", "vnc.connected": "Connected", "vnc.disconnected": "Disconnected", "vnc.failed": "Connection failed: {msg}",
     "inst.trafNote": "Monthly mode checks platform metrics every 30 min, rolling window every 10 min (free; 5–15 min delay — keep headroom). Telegram alert at the warning ratio; on limit, notify or optionally auto-shutdown.",
     "inst.trafTitle": "Traffic guard · {name}",
     "inst.trafMode": "Basis", "inst.trafMonthly": "This month total", "inst.trafRolling": "Rolling window (last N hours)",

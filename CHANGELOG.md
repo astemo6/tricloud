@@ -1,6 +1,9 @@
 # Changelog
 
-## 未发布（2026-11-10 已合并 master 并部署 #15；VirtFusion 真机联调待 Token）
+## 未发布（2026-11-10 已合并 master 并部署 #15，真机联调已通过；VNC 与列表流量为同日晚追加）
+- 新功能：**VirtFusion VNC 控制台**（Web）：实例操作加「VNC」，弹窗内用内置 noVNC（vendored v1.5.0，web/vendor/novnc）直连面板 wss 端点；未开启时后端 POST 开启并轮询等就绪。新增接口 GET /api/accounts/{id}/instances/vnc，不支持的厂商返回友好错误。
+- 改进：**流量统计直接显示在实例列表**（SolusVM / VirtFusion，表格与卡片视图）：已用 / 总额 + 百分比，悬停看入/出明细，不必再点进「流量守护」；守护弹窗本身保留（阈值与自动关机设置）。VirtFusion 流量返回补 period 文案，守护弹窗的周期显示同步修好。
+- 备注：绿云 cp.green.cloud 前置 Cloudflare 会拦截甲骨文机房 IP 段（403），#15 上的面板需给 VirtFusion 账号配出口代理（已在 greensbank 上备好 tinyproxy 专用代理）才能调通 API——属部署配置，非代码问题。
 - 新功能：新增两类「面板型」云厂商 **SolusVM** 与 **VirtFusion**（绿云 GreenCloud 等 VPS 商走这两套面板），TriCloud 从三家云扩到五家：
   - **SolusVM**（完整）：凭证 = 面板地址 + 该 VPS 在面板 API 页生成的 Key/Hash（一对凭证一台机，一台机加一个账号）。支持测活、实例列表（状态/IP/内存/硬盘/地点）、开关机/重启、流量（计费周期合计，SolusVM 只提供入出合计、不拆分，合计计入出站口径）、监控与总览计数。
   - **VirtFusion**（完整）：凭证 = 面板地址 + 用户 API Token（面板 Account → API 生成，需 ≥6.1 且管理员未关闭用户 API；一个账号管名下全部服务器）。支持测活、实例列表（分页）、实时状态、开关机/重启（boot/shutdown/restart；powerOff 是强制关机、与强制重启语义不同，未映射 hard_reboot）、流量（GET server/{id}?state=true 的 traffic 计数，当月周期口径，入/出分开；额度取 network limit）、改名。端点与字段已按绿云面板内官方 API 文档（OpenAPI 3.0.1，2026-11-10 导出）核对：id 为 UUID，cpu/memory/容量/额度均为带单位字符串，已做统一解析。真机联调待用户生成 Token 后进行。

@@ -172,6 +172,16 @@ async def traffic(acc_id: int, instance_id: str, region: str = None, kind: str =
     return await run(p.traffic, instance_id) if acc["provider"] == "oci" else await run(p.traffic, instance_id, kind)
 
 
+@router.get("/api/accounts/{acc_id}/instances/vnc")
+async def inst_vnc(acc_id: int, instance_id: str, region: str = None):
+    """VNC 控制台连接信息（wss 地址 + 密码）：目前 VirtFusion 支持，未开启时后端负责开启并等它就绪。"""
+    acc = need_acc(acc_id)
+    p = services.provider(acc_id, region)
+    if not hasattr(p, "vnc"):
+        raise HTTPException(400, msg("err.no_vnc"))
+    return await run(p.vnc, instance_id)
+
+
 # ================= 3. 重装系统（三家云，后台任务） =================
 @router.post("/api/accounts/{acc_id}/instances/reinstall")
 async def reinstall(acc_id: int, body: dict = Body(...)):

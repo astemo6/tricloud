@@ -51,7 +51,7 @@ export async function pageAccount(acc, tab) {
 export function instOps(acc, kind) {
   // 面板型 provider（客户 API 能力子集）：只给 API 真正支持的操作，其余不显示
   if (acc.provider === "solusvm") return [["start", t("op.start")], ["stop", t("op.stop")], ["reboot", t("op.reboot")], ["traffic", t("op.traffic")], ["monitor", t("op.monitor")]];
-  if (acc.provider === "virtfusion") return [["monitor", t("op.monitor")]];   // 电源 / 流量端点待实测后开放
+  if (acc.provider === "virtfusion") return [["start", t("op.start")], ["stop", t("op.stop")], ["reboot", t("op.reboot")], ["rename", t("op.rename")], ["traffic", t("op.traffic")], ["monitor", t("op.monitor")]];   // 电源 / 流量 / 改名据官方 API 文档（2026-11-10）
   const ops = [["start", t("op.start")], ["stop", acc.provider === "azure" ? t("op.stopRelease") : t("op.stop")], ["reboot", t("op.reboot")], ["changeip", t("op.changeip")]];
   if (acc.provider === "oci") ops.push(["ipv6", t("op.ipv6")], ["delipv6", t("op.delipv6")], ["resize", t("op.resize")], ["rename", t("op.rename")], ["bootvol", t("op.bootvol")],
     ["security", t("op.security")]);

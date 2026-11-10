@@ -3,7 +3,7 @@
 ## 未发布（分支 feat/greencloud-providers）
 - 新功能：新增两类「面板型」云厂商 **SolusVM** 与 **VirtFusion**（绿云 GreenCloud 等 VPS 商走这两套面板），TriCloud 从三家云扩到五家：
   - **SolusVM**（完整）：凭证 = 面板地址 + 该 VPS 在面板 API 页生成的 Key/Hash（一对凭证一台机，一台机加一个账号）。支持测活、实例列表（状态/IP/内存/硬盘/地点）、开关机/重启、流量（计费周期合计，SolusVM 只提供入出合计、不拆分，合计计入出站口径）、监控与总览计数。
-  - **VirtFusion**（部分）：凭证 = 面板地址 + 用户 API Token（面板 Account → API 生成，需 ≥6.1 且管理员未关闭用户 API；一个账号管名下全部服务器）。已支持测活、实例列表（分页）与状态；电源 / 流量端点未公开（文档只在面板内 Account → API 页），代码里明确报错留待实测补齐，没有猜端点乱发请求。
+  - **VirtFusion**（完整）：凭证 = 面板地址 + 用户 API Token（面板 Account → API 生成，需 ≥6.1 且管理员未关闭用户 API；一个账号管名下全部服务器）。支持测活、实例列表（分页）、实时状态、开关机/重启（boot/shutdown/restart；powerOff 是强制关机、与强制重启语义不同，未映射 hard_reboot）、流量（GET server/{id}?state=true 的 traffic 计数，当月周期口径，入/出分开；额度取 network limit）、改名。端点与字段已按绿云面板内官方 API 文档（OpenAPI 3.0.1，2026-11-10 导出）核对：id 为 UUID，cpu/memory/容量/额度均为带单位字符串，已做统一解析。真机联调待用户生成 Token 后进行。
   - 两家客户 API 都不提供创建 / 删除 / 换 IP / 开端口 / 账单：Web 端不显示这些操作，API 直调返回友好提示；实例「终止」被明确拒绝（退订走服务商客户区）。
   - 接入点：后端 provider 注册表 / 账号必填校验 / 总览通用分组 / Telegram 厂商名；Web 端厂商列表、添加账号表单与提示文案（中英）、实例操作菜单按能力收敛、账号圆点配色。Android / iOS App 尚未跟进（/api/meta 已能返回新厂商）。
   - 安全：面板请求只用账号里配置的出口代理，不继承进程环境变量代理（trust_env=False）。

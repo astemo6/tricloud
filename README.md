@@ -22,13 +22,13 @@
 在新 VPS 上用 root 执行一行即可：自动装好 curl、Docker 和 compose，下载代码、生成随机初始密码、构建并启动，最后打印访问地址和密码。
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/astemo6/tricloud/master/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/wdjiangdev/tricloud/master/install.sh)
 ```
 
 仓库为私有时，先 `export GH_TOKEN=<有该仓库读权限的 Token>`，再执行：
 
 ```bash
-bash <(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercontent.com/astemo6/tricloud/master/install.sh)
+bash <(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercontent.com/wdjiangdev/tricloud/master/install.sh)
 ```
 
 常用参数（加在 `bash` 前）：`PORT=8080` 换端口（默认 8000）；`BIND=127.0.0.1` 只监听本机，配合反代；`CN=1` 国内机器用阿里云源装 Docker；`DIR=/path` 改安装目录（默认 `/opt/docker/tricloud`）。再次运行同一条命令就是升级：保留 `.env` 和 `data/`，升级前自动备份。
@@ -182,7 +182,7 @@ CloudFront 包月套餐订阅时面板会自动为分发创建并关联一个配
 
 ## App
 
-直接下载：[Releases](https://github.com/astemo6/tricloud/releases/latest) 里有 Android APK、Windows 客户端（安装版和免安装版 exe）和 iOS 未签名 IPA。首次打开填你自己的面板地址。
+直接下载：[Releases](https://github.com/wdjiangdev/tricloud/releases/latest) 里有 Android APK、Windows 客户端（安装版和免安装版 exe）和 iOS 未签名 IPA。首次打开填你自己的面板地址。
 
 自行构建：
 

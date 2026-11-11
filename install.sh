@@ -6,13 +6,13 @@
 #   BIND=127.0.0.1 bash install.sh  # 只监听本机（配合 Nginx / Caddy / Cloudflare Tunnel）
 #   GH_TOKEN=xxx bash install.sh    # 仓库为私有时，用有读权限的 GitHub Token 下载代码
 #
-# 可选环境变量：DIR（安装目录，默认 /opt/docker/tricloud）、REPO（默认 astemo6/tricloud）、
+# 可选环境变量：DIR（安装目录，默认 /opt/docker/tricloud）、REPO（默认 wdjiangdev/tricloud）、
 # BRANCH（默认 master）、PANEL_PASSWORD（首次安装的面板密码，留空则随机生成）、
 # CN=1（国内机器：Docker 用阿里云镜像源安装）。
 # 再次运行即升级：保留 .env 与 data/，只更新代码并重建容器。
 set -euo pipefail
 
-REPO="${REPO:-astemo6/tricloud}"
+REPO="${REPO:-wdjiangdev/tricloud}"
 BRANCH="${BRANCH:-master}"
 DIR="${DIR:-/opt/docker/tricloud}"
 # 升级时沿用上次安装的端口和监听地址（命令行指定的优先）

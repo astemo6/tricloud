@@ -52,23 +52,44 @@ export function renderSide(p) {
   const cur = "#/" + (p[0] === "deleted" ? "accounts" : p.slice(0, 2).join("/"));
   const curTab = TABS[p[0]] ? p[2] : null;   // 与顶栏切换器同款：切账号时保留当前标签页（跨云走 mapTab 等价映射/回落）
   const link = (h, label, cls = "") => `<a href="${h}" class="${(cur === h || (h === "#/" && !p.length)) ? "on" : ""}">${cls}${label}</a>`;
+  const collapsed = sideCollapsed();
   let html = `<div class="logo">Tri<span>Cloud</span></div>` + link("#/", `🏠 ${t("nav.home")}`);
   for (const prov of PROVS) {
     const list = ACCOUNTS.filter((a) => a.provider === prov);
     if (!list.length) continue;
-    html += `<div class="grp prov">${PLOGO[prov]}${PNAME[prov]}</div>`;
+    const off = collapsed.has(prov) && p[0] !== prov;   // 当前账号所在组强制展开，不然看不到自己在哪
+    html += `<div class="grp prov" data-gtoggle="${prov}">${PLOGO[prov]}${PNAME[prov]}<span class="gcar">${off ? "▸" : "▾"}</span></div>`;
+    html += `<div class="gwrap${off ? " off" : ""}">`;
     for (const a of list) html += `<a href="#/${prov}/${a.id}/${mapTab(curTab, prov)}" data-acc="${a.id}" draggable="true" title="${esc(a.name)}" class="${cur === `#/${prov}/${a.id}` ? "on" : ""}"><span class="dot ${prov}"></span><span class="sname">${esc(a.name)}</span></a>`;
+    html += `</div>`;
   }
-  html += `<div class="grp">${t("nav.manage")}</div>` + link("#/accounts", `🔑 ${t("nav.accounts")}`) + link("#/health", `🩺 ${t("nav.health")}`) + link("#/freecheck", `🆓 ${t("nav.freecheck")}`) + link("#/traffic", `📈 ${t("nav.traffic")}`) + link("#/tasks", `⏱ ${t("nav.tasks")}`) +
+  const mOff = collapsed.has("manage");
+  html += `<div class="grp" data-gtoggle="manage">${t("nav.manage")}<span class="gcar">${mOff ? "▸" : "▾"}</span></div>` + `<div class="gwrap${mOff ? " off" : ""}">` + link("#/accounts", `🔑 ${t("nav.accounts")}`) + link("#/health", `🩺 ${t("nav.health")}`) + link("#/freecheck", `🆓 ${t("nav.freecheck")}`) + link("#/traffic", `📈 ${t("nav.traffic")}`) + link("#/tasks", `⏱ ${t("nav.tasks")}`) +
     link("#/monitors", `📡 ${t("nav.monitors")}`) + link("#/secrets", `🔐 ${t("nav.secrets")}`) + link("#/scripts", `📜 ${t("nav.scripts")}`) +
-    link("#/dns", `🌐 ${t("nav.dns")}`) + link("#/security", `🛡 ${t("nav.security")}`) + link("#/onedrive", `☁️ ${t("nav.onedrive")}`) + link("#/settings", `⚙️ ${t("nav.settings")}`);
+    link("#/dns", `🌐 ${t("nav.dns")}`) + link("#/security", `🛡 ${t("nav.security")}`) + link("#/onedrive", `☁️ ${t("nav.onedrive")}`) + link("#/settings", `⚙️ ${t("nav.settings")}`) + `</div>`;
   $("#side").innerHTML = html;
   wireSideDrag();
+  wireSideCollapse();
   const acc = TABS[p[0]] && ACCOUNTS.find((a) => a.id == p[1]);
   renderAccSwitch(acc);
   $("#title").textContent = acc ? `${PNAME[acc.provider]} · ${acc.name}` :
     ({ accounts: t("nav.accounts"), tasks: t("nav.tasks"), monitors: t("nav.monitors"), settings: t("nav.settings"), secrets: t("nav.secrets"), scripts: t("nav.scripts"),
       dns: t("title.dns"), security: t("nav.security"), onedrive: t("nav.onedrive"), health: t("nav.health"), traffic: t("nav.traffic"), deleted: t("nav.deleted"), freecheck: t("nav.freecheck") }[p[0]] || t("nav.home"));
+}
+
+// ---------- 侧栏分组折叠（按厂商 + 管理组；状态存 localStorage，刷新/重开都在） ----------
+function sideCollapsed() {
+  try { return new Set(JSON.parse(localStorage.getItem("tc_side_collapsed") || "[]")); } catch { return new Set(); }
+}
+function wireSideCollapse() {
+  $("#side").querySelectorAll("[data-gtoggle]").forEach((h) => {
+    h.onclick = () => {
+      const s = sideCollapsed(), g = h.dataset.gtoggle;
+      if (s.has(g)) s.delete(g); else s.add(g);
+      try { localStorage.setItem("tc_side_collapsed", JSON.stringify([...s])); } catch {}
+      renderSide(parseHash());
+    };
+  });
 }
 
 // ---------- 左侧账号手动排序（同云组内拖动，松手存后端 sort_order） ----------

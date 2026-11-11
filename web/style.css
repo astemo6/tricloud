@@ -81,6 +81,10 @@ label:has(input[type=checkbox]) { display: flex; align-items: center; font-size:
 .side .logo span { color: var(--primary); }   /* 与旧版一致：Tri + 蓝色 Cloud */
 .side .grp { font-size: 12px; font-weight: 500; color: var(--muted); padding: 18px 16px 8px; letter-spacing: .06em; }
 .side .grp.prov { display: flex; align-items: center; gap: 7px; letter-spacing: .02em; }
+.side .grp[data-gtoggle] { display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; }
+.side .grp .gcar { margin-left: auto; font-size: 10px; }
+.side .gwrap { display: contents; }
+.side .gwrap.off { display: none; }
 .side .grp .plogo { height: 13px; width: auto; flex: none; }
 .side .grp .plogo.aws { height: 18px; color: var(--text); transform: translateY(4px); }  /* 「aws」字母只占图上半部，下移让字母与文字齐平 */
 .side a { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 16px; margin: 1px 0; border-radius: 24px;

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.7（build 41）(2026-11-11)
+- 新功能：**三端侧边栏分组可折叠**（Web / Android / iOS；桌面端加载 Web 自动生效）：点厂商分组标题（OCI / AWS / Azure / SolusVM / VirtFusion 及「管理」组）收起 / 展开该组，标题带 ▾ / ▸ 指示；折叠状态本地持久化（Web localStorage、Android SharedPreferences、iOS AppStorage），重启不丢；当前账号所在组强制展开，不会把自己藏起来。实现备注：Android 抽屉由子菜单改平铺菜单（子菜单标题在 NavigationView 里收不到点击），用不同 groupId 保持组间分隔线；iOS 部署目标 15 没有 Section(isExpanded:)，用标题 Button + 条件渲染行实现。
+- 说明：iOS 的 1.6.6（build 40）IPA 未单独发布（CI 排队中按用户决定取消），build 40 的绿云管理与本版折叠在 build 41 的 IPA 里一并出；Android build 40 已正常发布。
+- 版本：Android versionCode 41 / iOS build 41（versionName 1.6.7）。
+
 ## 1.6.6（build 40）(2026-11-11)
 - 新功能：**Android / iOS App 补齐 SolusVM / VirtFusion（绿云）管理**，与 Web 端对齐：厂商注册表扩到五家（添加账号含粘贴识别 / 批量添加的厂商选项、凭证表单与提示文案中英、账号编辑的字段标签与 Hash / Token 密码型输入）；账号详情只有「实例」一个页签（此前误落 Azure 页签，整页不可用）；实例操作按客户 API 能力收敛（SolusVM：启动 / 停止 / 重启 / 流量守护 / 监控；VirtFusion 另加改名），不再显示换 IP / 开放端口 / 迁移 / 绑定域名 / 重装 / 终止等不支持的操作；实例卡片流量直显（已用 / 总额 + 百分比，异步填充）；无区域处理与 Web 一致（不显示区域选择、监控不显示自动换 IP、迁移目标排除面板型账号）；流量守护无规则时默认上限取套餐流量总额；品牌色与 Web 一致（SolusVM 绿 / VirtFusion 青，暂无官方 Logo 资源：Android 抽屉纯文字标题、iOS 分组不显示 Logo 图）。
 - 修复：账号类型接口把 SolusVM / VirtFusion 账号误标「AWS 账号」（后端 else 分支兜底，Web / Android / iOS 三端都中招），改为返回面板型账号说明。

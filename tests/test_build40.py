@@ -23,15 +23,15 @@ def ok(name, cond):
 def rd(*p):
     return open(os.path.join(ROOT, *p), encoding="utf-8").read()
 
-# 1. 版本恰为 40 / 1.6.6 且双端一致
+# 1. Android versionCode >= 40 且双端一致；versionName >= '1.6.6' 且双端一致（build 41 起按惯例放宽）
 bg = rd("android", "app", "build.gradle")
 py = rd("ios", "project.yml")
 _vc_and = int(re.search(r"versionCode (\d+)", bg).group(1))
 _vc_ios = re.search(r'CURRENT_PROJECT_VERSION: "(\d+)"', py).group(1)
 _vn_and = re.search(r"versionName '([^']+)'", bg).group(1)
 _vn_ios = re.search(r'MARKETING_VERSION: "([^"]+)"', py).group(1)
-ok("versionCode == 40 and CURRENT_PROJECT_VERSION == '40'", _vc_and == 40 and _vc_ios == "40")
-ok("versionName == '1.6.6' and MARKETING_VERSION == '1.6.6'", _vn_and == "1.6.6" and _vn_ios == "1.6.6")
+ok("versionCode >= 40 and Android == iOS", _vc_and >= 40 and _vc_and == int(_vc_ios))
+ok("versionName >= '1.6.6' and Android == iOS", _vn_and >= "1.6.6" and _vn_and == _vn_ios)
 
 A = ("android", "app", "src", "main", "java", "com", "tricloud", "app")
 and_main = rd(*A, "MainActivity.java")

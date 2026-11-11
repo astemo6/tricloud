@@ -1,3 +1,9 @@
+### 1.6.7 build 41 更新内容
+
+- **侧边栏分组可以折叠了**（网页 / Android / iOS 全平台）：点厂商名（Oracle Cloud / AWS / Azure / SolusVM / VirtFusion）或「管理」标题就能收起这一组，再点展开，标题右侧有 ▾ / ▸ 指示；折叠状态会记住，重启 App 不用重新折。账号多的时候侧边栏清爽多了。
+- **iOS 用户一次拿两版更新**：上一版的绿云管理（SolusVM / VirtFusion）没有单独发 iOS 包，本版连同折叠功能一起发布。
+- 版本：Android versionCode 41 / iOS build 41（versionName 1.6.7），需同时更新面板到最新版。
+
 ### 1.6.6 build 40 更新内容
 
 - **App 补齐绿云管理**（Android / iOS）：SolusVM / VirtFusion 两类面板型厂商现在 App 里也能完整用了——添加账号（粘贴识别 / 批量添加都行）、实例列表、开关机 / 重启、流量（卡片直接显示已用 / 总额）、流量守护、监控，VirtFusion 还能改名；不支持的操作（换 IP、开放端口、迁移、重装等）不再显示。此前 App 里绿云账号打开是 Azure 的页面、整页不可用，本版修好。

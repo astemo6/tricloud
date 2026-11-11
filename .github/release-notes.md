@@ -1,6 +1,7 @@
 ### 1.6.5 build 39 更新内容
 
-- **基于最新仓库重新出包**：App 端自 build 38 起无功能变化，本次仅升版本号重新打包。面板后端自 1.6.4 以来的更新已部署：cft 套餐显示修复（刚订阅完不再误显「按量付费」）、新增 SolusVM / VirtFusion 两类面板型云厂商、VirtFusion VNC 控制台已去掉。
+- **修了几个 bug**（后端/网页端，App 升级后配合最新面板生效）：账号编辑点开就报错 500 修好了（SolusVM/VirtFusion 账号）；cft 套餐显示修好了（刚订阅完不再误显「按量付费」）；VirtFusion VNC 控制台按要求去掉了。
+- **新增 SolusVM / VirtFusion 两类面板型云厂商**（绿云等走这两套面板）：账号、实例列表、开关机、流量、改名都已接入。
 - 版本：Android versionCode 39 / iOS build 39（versionName 1.6.5），需同时更新面板到最新版。
 
 ### 1.6.4 build 38 更新内容

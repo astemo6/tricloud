@@ -1,7 +1,7 @@
 """build 39：基于最新仓库重新出包，版本 1.6.5 / 39 静态检查。
 1. 版本：Android versionCode 39 / versionName 1.6.5，iOS CURRENT_PROJECT_VERSION "39" / MARKETING_VERSION "1.6.5"
 2. 发布说明（release-notes.md 同步 1.6.5 / 39）与 CHANGELOG / FEATURES 同步 1.6.5
-注：自 build 38 起 android/ 与 ios/ 零改动，本次 App 端无功能变化，仅升版本号重新打包。
+注：自 build 38 起 android/ 与 ios/ 原生代码零改动；本次改动在后端/Web（cft 套餐显示、账号编辑 500、SolusVM/VirtFusion 厂商、VNC 移除），App 配合最新面板生效。
 """
 import os, re, sys
 

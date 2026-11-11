@@ -13,7 +13,11 @@
   - 测试：新增 tests/test_solusvm_provider.py、tests/test_virtfusion_provider.py（mock 传输层）；test_structure 的 provider 顺序断言同步更新。全量测试与 master 基线一致（本地 E2E：假 SolusVM 面板 + 真应用走通加账号→列表→重启→流量→总览）。
 
 ## 1.6.5（build 39）(2026-11-11)
-- 版本：基于最新仓库重新出包；App 端自 build 38 起无功能变化（android/ 与 ios/ 零改动）。面板后端自 1.6.4 以来的更新（cft 套餐状态口径修复、SolusVM / VirtFusion 面板型厂商接入、VirtFusion VNC 已去掉）见「未发布」节，均已部署。
+- 修复：账号编辑点开就 500（SolusVM / VirtFusion 账号缺字段表导致 KeyError；凭证字段补中文标签）。
+- 修复：cft 套餐显示（刚订阅完列表误显「按量付费」、切换却拦「已是该套餐」；SYNC_IN_PROGRESS 算现行订阅、FAILED 废单不算）。
+- 移除：VirtFusion VNC 控制台已按用户要求去掉（provider/接口/中继/noVNC 前端与 websockets 依赖一并移除）；实例列表流量直显保留。
+- 新功能：新增 SolusVM / VirtFusion 两类面板型云厂商（绿云等走这两套面板）。
+- 说明：Android / iOS 原生代码自 build 38 起未动，以上改动都在后端/Web，App 升级后配合最新面板生效。
 - 版本：Android versionCode 39 / iOS build 39（versionName 1.6.5）。
 
 ## 1.6.4（build 38）(2026-11-07)

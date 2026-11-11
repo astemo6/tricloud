@@ -310,7 +310,7 @@ public abstract class BaseActivity extends AppCompatActivity {
     private void onNav(android.view.MenuItem it) {
         String k = navIds.get(it.getItemId());
         if (k == null) return;
-        if (k.startsWith("grp_")) { toggleNavGroup(k.substring(4)); buildNav(); return; }   // 折叠开关：抽屉保持打开，只重建菜单
+        if (k.startsWith("grp_")) { toggleNavGroup(k.substring(4)); nav.post(() -> buildNav()); return; }   // 折叠开关：抽屉保持打开；重建必须推迟到点击分发结束——NavigationView 的点击处理会先 setUpdateSuspended(true)，分发内同步重建会被 presenter 吞掉（prepareMenuItems 直接 return），界面不刷新、要等下一次无关重建才显形，表现为折叠时好时坏（build 41 的坑，build 42 修）
         drawer.closeDrawer(GravityCompat.START);
         if (k.equals(navKey())) return;
         if ("logout".equals(k)) {

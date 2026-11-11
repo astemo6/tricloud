@@ -1,5 +1,5 @@
 """build 38：App 功能对齐网页版与版本 1.6.4 / 38 静态检查。
-1. 版本：Android versionCode 38 / versionName 1.6.4，iOS CURRENT_PROJECT_VERSION "38" / MARKETING_VERSION "1.6.4"
+1. 版本：Android versionCode 38 / versionName 1.6.4，iOS CURRENT_PROJECT_VERSION "38" / MARKETING_VERSION "1.6.4"（build 39 起按惯例放宽）
 2. 表单多选字段（multiselect）：Android BaseActivity / iOS UIHub
 3. 脚本模板多选 script_ids：Android AccountActivity / iOS AccountPage+Create
 4. EC2 机型价格标签（ec2TypeField / __custom__ / 系统盘默认 8G）
@@ -27,15 +27,15 @@ def ok(name, cond):
 def rd(*p):
     return open(os.path.join(ROOT, *p), encoding="utf-8").read()
 
-# 1. Android versionCode 恰为 38、iOS CURRENT_PROJECT_VERSION 恰为 "38"；Android versionName 恰为 '1.6.4'、iOS MARKETING_VERSION 恰为 "1.6.4"
+# 1. Android versionCode >= 38 且 iOS CURRENT_PROJECT_VERSION 一致；versionName >= '1.6.4' 且双端一致（build 39 起按惯例放宽）
 bg = rd("android", "app", "build.gradle")
 py = rd("ios", "project.yml")
 _vc_and = int(re.search(r"versionCode (\d+)", bg).group(1))
 _vc_ios = re.search(r'CURRENT_PROJECT_VERSION: "(\d+)"', py).group(1)
 _vn_and = re.search(r"versionName '([^']+)'", bg).group(1)
 _vn_ios = re.search(r'MARKETING_VERSION: "([^"]+)"', py).group(1)
-ok("versionCode == 38 and CURRENT_PROJECT_VERSION == '38'", _vc_and == 38 and _vc_ios == "38")
-ok("versionName == '1.6.4' and MARKETING_VERSION == '1.6.4'", _vn_and == "1.6.4" and _vn_ios == "1.6.4")
+ok("versionCode >= 38 and Android == iOS", _vc_and >= 38 and _vc_and == int(_vc_ios))
+ok("versionName >= '1.6.4' and Android == iOS", _vn_and >= "1.6.4" and _vn_and == _vn_ios)
 
 and_base = rd("android", "app", "src", "main", "java", "com", "tricloud", "app", "BaseActivity.java")
 and_acc = rd("android", "app", "src", "main", "java", "com", "tricloud", "app", "AccountActivity.java")

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.8（build 42）(2026-11-11)
+- 修复：**Android 抽屉分组折叠时好时坏**（build 41 引入，真机反馈）。根因：NavigationView（material 1.12.0 的 NavigationMenuPresenter）处理条目点击时先 `setUpdateSuspended(true)` 再分发点击，build 41 在分发内同步 `buildNav()` 重建菜单，presenter 的 `prepareMenuItems()` 遇 suspended 直接返回，界面不刷新，要等下一次无关重建（点别的条目 / 重开抽屉）才把折叠状态显出来。修法：`onNav` 处理分组标题时先记状态，把重建推迟到点击分发结束后（`nav.post`）再执行。Web / iOS 无此问题（纯状态驱动重渲染）。
+- 版本：Android versionCode 42 / iOS build 42（versionName 1.6.8，两端版本号按惯例同步，iOS 代码未动）。
+
 ## 1.6.7（build 41）(2026-11-11)
 - 新功能：**三端侧边栏分组可折叠**（Web / Android / iOS；桌面端加载 Web 自动生效）：点厂商分组标题（OCI / AWS / Azure / SolusVM / VirtFusion 及「管理」组）收起 / 展开该组，标题带 ▾ / ▸ 指示；折叠状态本地持久化（Web localStorage、Android SharedPreferences、iOS AppStorage），重启不丢；当前账号所在组强制展开，不会把自己藏起来。实现备注：Android 抽屉由子菜单改平铺菜单（子菜单标题在 NavigationView 里收不到点击），用不同 groupId 保持组间分隔线；iOS 部署目标 15 没有 Section(isExpanded:)，用标题 Button + 条件渲染行实现。
 - 说明：iOS 的 1.6.6（build 40）IPA 未单独发布（CI 排队中按用户决定取消），build 40 的绿云管理与本版折叠在 build 41 的 IPA 里一并出；Android build 40 已正常发布。

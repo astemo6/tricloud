@@ -23,15 +23,15 @@ def ok(name, cond):
 def rd(*p):
     return open(os.path.join(ROOT, *p), encoding="utf-8").read()
 
-# 1. 版本恰为 41 / 1.6.7 且双端一致
+# 1. Android versionCode >= 41 且双端一致；versionName >= '1.6.7' 且双端一致（build 42 起按惯例放宽）
 bg = rd("android", "app", "build.gradle")
 py = rd("ios", "project.yml")
 _vc_and = int(re.search(r"versionCode (\d+)", bg).group(1))
 _vc_ios = re.search(r'CURRENT_PROJECT_VERSION: "(\d+)"', py).group(1)
 _vn_and = re.search(r"versionName '([^']+)'", bg).group(1)
 _vn_ios = re.search(r'MARKETING_VERSION: "([^"]+)"', py).group(1)
-ok("versionCode == 41 and CURRENT_PROJECT_VERSION == '41'", _vc_and == 41 and _vc_ios == "41")
-ok("versionName == '1.6.7' and MARKETING_VERSION == '1.6.7'", _vn_and == "1.6.7" and _vn_ios == "1.6.7")
+ok("versionCode >= 41 and Android == iOS", _vc_and >= 41 and _vc_and == int(_vc_ios))
+ok("versionName >= '1.6.7' and Android == iOS", _vn_and >= "1.6.7" and _vn_and == _vn_ios)
 
 # 2. Web 折叠
 router = rd("web", "js", "router.js")

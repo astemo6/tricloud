@@ -126,6 +126,9 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 - 安全列表（实例级）（Android / iOS）：OCI 实例操作菜单新增「安全列表」入口，可查看所属安全列表规则并支持确认删除单个规则。
 - 账号快速切换器（Android / iOS）：账号详情页提供快捷切换入口，支持搜索与按云厂商分组，选中后直接停留在账号详情页换为新账号。
 
+## 1.6.8 build 42
+- 修 Android 抽屉折叠时好时坏：material 1.12.0 NavigationMenuPresenter 在条目点击分发前 setUpdateSuspended(true)，分发内同步重建菜单被 prepareMenuItems 吞掉；onNav 的 grp_ 分支改用 nav.post 把 buildNav 推迟到分发结束。
+
 ## 1.6.7 build 41
 - 侧栏分组折叠（三端）：Web renderSide 分组标题 data-gtoggle + gwrap 包裹（display:contents 不改布局，.off 时 display:none）+ localStorage tc_side_collapsed；Android 抽屉改平铺菜单（分组标题为普通菜单项 grp_*，点击切换；不同 groupId 保持分隔线）+ SharedPreferences nav/collapsed；iOS iPad 侧栏 Section 标题改 Button + 条件渲染行（部署目标 iOS 15 无 Section(isExpanded:)）+ @AppStorage collapsedGroups；三端均为厂商组 + 管理组可折叠、当前账号所在组强制展开。桌面端加载 Web 自动生效。
 

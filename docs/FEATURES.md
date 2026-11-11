@@ -127,7 +127,10 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 - 账号快速切换器（Android / iOS）：账号详情页提供快捷切换入口，支持搜索与按云厂商分组，选中后直接停留在账号详情页换为新账号。
 
 ## 1.6.5 build 39
-- 重新出包（Android / iOS）：基于最新仓库重新打包，App 端自 build 38 起无功能变化；面板后端更新（cft 套餐状态口径、SolusVM / VirtFusion 厂商、VNC 移除）均已部署。
+- 账号编辑 500 修复（后端）：SolusVM / VirtFusion 账号编辑详情补字段表，凭证字段加中文标签。
+- cft 套餐状态口径修复（后端）：SYNC_IN_PROGRESS 算现行订阅，FAILED 废单不算；刚订阅完列表不再误显「按量付费」。
+- SolusVM / VirtFusion 面板型厂商接入（后端/Web）：两类厂商账号、实例、电源、流量、改名；VirtFusion VNC 控制台已按用户要求去掉，实例列表流量直显保留。
+- 说明：Android / iOS 原生代码自 build 38 起未动，以上改动在后端/Web，App 配合最新面板生效。
 
 ## 1.6.4 build 38
 - EC2 创建对齐 Web（Android / iOS）：机型下拉带规格（vCPU/内存）与官方月价（specs.monthly），最低价标「最便宜」，末尾「手动输入其他机型」配合 type_custom 字段；系统盘默认 8G。

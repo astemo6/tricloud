@@ -58,15 +58,13 @@ async def auth_mw(req: Request, call_next):
             except Exception:
                 pass
         elif tok and (tk := security.check_api_token(tok, req.method)):
-            # v1.5：从旧版迁移来的 Token（不以 tc_ 开头）在审计里只记 id，不记 Token 片段
             actor = "api_token:" + (tok[:10] if tok.startswith("tc_") else f"legacy#{tk['id']}")
-            # API Token 不能管理安全设置
+            # API Token 不能管理安全设置；旧版迁移来的 Token（非 tc_ 开头）审计只记 id
             if path.startswith(("/api/2fa", "/api/tokens", "/api/sessions", "/api/password", "/api/backup", "/api/restore", "/api/secrets")) \
                     or (path == "/api/audit" and req.method == "DELETE") \
                     or (path.startswith("/api/onedrive") and req.method != "GET" and path != "/api/onedrive/backup") \
                     or (req.method != "GET" and AGENT_RESET_RE.match(path)) or RESTRICT_RE.match(path):
-                # Token 不能抹掉审计痕迹；OneDrive 只能看状态 / 列表和「立即备份」，不能绑定（防止绑到别人的网盘）、改密码、恢复、解绑；
-                # build 22：Token 不能重置流量守护 agent token（GET /agent 也不返回带 token 的安装命令）
+                # 不能抹审计；OneDrive 只能看状态和「立即备份」；不能重置 guard agent token（build 22）
                 return JSONResponse({"detail": _imsg("err.token_forbidden")}, status_code=403)
         else:
             return JSONResponse({"detail": _imsg("err.not_logged_in")}, status_code=401)
@@ -104,8 +102,7 @@ async def err(req, exc):
         act = re.search(r"perform:? ([\w:.\-/]+)", msg) or re.search(r"action '([\w:.\-/]+)'", msg)
         tip = _imsg("err.cloud_perm_tip_act", act=act.group(1)) if act else _imsg("err.cloud_perm_tip_check")
         return JSONResponse({"detail": _imsg("err.cloud_perm", code=m.group(1), tip=tip)}, status_code=403)
-    # 兜底 500：不把异常原文（含路径/SQL/账号信息）返回给浏览器，只记日志
-    rid = uuid.uuid4().hex[:8]
+    rid = uuid.uuid4().hex[:8]   # 兜底 500：不把异常原文（含路径/SQL/账号信息）返回给浏览器，只记日志
     try:
         where = f"{req.method} {req.url.path}"
     except Exception:

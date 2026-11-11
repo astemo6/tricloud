@@ -40,8 +40,8 @@ telegram.poll_loop = noop
 
 # ================= 1. 路由拆分 =================
 api = [r for r in main.app.routes if getattr(r, "path", "").startswith("/api/")]
-ok("routers: 184 API routes + / + /login registered once each",
-   len(api) == 184 and len({(r.path, tuple(sorted(r.methods))) for r in api}) == 184
+ok("routers: 188 API routes + / + /login registered once each",
+   len(api) == 188 and len({(r.path, tuple(sorted(r.methods))) for r in api}) == 188
    and sum(1 for r in main.app.routes if getattr(r, "path", "") in ("/", "/login")) == 2)
 ok("routers: every route comes from app.routers.*",
    all(r.endpoint.__module__.startswith("app.routers.") for r in main.app.routes if hasattr(r, "endpoint")))
@@ -104,7 +104,7 @@ ok("azure on-demand clients cached", z._cached("x", lambda: n.append(1) or objec
 # ================= 4. 任务类型注册表 =================
 ok("tasks: registry covers every one-shot task type",
    set(tasks.ONCE_HANDLERS) == {"change_ip", "ipv6", "azure_create", "ensure_network", "migrate", "cf_delete", "resize", "reinstall",
-                                "net500m", "foundry", "billing_keep", "aws_credit", "onedrive_backup", "oci_restrict"} and tasks.TASK_RUNNERS == {"snatch": "_run_snatch"})
+                                "net500m", "foundry", "billing_keep", "aws_credit", "onedrive_backup", "oci_restrict", "cf_waf_cleanup"} and tasks.TASK_RUNNERS == {"snatch": "_run_snatch"})
 calls = []
 
 

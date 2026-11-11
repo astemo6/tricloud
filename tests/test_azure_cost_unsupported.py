@@ -37,7 +37,7 @@ def test_other_errors_still_raise():
         _prov(HttpResponseError(message="(Throttled) too many")).billing()
     except core.CloudUnsupportedError:
         raise AssertionError("should not be friendly")
-    except HttpResponseError:
+    except (HttpResponseError, ValueError):   # fix/azure-billing-429 起其他错误包成 err.azure_billing_failed（ValueError）
         pass
 
 

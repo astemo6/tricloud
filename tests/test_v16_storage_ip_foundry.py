@@ -428,10 +428,10 @@ with TestClient(main.app) as c:
         r = c.post(f"/api/accounts/{oid}/instances/change-ip", json={"instance_id": "i", "quality_max_risk": 50})
         t = core.q("SELECT * FROM tasks WHERE id=?", (r.json().get("task_id"),), one=True)
         ok("route change-ip: OCI with quality -> task (not sync)", t and json.loads(t["params"])["quality_max_risk"] == 50 and json.loads(t["params"])["max_tries"] == 20)
-        ok("route lightsail ports: 0.0.0.0/0 needs confirm (409), all ports refused", c.post(f"/api/accounts/{aid}/lightsail/ports", json={
+        ok("route lightsail ports: 0.0.0.0/0 needs confirm (409), all ports allowed after confirm", c.post(f"/api/accounts/{aid}/lightsail/ports", json={
             "instance": "ls1", "protocol": "tcp", "from_port": 8443}).status_code == 409
            and c.post(f"/api/accounts/{aid}/lightsail/ports", json={"instance": "ls1", "protocol": "tcp", "from_port": 1, "to_port": 65535,
-                                                                     "confirm_public": True}).status_code == 400
+                                                                     "confirm_public": True}).status_code == 200   # 2026-11-06 起全部端口+公网改为二次确认放行
            and c.post(f"/api/accounts/{aid}/lightsail/ports", json={"instance": "ls1", "protocol": "tcp", "from_port": 8443, "confirm_public": True}).status_code == 200)
         ok("route object put: >100MB refused before reading", c.put(f"/api/accounts/{oid}/oci/objects?bucket=b&name=x",
                                                                     content=b"x", headers={"content-length": str(200 * 1024 * 1024)}).status_code == 413)

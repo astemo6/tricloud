@@ -245,8 +245,8 @@ with TestClient(main.app) as c:
            and not hasattr(OCIProvider, "open_all"))
         ok("oci/security add_ports: ports required", c.post(u, json={"op": "add_ports", "sl_id": "sl-1", "instance_id": "x",
                                                                     "ports": "", "confirm_public": True}).status_code == 400)
-        ok("oci/security add_ports: 1-65535 to public refused", c.post(u, json={"op": "add_ports", "sl_id": "sl-1", "instance_id": "x",
-                                                                    "ports": "1-65535", "confirm_public": True}).status_code == 400)
+        ok("oci/security add_ports: 1-65535 to public allowed after confirm", c.post(u, json={"op": "add_ports", "sl_id": "sl-1", "instance_id": "x",
+                                                                    "ports": "1-65535", "confirm_public": True}).status_code == 200)   # 2026-11-06 起全部端口改为二次确认放行
         r = c.post(u, json={"op": "add_ports", "sl_id": "sl-1", "instance_id": "x", "ports": "8443"})
         ok("oci/security add_ports: 0.0.0.0/0 needs confirm", r.status_code == 409 and r.json()["detail"]["public_warning"])
         r = c.post(u, json={"op": "add_ports", "sl_id": "sl-1", "instance_id": "x", "ports": "8443, 9000-9001",
@@ -254,7 +254,7 @@ with TestClient(main.app) as c:
         ok("oci/security add_ports: tcp+udp, one rule per range", r.status_code == 200 and r.json()["added"] == 4)
         bad = [c.post(u, json=dict(b, op="add", sl_id="sl-1", direction="ingress", confirm_public=True)).status_code
                for b in ({"protocol": "all", "cidr": "0.0.0.0/0"}, {"protocol": "tcp", "cidr": "::/0"})]
-        ok("oci/security add: open-all-ports to public refused", bad == [400, 400])
+        ok("oci/security add: open-all-ports to public allowed after confirm", bad == [200, 200])
         ok("oci/security add: 0.0.0.0/0 single port needs confirm", c.post(u, json={"op": "add", "sl_id": "sl-1", "direction": "ingress",
            "protocol": "tcp", "cidr": "0.0.0.0/0", "port": "8080"}).status_code == 409)
         n0 = len(VNET.lists["sl-1"].ingress_security_rules)
@@ -286,7 +286,7 @@ with TestClient(main.app) as c:
         bad = [c.post(u, json=dict(b, confirm_public=True)).status_code for b in (
             {"port": ""}, {}, {"port": "1-65535"}, {"port": "0"}, {"port": "80,70000"}, {"port": "80", "protocol": "icmp"},
             {"port": "1-65535", "protocol": "udp"})]
-        ok("open-port: empty / 1-65535 / invalid port / bad protocol -> 400", bad == [400] * 7 and VNET.updates == n_up)
+        ok("open-port: empty / invalid port / bad protocol -> 400, 1-65535 allowed after confirm", bad == [400, 400, 200, 400, 400, 400, 200])
         r = c.post(u, json={"port": "22, 7000-7001", "confirm_public": True})
         j = r.json()
         last = VNET.lists["sl-1"].ingress_security_rules[-1]
@@ -463,7 +463,7 @@ with TestClient(main.app) as c:
         # ---- 套餐（pricing-plan-manager：moto 不支持，用假客户端） ----
         class PPM:
             def __init__(self):
-                self.subs, self.created, self.disassoc = [], [], []
+                self.subs, self.created, self.disassoc, self.cancelled = [], [], [], []
 
             def get_paginator(self, name):
                 outer = self
@@ -472,8 +472,13 @@ with TestClient(main.app) as c:
             def create_subscription(self, **kw):
                 self.created.append(kw)
                 self.subs.append({"arn": "arn:sub/1", "planFamily": "CloudFront", "planTier": kw["planTier"], "status": "ACTIVE",
-                                  "resourceArns": kw["resourceArns"]})
+                                  "resourceArns": kw["resourceArns"], "eTag": "e1"})
                 return {"subscription": {"status": "ACTIVE"}}
+
+            def cancel_subscription(self, arn=None, ifMatch=None, **kw):   # 切回按量走 cancel_subscription（arn + ifMatch=eTag）
+                self.cancelled.append({"arn": arn, "ifMatch": ifMatch})
+                self.subs = [x for x in self.subs if x["arn"] != arn]
+                return {}
 
             def disassociate_resources_from_subscription(self, **kw):
                 self.disassoc.append(kw)
@@ -490,7 +495,8 @@ with TestClient(main.app) as c:
                and ppm.created[0]["resourceArns"][0].endswith(f":distribution/{r3['id']}"))
             ok("cf plan: list shows plan", [d for d in c.get(f"/api/accounts/{aid}/cloudfront").json() if d["id"] == r3["id"]][0]["plan"] == "PRO")
             r = c.post(f"/api/accounts/{aid}/cloudfront/plan", json={"distribution_id": r3["id"], "plan_tier": "paygo"}).json()
-            ok("cf plan: back to pay-as-you-go (disassociate)", r["plan"] == "PAYGO" and ppm.disassoc)
+            ok("cf plan: back to pay-as-you-go (cancel subscription)", r["plan"] == "PAYGO"
+               and ppm.cancelled == [{"arn": "arn:sub/1", "ifMatch": "e1"}])
 
     # ================= 7. 已删账号回收站 =================
     with mock.patch.object(AWSProvider, "test", return_value={"ok": True}):
@@ -524,7 +530,7 @@ with TestClient(main.app) as c:
             "user": "u", "tenancy": "t", "fingerprint": "f", "key_content": "k", "region": "ap-osaka-1"}}).json()["id"]
     bot = Bot()
     asyncio.run(telegram.handle_message(bot, "42", {"chat": {"id": 42}, "text": "/start"}))
-    ok("tg: /start shows button menu with 3 clouds", sum(1 for t in bot.texts() if t.startswith("☁️")) == 3
+    ok("tg: /start shows button menu with 5 clouds (incl. SolusVM / VirtFusion)", sum(1 for t in bot.texts() if t.startswith("☁️")) == 5
        and any("一键测活" in t for t in bot.texts()))
     asyncio.run(telegram.handle_message(bot, "42", {"chat": {"id": 99}, "text": "/start"}))
     ok("tg: other chat_id ignored (message)", len(bot.calls) == 1)

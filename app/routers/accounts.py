@@ -478,9 +478,13 @@ async def account_type(acc_id: int, refresh: bool = False):
         s = await call(P(acc_id).subscription_info)
         r = {"label": s.get("offer") or s.get("quota_id") or "未知", "plan_type": s.get("quota_id"), "state": s.get("state"),
              "spending_limit": s.get("spending_limit")}
-    else:
+    elif acc["provider"] == "aws":
         r = {"label": "AWS 账号", "plan_type": None,
              "hint": "AWS 没有公开的「试用 / 付费」类型接口；新账号的免费套餐期限请以控制台 Billing 为准"}
+    else:
+        # 面板型（SolusVM / VirtFusion 等）：此前落进 AWS 分支被误标「AWS 账号」，三端（Web / Android / iOS）都中招
+        r = {"label": f"{acc['provider']} 面板账号", "plan_type": None,
+             "hint": "面板型云厂商没有账号类型接口；套餐、到期与续费请在服务商客户区查看"}
     if not r.get("age_days") and row and row["cloud_created_at"]:
         try:
             r["age_days"] = int((time.time() - time.mktime(time.strptime(row["cloud_created_at"], "%Y-%m-%d"))) // 86400)

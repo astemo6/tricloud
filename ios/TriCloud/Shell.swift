@@ -157,6 +157,29 @@ struct TabsRoot: View {
 struct SidebarRoot: View {
     @ObservedObject var app = AppState.shared
     @State private var sel: String? = "home"
+    @AppStorage("collapsedGroups") private var collapsedRaw: String = ""   // 侧栏已折叠分组（厂商 key / manage，逗号分隔），重启保持
+
+    private var collapsed: Set<String> { Set(collapsedRaw.split(separator: ",").map(String.init)) }
+
+    private func toggleGroup(_ g: String) {
+        var s = collapsed
+        if s.contains(g) { s.remove(g) } else { s.insert(g) }
+        collapsedRaw = s.sorted().joined(separator: ",")
+    }
+
+    /// 可点击的分组标题：点一下折叠/展开该组（部署目标 iOS 15，没有 Section(isExpanded:) 可用，手写实现）。
+    private func groupHeader(_ title: String, _ g: String, _ isCol: Bool) -> some View {
+        Button(action: { toggleGroup(g) }) {
+            HStack(spacing: 6) {
+                SectionHeader(title: title)
+                Spacer()
+                Image(systemName: isCol ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 10, weight: .semibold)).foregroundColor(.secondary)
+            }
+            .textCase(nil)
+        }
+        .buttonStyle(.plain)
+    }
 
     var body: some View {
         NavigationView {
@@ -167,36 +190,42 @@ struct SidebarRoot: View {
                 ForEach(MainPage.PROVS, id: \.self) { p in
                     let list = app.accounts.filter { $0.optString("provider") == p }
                     if !list.isEmpty {
-                        Section(header: SectionHeader(title: MainPage.pname(p))) {
-                            ForEach(list.indices, id: \.self) { i in
-                                let acc = list[i]
-                                NavigationLink(destination: app.pages.account(acc).makeView(), tag: "acc\(acc.optInt("id"))", selection: $sel) {
-                                    Label {
-                                        Text(acc.optString("name") + (acc.optInt("disabled") == 1 ? L("（已停用）") : ""))
-                                    } icon: {
-                                        Image(systemName: Brand.icon(p)).foregroundColor(Brand.color(p))
+                        let inGroup = sel.map { s in list.contains { "acc\($0.optInt("id"))" == s } } ?? false
+                        let isCol = collapsed.contains(p) && !inGroup   // 当前账号所在组强制展开
+                        Section(header: groupHeader(MainPage.pname(p), p, isCol)) {
+                            if !isCol {
+                                ForEach(list.indices, id: \.self) { i in
+                                    let acc = list[i]
+                                    NavigationLink(destination: app.pages.account(acc).makeView(), tag: "acc\(acc.optInt("id"))", selection: $sel) {
+                                        Label {
+                                            Text(acc.optString("name") + (acc.optInt("disabled") == 1 ? L("（已停用）") : ""))
+                                        } icon: {
+                                            Image(systemName: Brand.icon(p)).foregroundColor(Brand.color(p))
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                Section(header: SectionHeader(title: "管理")) {
-                    ForEach(Menus.manage.indices, id: \.self) { i in
-                        let m = Menus.manage[i]
-                        NavigationLink(destination: app.pages.cached(m.key, m.make).makeView(), tag: m.key, selection: $sel) {
-                            Label {
-                                Text(L(m.title))
-                            } icon: {
-                                Image(systemName: m.icon).foregroundColor(m.tint)
+                Section(header: groupHeader("管理", "manage", collapsed.contains("manage"))) {
+                    if !collapsed.contains("manage") {
+                        ForEach(Menus.manage.indices, id: \.self) { i in
+                            let m = Menus.manage[i]
+                            NavigationLink(destination: app.pages.cached(m.key, m.make).makeView(), tag: m.key, selection: $sel) {
+                                Label {
+                                    Text(L(m.title))
+                                } icon: {
+                                    Image(systemName: m.icon).foregroundColor(m.tint)
+                                }
                             }
+                            .badge(m.key == "tasks" ? app.runningTasks : 0)
                         }
-                        .badge(m.key == "tasks" ? app.runningTasks : 0)
-                    }
-                    Button {
-                        confirmLogout(nil)
-                    } label: {
-                        Label(L("退出登录"), systemImage: "rectangle.portrait.and.arrow.right").foregroundColor(.red)
+                        Button {
+                            confirmLogout(nil)
+                        } label: {
+                            Label(L("退出登录"), systemImage: "rectangle.portrait.and.arrow.right").foregroundColor(.red)
+                        }
                     }
                 }
             }

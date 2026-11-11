@@ -51,7 +51,7 @@ export async function pageAccount(acc, tab) {
 export function instOps(acc, kind) {
   // 面板型 provider（客户 API 能力子集）：只给 API 真正支持的操作，其余不显示
   if (acc.provider === "solusvm") return [["start", t("op.start")], ["stop", t("op.stop")], ["reboot", t("op.reboot")], ["traffic", t("op.traffic")], ["monitor", t("op.monitor")]];
-  if (acc.provider === "virtfusion") return [["start", t("op.start")], ["stop", t("op.stop")], ["reboot", t("op.reboot")], ["rename", t("op.rename")], ["vnc", t("op.vnc")], ["traffic", t("op.traffic")], ["monitor", t("op.monitor")]];   // 电源 / 流量 / 改名 / VNC 据官方 API 文档（2026-11-10）
+  if (acc.provider === "virtfusion") return [["start", t("op.start")], ["stop", t("op.stop")], ["reboot", t("op.reboot")], ["rename", t("op.rename")], ["traffic", t("op.traffic")], ["monitor", t("op.monitor")]];   // 电源 / 流量 / 改名据官方 API 文档（2026-11-10）
   const ops = [["start", t("op.start")], ["stop", acc.provider === "azure" ? t("op.stopRelease") : t("op.stop")], ["reboot", t("op.reboot")], ["changeip", t("op.changeip")]];
   if (acc.provider === "oci") ops.push(["ipv6", t("op.ipv6")], ["delipv6", t("op.delipv6")], ["resize", t("op.resize")], ["rename", t("op.rename")], ["bootvol", t("op.bootvol")],
     ["security", t("op.security")]);
@@ -215,9 +215,6 @@ export async function instOp(acc, inst, op, kind, btn, reload) {
     openSecurity(acc, inst, base);
   } else if (op === "traffic") {
     trafficDialog(acc, inst, kind);
-  } else if (op === "vnc") {
-    const m = await import("./vnc.js");
-    m.openVnc(acc, inst);
   } else if (op === "dns") {
     bindDns(acc, inst);
   } else if (op === "resize") {
@@ -437,7 +434,7 @@ export async function trafficDialog(acc, inst, kind, onSaved) {
 }
 
 // ---------- 实例表格视图 ----------
-export const INLINE_OPS = ["start", "stop", "reboot", "changeip", "vnc"];
+export const INLINE_OPS = ["start", "stop", "reboot", "changeip"];
 // 按实例状态禁用无意义的操作：运行中不能再启动，已停止不能停止/重启
 export function opOff(op, i) {
   const st = String(i.state || "").toLowerCase();

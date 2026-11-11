@@ -24,7 +24,6 @@ suspended / deleting 等标志位），实时状态走 ?state=true。
 该 API（用户级）不提供：创建 / 删除 / 账单——对应方法明确报错。
 """
 import re
-import time
 
 import httpx
 
@@ -192,33 +191,6 @@ class VirtFusionProvider:
                 "used_gb": round((rx + tx) / _GIB, 3), "total_gb": round(total_gb, 3),
                 "period": ptxt, "period_start": period.get("start"), "period_end": period.get("end")}
 
-    # ---------------- VNC 控制台 ----------------
-    _VNC_POLL_TRIES = 8
-    _VNC_POLL_SECONDS = 2
-
-    def _vnc_data(self, inst_id):
-        return (self._req("GET", f"server/{inst_id}/vnc") or {}).get("data") or {}
-
-    def vnc(self, inst_id):
-        """VNC 连接信息 {url, password, enabled}：未开启时先 POST 开启（异步
-        task），轮询到 enabled 再返回。wss.url 是面板域名下的相对路径
-        （/vnc/?token=…，token 已在查询串里），拼成绝对 wss 地址给前端 noVNC。"""
-        data = self._vnc_data(inst_id)
-        if not data.get("enabled"):
-            self._req("POST", f"server/{inst_id}/vnc")
-            for _ in range(self._VNC_POLL_TRIES):
-                time.sleep(self._VNC_POLL_SECONDS)
-                data = self._vnc_data(inst_id)
-                if data.get("enabled"):
-                    break
-        rel = ((data.get("wss") or {}).get("url") or "")
-        if rel.startswith("/"):
-            url = self.panel.replace("https://", "wss://", 1).replace("http://", "ws://", 1) + rel
-        else:
-            url = rel
-        if not url:
-            raise RuntimeError("VirtFusion 未返回 VNC 连接地址")
-        return {"url": url, "password": data.get("password") or "", "enabled": bool(data.get("enabled"))}
 
     def billing(self):
         raise core.CloudUnsupportedError("VirtFusion（绿云等）不提供账单 API，费用与续费请在服务商客户区查看")

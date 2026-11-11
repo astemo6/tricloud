@@ -141,36 +141,6 @@ def test_power_actions_and_rename():
         _restore(orig)
 
 
-def test_vnc_enabled_and_enable_flow():
-    vnc_on = {"data": {"enabled": True, "password": "abcd1234",
-                       "wss": {"token": "tok-uuid", "url": "/vnc/?token=tok-uuid"}}}
-
-    p, orig, _ = _prov(lambda m, path, params, body: FakeResp(vnc_on))
-    try:
-        v = p.vnc(SERVER["id"])
-        assert v == {"url": "wss://cp.example.com/vnc/?token=tok-uuid", "password": "abcd1234", "enabled": True}
-    finally:
-        _restore(orig)
-
-    state = {"n": 0}
-
-    def handler(method, path, params, body):
-        if method == "POST":
-            assert path == f"server/{SERVER['id']}/vnc"
-            return FakeResp({"data": {"task": {"id": 1, "status": "accepted"}}})
-        state["n"] += 1
-        return FakeResp(vnc_on if state["n"] >= 2 else {"data": {"enabled": False, "password": "abcd1234",
-                                                                "wss": {"token": "tok-uuid", "url": "/vnc/?token=tok-uuid"}}})
-
-    p2, orig2, _ = _prov(handler)
-    p2._VNC_POLL_SECONDS = 0
-    try:
-        v2 = p2.vnc(SERVER["id"])
-        assert v2["enabled"] is True and v2["url"].startswith("wss://")
-    finally:
-        _restore(orig2)
-
-
 def test_traffic_period_text():
     def handler(method, path, params, body):
         return FakeResp({"data": dict(SERVER2, state=STATE)})

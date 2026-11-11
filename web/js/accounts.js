@@ -243,7 +243,8 @@ export async function pageDeletedAccounts() {
 // ---- 账号编辑：非敏感字段回显，密钥类留空不改；代理 URL + 用户名 + 密码 ----
 export const CRED_LABEL = { user: "cred.user", tenancy: "cred.tenancy", fingerprint: "cred.fingerprint", key_content: "cred.keyContent", pass_phrase: "cred.passPhrase", region: "cred.region",
   compartment: "cred.compartmentShort", home_region: "cred.homeRegionShort", access_key: "cred.accessKey", secret_key: "cred.secretKey", tenant_id: "cred.tenantId",
-  client_id: "cred.clientId", client_secret: "cred.clientSecret", subscription_id: "cred.subscriptionId" };
+  client_id: "cred.clientId", client_secret: "cred.clientSecret", subscription_id: "cred.subscriptionId",
+  panel_url: "cred.panelUrl", key: "cred.solusKey", hash: "cred.solusHash", api_token: "cred.apiToken" };
 export const proxyFields = (d = {}) => `<label>${t("acc.pfAddr")}</label><input name="proxy" value="${esc(d.proxyUrl || "")}" placeholder="${t("acc.pfPh")}" autocomplete="off">
   <div class="row2"><div><label>${t("acc.pfUser")}</label><input name="proxy_user" value="${esc(d.proxy_user || "")}" autocomplete="off"></div>
   <div><label>${d.proxy_pass_set ? t("acc.pfPassSet") : t("acc.pfPassOpt")}</label><input name="proxy_pass" type="password" placeholder="${d.proxy_pass_set ? t("acc.pfPassPh") : ""}" autocomplete="new-password"></div></div>

@@ -625,6 +625,7 @@ export const STR = {
     "cred.proxy": "出口代理（可选）", "cred.proxyUser": "代理用户名（可选）", "cred.proxyPass": "代理密码（可选）",
     "cred.accessKey": "Access Key ID", "cred.secretKey": "Secret Access Key", "cred.defRegion": "默认区域",
     "cred.tenantId": "Tenant ID", "cred.clientId": "Client (App) ID", "cred.clientSecret": "Client Secret", "cred.subscriptionId": "Subscription ID",
+    "cred.panelUrl": "面板地址", "cred.solusKey": "API Key", "cred.solusHash": "API Hash", "cred.apiToken": "API Token",
     "cred.panelUrl": "面板地址", "cred.apiKey": "API Key", "cred.apiHash": "API Hash", "cred.apiToken": "API Token（用户）",
     // ---- 云账号 ----
     "acc.addBtn": "添加云账号", "acc.batchBtn": "批量添加", "acc.testScope": "测活范围", "acc.allAccounts": "全部账号",
@@ -1441,6 +1442,7 @@ export const STR = {
     "cred.proxy": "Egress proxy (optional)", "cred.proxyUser": "Proxy username (optional)", "cred.proxyPass": "Proxy password (optional)",
     "cred.accessKey": "Access Key ID", "cred.secretKey": "Secret Access Key", "cred.defRegion": "Default region",
     "cred.tenantId": "Tenant ID", "cred.clientId": "Client (App) ID", "cred.clientSecret": "Client Secret", "cred.subscriptionId": "Subscription ID",
+    "cred.panelUrl": "Panel URL", "cred.solusKey": "API Key", "cred.solusHash": "API Hash", "cred.apiToken": "API Token",
     "cred.panelUrl": "Panel URL", "cred.apiKey": "API Key", "cred.apiHash": "API Hash", "cred.apiToken": "API Token (user)",
     // ---- cloud accounts ----
     "acc.addBtn": "Add cloud account", "acc.batchBtn": "Batch add", "acc.testScope": "Test scope", "acc.allAccounts": "All accounts",

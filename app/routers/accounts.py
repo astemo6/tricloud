@@ -288,17 +288,21 @@ def _apply_proxy_patch(cred, body):
 
 # 账号编辑回显：这些字段明文回显并可直接修改；其余凭证字段只显示「已设置」，留空不改
 # Azure 订阅没有默认区域（添加表单也没有 region），编辑时不回显、不接收、不要求；已存了 region 的旧账号原样保留
-NON_SENSITIVE = {"oci": ("region", "compartment", "home_region"), "aws": ("region",), "azure": ()}
+NON_SENSITIVE = {"oci": ("region", "compartment", "home_region"), "aws": ("region",), "azure": (),
+                 "solusvm": ("panel_url",), "virtfusion": ("panel_url",)}
 
 
 # 可识别但不算密钥的 ID 类字段：只回显末 6 位，方便核对是哪个账号
-MASKED = {"oci": ("user", "tenancy", "fingerprint"), "aws": ("access_key",), "azure": ("tenant_id", "client_id", "subscription_id")}
+MASKED = {"oci": ("user", "tenancy", "fingerprint"), "aws": ("access_key",), "azure": ("tenant_id", "client_id", "subscription_id"),
+          "solusvm": ("key",), "virtfusion": ()}
 
 
 CRED_KEYS = {
     "oci": ("user", "tenancy", "fingerprint", "key_content", "pass_phrase", "region", "compartment", "home_region"),
     "aws": ("access_key", "secret_key", "region"),
     "azure": ("tenant_id", "client_id", "client_secret", "subscription_id"),
+    "solusvm": ("panel_url", "key", "hash"),
+    "virtfusion": ("panel_url", "api_token"),
 }
 
 

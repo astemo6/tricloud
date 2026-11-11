@@ -219,7 +219,7 @@ public abstract class BaseActivity extends AppCompatActivity {
         };
         add.apply(m, new String[]{"home", getString(R.string.s0818)});
         JSONArray accs = Api.accounts == null ? new JSONArray() : Api.accounts;
-        String[] dots = {"🟥", "🟧", "🟦", "🟩"};
+        String[] dots = {"🟥", "🟧", "🟦", "🟩", "🟪"};   // 顺序同 PROVS：oci / aws / azure / solusvm / virtfusion
         for (int p = 0; p < MainActivity.PROVS.length; p++) {
             android.view.SubMenu sm = null;
             for (int i = 0; i < accs.length(); i++) {
@@ -240,6 +240,7 @@ public abstract class BaseActivity extends AppCompatActivity {
 
     /** 侧栏云厂商分组标题：官方 Logo + 名称（保持原大小写）。 */
     private CharSequence provHeader(int p) {
+        if (p >= PROV_LOGOS.length) return MainActivity.PNAMES[p];   // 面板型厂商暂无官方 Logo 资源，纯文字标题（防数组越界）
         android.text.SpannableString ss = new android.text.SpannableString("\u00A0 " + MainActivity.PNAMES[p]);
         android.graphics.drawable.Drawable d = androidx.core.content.ContextCompat.getDrawable(this, PROV_LOGOS[p]);
         if (d == null) return MainActivity.PNAMES[p];
@@ -344,12 +345,15 @@ public abstract class BaseActivity extends AppCompatActivity {
             }, tr -> {
                 JSONObject t = Api.obj(tr);
                 String use = t.has("error") ? getString(R.string.s0823, t.optString("error")) : getString(R.string.s0824, str(t, "period", "-"), t.optString("out_gb"), t.optString("in_gb"));
+                // 面板型厂商没有「免费出站」口径：无规则时默认上限取套餐流量总额（traffic 的 total_gb）
+                double totGb = t.optDouble("total_gb", 0);
+                String defLim = MainActivity.isPanel(prov) && totGb > 0 ? (totGb == Math.floor(totGb) ? String.valueOf((long) totGb) : String.valueOf(totGb)) : free;
                 String dir = str(gg, "direction", gg.optInt("count_in") == 1 ? "both" : "out");
                 List<Field> f = new ArrayList<>();
                 f.add(Field.select("mode", getString(R.string.s0825), str(gg, "mode", "monthly"), new String[]{"monthly", "rolling"}, new String[]{getString(R.string.s0826), getString(R.string.s0827)}));
                 f.add(Field.num("window_hours", getString(R.string.s0828), str(gg, "window_hours", "24")));
                 f.add(Field.select("direction", getString(R.string.s0272), dir, new String[]{"out", "in", "both"}, new String[]{getString(R.string.s0256), getString(R.string.s0255), getString(R.string.s0829)}));
-                f.add(Field.num("limit_gb", getString(R.string.s0830, free), str(gg, "limit_gb", free)));
+                f.add(Field.num("limit_gb", MainActivity.isPanel(prov) ? getString(R.string.lx_limit_gb) : getString(R.string.s0830, free), str(gg, "limit_gb", defLim)));
                 f.add(Field.num("warn_pct", getString(R.string.s0831), str(gg, "warn_pct", "80")));
                 f.add(Field.select("action", getString(R.string.s0832), str(gg, "action", "notify"), new String[]{"notify", "stop", "throttle"},
                         new String[]{getString(R.string.s0833), getString(R.string.s0834), getString(R.string.s0835)}));

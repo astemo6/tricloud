@@ -41,6 +41,7 @@ public class AccountActivity extends BaseActivity {
             case "oci": return new String[][]{{"instances", L10n.s(R.string.s0001)}, {"create", L10n.s(R.string.s0002)}, {"snatch", L10n.s(R.string.s0003)}, {"secgroup", L10n.s(R.string.s0004)}, {"storage", L10n.s(R.string.s0005)},
                     {"objects", L10n.s(R.string.s0006)}, {"traffic", L10n.s(R.string.s0007)}, {"limits", L10n.s(R.string.s0008)}, {"billing", L10n.s(R.string.s0009)}};   // 区域订阅收在「配额/网络」页底部（防误点）
             case "aws": return new String[][]{{"ec2", "EC2"}, {"lightsail", "Lightsail"}, {"regions", L10n.s(R.string.s0010)}, {"cloudfront", "CloudFront"}, {"quota", L10n.s(R.string.s0011)}, {"recycle", L10n.s(R.string.s0012)}, {"billing", L10n.s(R.string.s0009)}, {"credit", L10n.s(R.string.s0013)}};
+            case "solusvm": case "virtfusion": return new String[][]{{"instances", L10n.s(R.string.s0001)}};   // 面板型只有实例页（同 Web TABS）
             default: return new String[][]{{"vms", L10n.s(R.string.s0014)}, {"azcreate", L10n.s(R.string.s0015)}, {"rgs", L10n.s(R.string.s0016)}, {"azquota", L10n.s(R.string.s0011)}, {"foundry", "Foundry"}, {"subscription", L10n.s(R.string.s0017)}, {"billing", L10n.s(R.string.s0009)}};
         }
     }
@@ -392,6 +393,23 @@ public class AccountActivity extends BaseActivity {
         button(r, getString(R.string.s0031), v -> simple(inst, kind, "start", getString(R.string.s0031)));
         button(r, "azure".equals(prov) ? getString(R.string.s0032) : getString(R.string.s0033), v -> simple(inst, kind, "stop", getString(R.string.s0033)));
         button(r, getString(R.string.s0034), v -> simple(inst, kind, "reboot", getString(R.string.s0034)));
+        if (MainActivity.isPanel(prov)) {
+            // 面板型（SolusVM / VirtFusion）：客户 API 只支持电源 / 流量 / 监控，VirtFusion 另支持改名（同 Web instOps）；其余操作不显示
+            if ("virtfusion".equals(prov)) button(r, getString(R.string.s0048), v -> rename(inst, kind));
+            button(r, getString(R.string.s0050), v -> traffic(inst, kind));
+            button(r, getString(R.string.s0053), v -> monitor(inst, kind));
+            TextView trafLine = text(c, "", 13, false);   // 流量直显（同 Web 列表：已用 / 总额 + 百分比，异步填充；拉不到就整行隐藏）
+            trafLine.setVisibility(View.GONE);
+            Api.quiet("/accounts/" + id + "/traffic?instance_id=" + Api.enc(inst.optString("id")) + "&kind=" + kind, x -> {
+                JSONObject td = Api.obj(x);
+                if (td.has("used_gb") && !td.isNull("used_gb")) {
+                    double tot = td.optDouble("total_gb", 0);
+                    trafLine.setText(getString(R.string.s0007) + " " + td.optString("used_gb") + (tot > 0 ? " / " + td.optString("total_gb") + " GB（" + Math.round(td.optDouble("used_gb", 0) / tot * 100) + "%）" : " GB"));
+                    trafLine.setVisibility(View.VISIBLE);
+                }
+            });
+            return;
+        }
         button(r, getString(R.string.s0035), v -> changeIp(inst, kind));
         if ("oci".equals(prov)) {
             button(r, getString(R.string.s0036), v -> { try { Api.post(this, "/accounts/" + id + "/oci/ipv6", base(inst, kind), x -> taskOrToast(x, getString(R.string.s0037))); } catch (Exception ignored) { } });
@@ -605,10 +623,11 @@ public class AccountActivity extends BaseActivity {
     }
 
     private void monitor(JSONObject inst, String kind) {
-        form(getString(R.string.s0129), getString(R.string.s0130, inst.optString("name")), Arrays.asList(
-                Field.check("auto_start", getString(R.string.s0131), false),
-                Field.num("check_port", getString(R.string.s0132), "0"),
-                Field.check("auto_change_ip", getString(R.string.s0133), false)), getString(R.string.s0089), v -> {
+        List<Field> mf = new ArrayList<>();
+        mf.add(Field.check("auto_start", getString(R.string.s0131), false));
+        mf.add(Field.num("check_port", getString(R.string.s0132), "0"));
+        if (!MainActivity.isPanel(prov)) mf.add(Field.check("auto_change_ip", getString(R.string.s0133), false));   // 面板型不能换 IP（同 Web NO_CHANGE_IP）
+        form(getString(R.string.s0129), getString(R.string.s0130, inst.optString("name")), mf, getString(R.string.s0089), v -> {
             try {
                 JSONObject b = new JSONObject().put("account_id", id).put("instance_id", inst.optString("id")).put("region", region())
                         .put("kind", kind).put("name", inst.optString("name")).put("state", inst.optString("state"))
@@ -1779,7 +1798,7 @@ public class AccountActivity extends BaseActivity {
         Api.get(this, "/accounts", r -> {
             JSONArray a = Api.arr(r);
             List<JSONObject> ts = new ArrayList<>();
-            for (int i = 0; i < a.length(); i++) if (a.optJSONObject(i).optInt("id") != id) ts.add(a.optJSONObject(i));
+            for (int i = 0; i < a.length(); i++) if (a.optJSONObject(i).optInt("id") != id && !MainActivity.isPanel(a.optJSONObject(i).optString("provider"))) ts.add(a.optJSONObject(i));   // 面板型不能创建实例，不能作迁移目标（同 Web NO_CREATE）
             if (ts.isEmpty()) { toast(getString(R.string.s0449)); return; }
             String[] labels = new String[ts.size()];
             for (int i = 0; i < labels.length; i++) labels[i] = MainActivity.pname(ts.get(i).optString("provider")) + " · " + ts.get(i).optString("name");

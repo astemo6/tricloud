@@ -1276,6 +1276,13 @@
     <string name="lx_hint_oci">In the OCI console: avatar (top right) → User settings (My profile) → Tokens and keys tab → Add API key.</string>
     <string name="lx_hint_aws">Use an IAM user limited to EC2/Lightsail/CloudFront/Service Quotas/CE permissions.</string>
     <string name="lx_hint_azure">Create with: az ad sp create-for-rbac --role Contributor --scopes /subscriptions/&lt;subscription ID&gt;</string>
+    <string name="lx_panel_url">Panel URL</string>
+    <string name="lx_api_key">API Key</string>
+    <string name="lx_api_hash">API Hash</string>
+    <string name="lx_api_token">API Token (user)</string>
+    <string name="lx_hint_solusvm">In the SolusVM panel, open this VPS → API tab to generate a Key / Hash. One credential pair covers one VPS; add one account per VPS.</string>
+    <string name="lx_hint_virtfusion">In the VirtFusion panel (e.g. GreenCloud cp.green.cloud), create a user API token under Account → API (requires panel ≥ 6.1 and the admin not having disabled the user API). One account manages all your servers, with power / traffic / rename support.</string>
+    <string name="lx_limit_gb">Limit GB</string>
     <string name="lx_shape_a1">A1.Flex · ARM · ✅ Always Free (free accounts 2 OCPU / 12 GB total, paid 4 / 24)</string>
     <string name="lx_shape_e2">E2.1.Micro · AMD 1/8 OCPU · 1 GB · ✅ Always Free (up to 2)</string>
     <string name="lx_shape_e4">E4.Flex · AMD · 💰 Paid, not Always Free</string>

@@ -12,11 +12,14 @@ import java.util.Arrays;
 
 /** 总览（同 Web pageHome）：到期提醒、账号健康度、各账号实例数，抽屉导航到各账号与管理页。 */
 public class MainActivity extends BaseActivity {
-    static final String[] PROVS = {"oci", "aws", "azure"};
-    static final String[] PNAMES = {"Oracle Cloud", "AWS", "Azure"};
+    static final String[] PROVS = {"oci", "aws", "azure", "solusvm", "virtfusion"};
+    static final String[] PNAMES = {"Oracle Cloud", "AWS", "Azure", "SolusVM", "VirtFusion"};
 
     /** 没有区域概念的云厂商（Azure 用资源组位置）。 */
-    static boolean noRegion(String p) { return "azure".equals(p); }
+    static boolean noRegion(String p) { return "azure".equals(p) || isPanel(p); }
+
+    /** 面板型云厂商（SolusVM / VirtFusion，绿云等）：没有区域概念，客户 API 只支持电源 / 流量 / 改名子集。 */
+    static boolean isPanel(String p) { return "solusvm".equals(p) || "virtfusion".equals(p); }
     private boolean first = true;
     private boolean rescan = false;   // 「重新扫描区域」：下一次刷新带 refresh=true
 

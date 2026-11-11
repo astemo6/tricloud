@@ -1276,6 +1276,13 @@
     <string name="lx_hint_oci">OCI 控制台右上角头像 → User settings（进入 My profile）→ Tokens and keys 标签 → Add API key 生成。</string>
     <string name="lx_hint_aws">建议使用仅含 EC2/Lightsail/CloudFront/Service Quotas/CE 权限的 IAM 用户。</string>
     <string name="lx_hint_azure">用 az ad sp create-for-rbac --role Contributor --scopes /subscriptions/&lt;订阅 ID&gt; 生成。</string>
+    <string name="lx_panel_url">面板地址</string>
+    <string name="lx_api_key">API Key</string>
+    <string name="lx_api_hash">API Hash</string>
+    <string name="lx_api_token">API Token（用户）</string>
+    <string name="lx_hint_solusvm">在 SolusVM 面板打开这台 VPS → API 页生成 Key / Hash。一对凭证只对应一台 VPS，每台单独加一个账号。</string>
+    <string name="lx_hint_virtfusion">在 VirtFusion 面板（如绿云 cp.green.cloud）Account → API 里生成用户 API Token（需面板 ≥6.1 且管理员未关闭用户 API）。一个账号可管理名下全部服务器，支持电源 / 流量 / 改名。</string>
+    <string name="lx_limit_gb">上限 GB</string>
     <string name="lx_shape_a1">A1.Flex · ARM · ✅ Always Free（免费号合计 2 OCPU / 12 GB，付费号 4 / 24）</string>
     <string name="lx_shape_e2">E2.1.Micro · AMD 1/8 OCPU · 1 GB · ✅ Always Free（最多 2 台）</string>
     <string name="lx_shape_e4">E4.Flex · AMD · 💰 付费，非 Always Free</string>

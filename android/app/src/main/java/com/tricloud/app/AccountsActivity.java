@@ -50,15 +50,21 @@ public class AccountsActivity extends BaseActivity {
         m.put("azure", new String[][]{{"tenant_id", "Tenant ID", "", "text"}, {"client_id", "Client (App) ID", "", "text"}, {"client_secret", "Client Secret", "", "password"},
                 {"subscription_id", "Subscription ID", "", "text"},
                 {"proxy", px, "http://host:port", "text"}, {"proxy_user", pu, "", "text"}, {"proxy_pass", pp, "", "password"}});
+        m.put("solusvm", new String[][]{{"panel_url", L10n.s(R.string.lx_panel_url), "https://cp.greencloudvps.com", "text"}, {"key", L10n.s(R.string.lx_api_key), "", "text"}, {"hash", L10n.s(R.string.lx_api_hash), "", "password"},
+                {"proxy", px, "http://host:port", "text"}, {"proxy_user", pu, "", "text"}, {"proxy_pass", pp, "", "password"}});
+        m.put("virtfusion", new String[][]{{"panel_url", L10n.s(R.string.lx_panel_url), "https://", "text"}, {"api_token", L10n.s(R.string.lx_api_token), "", "password"},
+                {"proxy", px, "http://host:port", "text"}, {"proxy_user", pu, "", "text"}, {"proxy_pass", pp, "", "password"}});
         return m;
     }
     /** 添加账号页切换按钮用的短名。 */
-    static final String[] PSHORT = {"OCI", "AWS", "Azure"};
+    static final String[] PSHORT = {"OCI", "AWS", "Azure", "SolusVM", "VirtFusion"};
     static String provHint(String p) {
         switch (p) {
             case "oci": return L10n.s(R.string.lx_hint_oci);
             case "aws": return L10n.s(R.string.lx_hint_aws);
             case "azure": return L10n.s(R.string.lx_hint_azure);
+            case "solusvm": return L10n.s(R.string.lx_hint_solusvm);
+            case "virtfusion": return L10n.s(R.string.lx_hint_virtfusion);
             default: return "";
         }
     }
@@ -412,7 +418,7 @@ public class AccountsActivity extends BaseActivity {
     private void batchAdd(String prefill) {
         form(getString(R.string.s0751), getString(R.string.s0752),
                 Arrays.asList(Field.multi("text", getString(R.string.s0753), prefill),
-                        Field.select("provider", getString(R.string.s0754), "", new String[]{"", "oci", "aws", "azure"}, new String[]{getString(R.string.s0755), "Oracle Cloud", "AWS", "Azure"}),
+                        Field.select("provider", getString(R.string.s0754), "", new String[]{"", "oci", "aws", "azure", "solusvm", "virtfusion"}, new String[]{getString(R.string.s0755), "Oracle Cloud", "AWS", "Azure", "SolusVM", "VirtFusion"}),
                         Field.check("dry_run", getString(R.string.s0756), false)), getString(R.string.s0757), v -> {
             if (v.optString("text").isEmpty()) { toast(getString(R.string.s0758)); return; }
             try {
@@ -642,7 +648,7 @@ public class AccountsActivity extends BaseActivity {
                 else {
                     JSONObject o = (JSONObject) v;
                     String l2 = lab + (o.optBoolean("set") ? getString(R.string.s0809, (o.optString("hint").isEmpty() ? "" : " " + o.optString("hint"))) : getString(R.string.s0810));
-                    f.add("key_content".equals(k) || "servers_text".equals(k) ? Field.multi("c_" + k, l2, "") : (k.contains("secret") || k.contains("pass") ? Field.pass("c_" + k, l2) : Field.text("c_" + k, l2, "")));
+                    f.add("key_content".equals(k) || "servers_text".equals(k) ? Field.multi("c_" + k, l2, "") : (k.contains("secret") || k.contains("pass") || "hash".equals(k) || "api_token".equals(k) ? Field.pass("c_" + k, l2) : Field.text("c_" + k, l2, "")));
                 }
             }
             f.add(Field.text("proxy", getString(R.string.s0811, (d.optString("proxy").isEmpty() ? getString(R.string.s0721) : d.optString("proxy"))), ""));

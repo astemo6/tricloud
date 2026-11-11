@@ -157,7 +157,7 @@ final class Regions {
 
     /** 机器最多的区域；Azure 按订阅管理不用区域，没有记录 / 没有机器时返回 ""。与 core.js machineRegion 相同。 */
     static String machineRegion(org.json.JSONObject acc) {
-        if ("azure".equals(acc.optString("provider"))) return "";
+        if (MainActivity.noRegion(acc.optString("provider"))) return "";   // Azure 与面板型（SolusVM / VirtFusion）都没有区域概念
         org.json.JSONArray l = machineRegions(acc);
         return l == null || l.length() == 0 ? "" : l.optJSONObject(0).optString("region");
     }
@@ -177,7 +177,7 @@ final class Regions {
         if (acc.optBoolean("machine_regions_denied")) return EN ? "Access denied" : "权限被拒";
         org.json.JSONArray l = machineRegions(acc);
         if (l != null && l.length() > 0) return brief(l);
-        if ("azure".equals(acc.optString("provider"))) return l == null ? "" : (EN ? "No instances" : "无机器");
+        if (MainActivity.noRegion(acc.optString("provider"))) return l == null ? "" : (EN ? "No instances" : "无机器");
         String r = BaseActivity.str(acc, "region", "");
         String d = r.isEmpty() ? "-" : label(r);
         return l == null ? d + (EN ? " (default)" : "（默认区域）") : (EN ? "No instances · default " + d : "无机器 · 默认 " + d);

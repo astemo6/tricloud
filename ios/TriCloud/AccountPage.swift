@@ -29,6 +29,7 @@ final class AccountPage: Page {
                             ("objects", "对象存储"), ("traffic", "流量"), ("limits", "配额/网络"), ("billing", "账单")]   // 区域订阅收在「配额/网络」底部的二级入口（防误点）
         case "aws": return [("ec2", "EC2"), ("lightsail", "Lightsail"), ("regions", "区域"), ("cloudfront", "CloudFront"), ("quota", "配额"),
                             ("recycle", "闲置资源"), ("billing", "账单"), ("credit", "新号 Credit")]
+        case "solusvm", "virtfusion": return [("instances", "实例")]   // 面板型只有实例页（同 Web TABS）
         default: return [("vms", "虚拟机"), ("azcreate", "创建 VM"), ("rgs", "资源组"), ("azquota", "配额"), ("foundry", "Foundry"),
                          ("subscription", "订阅"), ("billing", "账单")]
         }
@@ -62,7 +63,7 @@ final class AccountPage: Page {
 
     /// 手动选过的区域 > 机器最多的区域（build 25）> 账号默认区域。
     func region() -> String { Regions.current(acc) }
-    func rq() -> String { prov == "azure" ? "" : "region=" + enc(region()) }
+    func rq() -> String { MainPage.noRegion(prov) ? "" : "region=" + enc(region()) }
     func base(_ inst: JObj, _ kind: String) -> JObj {
         ["instance_id": inst.optString("id"), "region": region(), "kind": kind, "name": inst.optString("name")]
     }
@@ -75,7 +76,7 @@ final class AccountPage: Page {
             Prefs.set("tab_\(self.id)", t)
             self.refresh()
         }
-        if prov != "azure" && !["cloudfront", "quota", "billing", "subscription", "regions", "credit"].contains(tab) {
+        if !MainPage.noRegion(prov) && !["cloudfront", "quota", "billing", "subscription", "regions", "credit"].contains(tab) {
             nav("globe.asia.australia.fill", "区域", Regions.label(region()), tint: .teal) { self.pickRegion() }
         }
     }
@@ -227,13 +228,34 @@ final class AccountPage: Page {
         r.button("启动") { self.simple(inst, kind, "start", "启动") }
         r.button(prov == "azure" ? "停止(释放)" : "停止") { self.simple(inst, kind, "stop", "停止") }
         r.button("重启") { self.simple(inst, kind, "reboot", "重启") }
-        r.button("换 IP") { self.changeIp(inst, kind) }
+        if MainPage.isPanel(prov) {
+            // 面板型：流量直显（同 Web 列表：已用 / 总额 + 百分比，异步填充；拉不到保持空白）
+            let tl = c.live("")
+            Api.call("GET", "/accounts/\(id)/traffic?instance_id=" + enc(inst.optString("id")) + "&kind=" + kind, nil) { res in
+                if case .success(let x) = res {
+                    let td = jobj(x)
+                    if !td.isNull("used_gb") {
+                        let tot = td.optDouble("total_gb", 0)
+                        tl.text = "流量 " + td.optString("used_gb") + (tot > 0 ? " / " + td.optString("total_gb") + " GB（" + String(Int((td.optDouble("used_gb", 0) / tot * 100).rounded())) + "%）" : " GB")
+                    }
+                }
+            }
+        } else {
+            r.button("换 IP") { self.changeIp(inst, kind) }
+        }
         r.menu("更多操作", moreOps(inst, kind))
     }
 
     /// 次要操作收进「更多」菜单（与 Web 端「更多 ▾」同样的顺序）。
     func moreOps(_ inst: JObj, _ kind: String) -> [(String, () -> Void)] {
         var more: [(String, () -> Void)] = []
+        if MainPage.isPanel(prov) {
+            // 面板型（SolusVM / VirtFusion）：客户 API 只支持流量 / 监控，VirtFusion 另支持改名（同 Web instOps）；其余操作不显示
+            if prov == "virtfusion" { more.append(("改名", { self.rename(inst, kind) })) }
+            more.append(("流量守护", { self.traffic(inst, kind) }))
+            more.append(("监控", { self.monitor(inst, kind) }))
+            return more
+        }
         if prov == "oci" {
             more.append(("加 IPv6", {
                 self.confirm("一键 IPv6", "将按需为所在 VCN 开启 IPv6、给子网分配 /64、添加 ::/0 路由和出站规则，再给实例分配 IPv6。确定？") {
@@ -478,10 +500,11 @@ final class AccountPage: Page {
     }
 
     func monitor(_ inst: JObj, _ kind: String) {
+        var mf = [Field.check("auto_start", "异常停止时自动启动", false),
+                  Field.num("check_port", "IP 连通检测端口（0 = 不检测，常用 22）", "0")]
+        if !MainPage.isPanel(prov) { mf.append(Field.check("auto_change_ip", "连续 3 次连不上时自动换 IP（并更新已绑定域名）", false)) }   // 面板型不能换 IP（同 Web NO_CHANGE_IP）
         form("加入监控", "监控「" + inst.optString("name") + "」，非面板操作导致停止 / 终止时推送 Telegram 告警。连通检测从面板所在服务器发起。",
-             [Field.check("auto_start", "异常停止时自动启动", false),
-              Field.num("check_port", "IP 连通检测端口（0 = 不检测，常用 22）", "0"),
-              Field.check("auto_change_ip", "连续 3 次连不上时自动换 IP（并更新已绑定域名）", false)], "保存") { v in
+             mf, "保存") { v in
             let b: JObj = ["account_id": self.id, "instance_id": inst.optString("id"), "region": self.region(),
                            "kind": kind, "name": inst.optString("name"), "state": inst.optString("state"),
                            "auto_start": v.optBoolean("auto_start"), "public_ip": inst.optString("public_ip"),

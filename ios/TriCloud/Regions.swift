@@ -239,7 +239,7 @@ enum Regions {
 
     /// 机器最多的区域；Azure 按订阅管理不用区域，没有记录 / 没有机器时返回 ""。与 core.js machineRegion 相同。
     static func machineRegion(_ acc: JObj) -> String {
-        if acc.optString("provider") == "azure" { return "" }
+        if MainPage.noRegion(acc.optString("provider")) { return "" }   // Azure 与面板型（SolusVM / VirtFusion）都没有区域概念
         guard let l = machineRegions(acc), !l.isEmpty else { return "" }
         return l.obj(0).optString("region")
     }
@@ -258,7 +258,7 @@ enum Regions {
         if acc.optBoolean("machine_regions_denied") { return L10n.isEN ? "Access denied" : "权限被拒" }
         let l = machineRegions(acc)
         if let l = l, !l.isEmpty { return brief(l) }
-        if acc.optString("provider") == "azure" { return l == nil ? "" : (L10n.isEN ? "No instances" : "无机器") }
+        if MainPage.noRegion(acc.optString("provider")) { return l == nil ? "" : (L10n.isEN ? "No instances" : "无机器") }
         let r = str(acc, "region", "")
         let d = r.isEmpty ? "-" : label(r)
         return l == nil ? d + (L10n.isEN ? " (default)" : "（默认区域）") : (L10n.isEN ? "No instances · default " + d : "无机器 · 默认 " + d)

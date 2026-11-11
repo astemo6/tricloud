@@ -46,7 +46,7 @@ final class HomePage: Page {
     private func build(_ a: JArr, _ alerts: JArr, _ health: JArr?) {
         clear()
         if a.isEmpty {
-            card("还没有云账号").muted("添加 Oracle Cloud / AWS / Azure 账号后，这里会显示各账号的实例数、健康度和到期提醒。")
+            card("还没有云账号").muted("添加云账号后，这里会显示各账号的实例数、健康度和到期提醒。")
             bigButton("＋ 添加云账号") { self.openAddAccount() }
             return
         }
@@ -96,7 +96,7 @@ final class HomePage: Page {
             if list.isEmpty { continue }
             section(MainPage.pname(p))
             for acc in list {
-                let region = p == "azure" ? "" : Regions.current(acc)
+                let region = MainPage.noRegion(p) ? "" : Regions.current(acc)
                 let age = HomePage.ageDays(acc)
                 let headDetail = (region.isEmpty ? "" : Regions.label(region) + " · ") + (age.isEmpty ? "" : age + " · ")
                 let off = acc.optInt("disabled") == 1
@@ -178,7 +178,7 @@ final class AccountsPage: Page {
             self.clear()
             var items: [Int: (NavItem, JObj)] = [:]
             if a.isEmpty {
-                self.card("还没有云账号").muted("点击下方按钮添加 OCI / AWS / Azure 账号，支持粘贴控制台内容自动识别。")
+                self.card("还没有云账号").muted("点击下方按钮添加云账号，支持粘贴控制台内容自动识别。")
             }
             for p in MainPage.PROVS {
                 let list = (0..<a.count).map { a.obj($0) }.filter { $0.optString("provider") == p }

@@ -7,7 +7,7 @@ extension AccountPage {
         get("/accounts") { r in
             let a = jarr(r)
             var ts: [JObj] = []
-            for i in 0..<a.count where a.obj(i).optInt("id") != self.id { ts.append(a.obj(i)) }
+            for i in 0..<a.count where a.obj(i).optInt("id") != self.id && !MainPage.isPanel(a.obj(i).optString("provider")) { ts.append(a.obj(i)) }   // 面板型不能创建实例，不能作迁移目标（同 Web NO_CREATE）
             if ts.isEmpty { self.toast("至少需要两个云账号"); return }
             let labels = ts.map { MainPage.pname($0.optString("provider")) + " · " + $0.optString("name") }
             self.choose("迁移到哪个账号", labels) { idx in
@@ -69,7 +69,7 @@ extension AccountPage {
     }
 
     func traffic(_ inst: JObj, _ kind: String) {
-        trafficGuardForm(id, prov, inst.optString("id"), inst.optString("name"), prov == "azure" ? "" : region(), kind, nil)
+        trafficGuardForm(id, prov, inst.optString("id"), inst.optString("name"), MainPage.noRegion(prov) ? "" : region(), kind, nil)
     }
 }
 
@@ -85,10 +85,16 @@ extension Page {
             for i in 0..<gs.count where gs.obj(i).optInt("account_id") == accId && gs.obj(i).optString("instance_id") == instId { g = gs.obj(i) }
             Api.call("GET", "/accounts/\(accId)/traffic?instance_id=" + enc(instId) + "&kind=" + kind + rq, nil) { res in
                 var use = ""
+                var panelTotal = ""
                 switch res {
                 case .success(let x):
                     let t = jobj(x)
                     use = "本月出站 " + t.optString("out_gb") + " GB，入站 " + t.optString("in_gb") + " GB。"
+                    // 面板型：周期文案用接口返回的 period（计费周期 / 日期范围），默认上限取套餐流量总额
+                    let per = str(t, "period", "")
+                    if !per.isEmpty { use = "周期（" + per + "）出站 " + t.optString("out_gb") + " GB，入站 " + t.optString("in_gb") + " GB。" }
+                    let tot = t.optDouble("total_gb", 0)
+                    if tot > 0 { panelTotal = AccountPage.trimNum(tot) }
                 case .failure(let e):
                     use = "读取流量失败：" + ((e as? ApiError)?.msg ?? e.localizedDescription)
                 }
@@ -97,7 +103,7 @@ extension Page {
                 f.append(Field.select("mode", "统计方式", str(g, "mode", "monthly"), ["monthly", "rolling"], ["本月累计", "滚动窗口（最近 N 小时）"]))
                 f.append(Field.num("window_hours", "窗口小时数 N（滚动窗口）", str(g, "window_hours", "24")))
                 f.append(Field.select("direction", "方向", dir, ["out", "in", "both"], ["出站", "入站", "双向（出+入）"]))
-                f.append(Field.num("limit_gb", "上限 GB（免费出站 " + free + " GB/月）", str(g, "limit_gb", free)))
+                f.append(Field.num("limit_gb", MainPage.isPanel(prov) ? "上限 GB" : "上限 GB（免费出站 " + free + " GB/月）", str(g, "limit_gb", MainPage.isPanel(prov) && !panelTotal.isEmpty ? panelTotal : free)))
                 f.append(Field.num("warn_pct", "预警比例 %", str(g, "warn_pct", "80")))
                 f.append(Field.select("action", "到达上限后", str(g, "action", "notify"), ["notify", "stop", "throttle"],
                                       ["只推送", "推送并自动停机", "推送并限速（需在实例上装 agent）"]))

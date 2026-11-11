@@ -28,6 +28,11 @@ final class AddAccountModel: ObservableObject {
                   CredField(key: "client_id", label: "Client (App) ID", def: "", type: "text"),
                   CredField(key: "client_secret", label: "Client Secret", def: "", type: "password"),
                   CredField(key: "subscription_id", label: "Subscription ID", def: "", type: "text")],
+        "solusvm": [CredField(key: "panel_url", label: "面板地址", def: "https://cp.greencloudvps.com", type: "text"),
+                    CredField(key: "key", label: "API Key", def: "", type: "text"),
+                    CredField(key: "hash", label: "API Hash", def: "", type: "password")],
+        "virtfusion": [CredField(key: "panel_url", label: "面板地址", def: "https://", type: "text"),
+                       CredField(key: "api_token", label: "API Token（用户）", def: "", type: "password")],
     ]
     static let PROXY: [CredField] = [
         CredField(key: "proxy", label: "出口代理地址（http:// 或 socks5://，留空 = 直连）", def: "", type: "text"),
@@ -36,7 +41,9 @@ final class AddAccountModel: ObservableObject {
     static let HINT: [String: String] = [
         "oci": "OCI 控制台右上角头像 → User settings（进入 My profile）→ Tokens and keys 标签 → Add API key 生成。",
         "aws": "建议使用仅含 EC2 / Lightsail / CloudFront / Service Quotas / CE 权限的 IAM 用户。",
-        "azure": "用服务主体（应用注册）创建，并给订阅授予 Contributor 角色。"]
+        "azure": "用服务主体（应用注册）创建，并给订阅授予 Contributor 角色。",
+        "solusvm": "在 SolusVM 面板打开这台 VPS → API 页生成 Key / Hash。一对凭证只对应一台 VPS，每台单独加一个账号。",
+        "virtfusion": "在 VirtFusion 面板（如绿云 cp.green.cloud）Account → API 里生成用户 API Token（需面板 ≥6.1 且管理员未关闭用户 API）。一个账号可管理名下全部服务器，支持电源 / 流量 / 改名。"]
 
     @Published var prov = "oci" {
         didSet { if oldValue != prov { resetFields() } }
@@ -193,7 +200,7 @@ final class AddAccountModel: ObservableObject {
 
 struct AddAccountView: View {
     /// 分段控件用短名，避免截断。
-    static let SHORT: [String: String] = ["oci": "OCI", "aws": "AWS", "azure": "Azure"]
+    static let SHORT: [String: String] = ["oci": "OCI", "aws": "AWS", "azure": "Azure", "solusvm": "SolusVM", "virtfusion": "VirtFusion"]
     @ObservedObject var m: AddAccountModel
     let onDone: () -> Void
     let onBatch: (String) -> Void
@@ -361,7 +368,7 @@ extension Page {
         form("批量添加云账号",
              "直接粘贴复制来的一堆内容：控制台页面、环境变量、AWS accessKeys.csv、Azure 应用注册页、OCI config + 私钥，或 JSON，混在一起也能自动识别、自动拆分成多个账号。每条都会在线校验凭证，最多 50 个。",
              [Field.multi("text", "内容", prefill),
-              Field.select("provider", "无法判断云厂商时按", "", ["", "oci", "aws", "azure"], ["不猜测（报错）", "Oracle Cloud", "AWS", "Azure"]),
+              Field.select("provider", "无法判断云厂商时按", "", ["", "oci", "aws", "azure", "solusvm", "virtfusion"], ["不猜测（报错）", "Oracle Cloud", "AWS", "Azure", "SolusVM", "VirtFusion"]),
               Field.check("dry_run", "只检查格式，不校验、不保存", false)], "校验并添加") { v in
             let text = v.optString("text")
             if text.isEmpty { self.toast("请粘贴内容"); return }

@@ -8,6 +8,8 @@ enum Brand {
         switch prov {
         case "oci": return .red
         case "aws": return .orange
+        case "solusvm": return Color(red: 0.49, green: 0.70, blue: 0.26)   // 同 Web --solusvm #7cb342
+        case "virtfusion": return Color(red: 0.15, green: 0.65, blue: 0.60)   // 同 Web --virtfusion #26a69a
         default: return .blue
         }
     }
@@ -17,7 +19,8 @@ enum Brand {
         switch prov {
         case "oci": return "LogoOCI"
         case "aws": return "LogoAWS"
-        default: return "LogoAzure"
+        case "azure": return "LogoAzure"
+        default: return ""   // 面板型厂商暂无 Logo 资源（分组标题只显示文字，不能错显 Azure 的）
         }
     }
     /// 分组标题以云厂商名开头时（如「Oracle Cloud · 1」）返回对应厂商。
@@ -31,7 +34,7 @@ struct SectionHeader: View {
     let title: String
     var body: some View {
         HStack(spacing: 6) {
-            if let p = Brand.prov(forTitle: title) {
+            if let p = Brand.prov(forTitle: title), !Brand.logo(p).isEmpty {
                 Image(Brand.logo(p)).resizable().scaledToFit()
                     .frame(height: p == "aws" ? 18 : 13)
                     .offset(y: p == "aws" ? 4 : 0)  // 「aws」字母只占图上半部，下移与文字齐平

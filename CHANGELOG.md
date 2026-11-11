@@ -12,6 +12,10 @@
   - 安全：面板请求只用账号里配置的出口代理，不继承进程环境变量代理（trust_env=False）。
   - 测试：新增 tests/test_solusvm_provider.py、tests/test_virtfusion_provider.py（mock 传输层）；test_structure 的 provider 顺序断言同步更新。全量测试与 master 基线一致（本地 E2E：假 SolusVM 面板 + 真应用走通加账号→列表→重启→流量→总览）。
 
+## 1.6.5（build 39）(2026-11-11)
+- 版本：基于最新仓库重新出包；App 端自 build 38 起无功能变化（android/ 与 ios/ 零改动）。面板后端自 1.6.4 以来的更新（cft 套餐状态口径修复、SolusVM / VirtFusion 面板型厂商接入、VirtFusion VNC 已去掉）见「未发布」节，均已部署。
+- 版本：Android versionCode 39 / iOS build 39（versionName 1.6.5）。
+
 ## 1.6.4（build 38）(2026-11-07)
 - 新功能：EC2 创建机型带规格与官方月价（Android / iOS）：机型下拉显示 vCPU/内存与 ≈$/月（与 Web 同源 specs），最低月价标「最便宜」，末尾可手动输入其他机型；系统盘默认改 8G（与 Web 一致）。
 - 新功能：Lightsail 创建改官网逻辑（Android / iOS）：先选套餐类型（通用/内存/计算）+ 网络（双栈/仅 IPv6），规格列表只列与两者都匹配的套餐（后端 bundles 已标注 family / ipv6_only）。

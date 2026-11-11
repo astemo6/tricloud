@@ -209,9 +209,10 @@ public abstract class BaseActivity extends AppCompatActivity {
         navIds.clear();
         navAccs.clear();
         int[] nid = {1};
+        int[] curGroup = {1};   // 当前菜单分组 id：NavigationView 按 groupId 变化画分隔线（替代原子菜单的分区效果）
         java.util.function.BiFunction<android.view.Menu, String[], android.view.MenuItem> add = (menu, kv) -> {
             int id = nid[0]++;
-            android.view.MenuItem it = menu.add(0, id, id, kv[1]);
+            android.view.MenuItem it = menu.add(curGroup[0], id, id, kv[1]);
             it.setCheckable(true);
             navIds.put(id, kv[0]);
             if (kv[0].equals(navKey())) it.setChecked(true);
@@ -220,28 +221,60 @@ public abstract class BaseActivity extends AppCompatActivity {
         add.apply(m, new String[]{"home", getString(R.string.s0818)});
         JSONArray accs = Api.accounts == null ? new JSONArray() : Api.accounts;
         String[] dots = {"🟥", "🟧", "🟦", "🟩", "🟪"};   // 顺序同 PROVS：oci / aws / azure / solusvm / virtfusion
+        java.util.Set<String> col = navCollapsed();
         for (int p = 0; p < MainActivity.PROVS.length; p++) {
-            android.view.SubMenu sm = null;
+            boolean has = false;
             for (int i = 0; i < accs.length(); i++) {
                 JSONObject a = accs.optJSONObject(i);
-                if (!MainActivity.PROVS[p].equals(a.optString("provider"))) continue;
-                if (sm == null) sm = m.addSubMenu(0, nid[0]++, nid[0], provHeader(p));
-                android.view.MenuItem it = add.apply(sm, new String[]{"acc_" + a.optInt("id"), dots[p] + "  " + a.optString("name") + (a.optInt("disabled") == 1 ? getString(R.string.s0819) : "")});
+                if (a != null && MainActivity.PROVS[p].equals(a.optString("provider"))) { has = true; break; }
+            }
+            if (!has) continue;
+            curGroup[0] = 10 + p;
+            boolean c = col.contains(MainActivity.PROVS[p]);
+            int hid = nid[0]++;
+            android.view.MenuItem hd = m.add(curGroup[0], hid, hid, provHeader(p, c));   // 分组标题做成普通菜单项：子菜单标题在 NavigationView 里收不到点击，折叠必须走普通项
+            hd.setCheckable(false);
+            navIds.put(hid, "grp_" + MainActivity.PROVS[p]);
+            if (c) continue;
+            for (int i = 0; i < accs.length(); i++) {
+                JSONObject a = accs.optJSONObject(i);
+                if (a == null || !MainActivity.PROVS[p].equals(a.optString("provider"))) continue;
+                android.view.MenuItem it = add.apply(m, new String[]{"acc_" + a.optInt("id"), dots[p] + "  " + a.optString("name") + (a.optInt("disabled") == 1 ? getString(R.string.s0819) : "")});
                 navAccs.put(it.getItemId(), a);
             }
         }
-        android.view.SubMenu mg = m.addSubMenu(0, nid[0]++, nid[0], getString(R.string.s0725));
-        for (String[] kv : NAV_PAGES) add.apply(mg, new String[]{kv[0], navLabel(kv[0])});
-        android.view.SubMenu out = m.addSubMenu(0, nid[0]++, nid[0], getString(R.string.s0783));
-        add.apply(out, new String[]{"logout", getString(R.string.s0820)}).setCheckable(false);
+        curGroup[0] = 30;
+        boolean mc = col.contains("manage");
+        int mid = nid[0]++;
+        android.view.MenuItem mh = m.add(curGroup[0], mid, mid, getString(R.string.s0725) + (mc ? "  ▸" : "  ▾"));
+        mh.setCheckable(false);
+        navIds.put(mid, "grp_manage");
+        if (!mc) for (String[] kv : NAV_PAGES) add.apply(m, new String[]{kv[0], navLabel(kv[0])});
+        curGroup[0] = 31;
+        add.apply(m, new String[]{"logout", getString(R.string.s0820)}).setCheckable(false);
+    }
+
+    /** 抽屉分组折叠状态（按厂商 + 管理组），存 SharedPreferences，重开 App 保持。 */
+    private java.util.Set<String> navCollapsed() {
+        java.util.Set<String> s = new java.util.HashSet<>();
+        String raw = getSharedPreferences("nav", MODE_PRIVATE).getString("collapsed", "");
+        if (raw != null) for (String x : raw.split(",")) if (!x.isEmpty()) s.add(x);
+        return s;
+    }
+
+    private void toggleNavGroup(String g) {
+        java.util.Set<String> s = navCollapsed();
+        if (!s.remove(g)) s.add(g);
+        getSharedPreferences("nav", MODE_PRIVATE).edit().putString("collapsed", android.text.TextUtils.join(",", s)).apply();
     }
 
     private static final int[] PROV_LOGOS = {R.drawable.logo_oci, R.drawable.logo_aws, R.drawable.logo_azure};
 
-    /** 侧栏云厂商分组标题：官方 Logo + 名称（保持原大小写）。 */
-    private CharSequence provHeader(int p) {
-        if (p >= PROV_LOGOS.length) return MainActivity.PNAMES[p];   // 面板型厂商暂无官方 Logo 资源，纯文字标题（防数组越界）
-        android.text.SpannableString ss = new android.text.SpannableString("\u00A0 " + MainActivity.PNAMES[p]);
+    /** 侧栏云厂商分组标题：官方 Logo + 名称（保持原大小写）+ 折叠箭头（▾ 展开 / ▸ 已折叠）。 */
+    private CharSequence provHeader(int p, boolean collapsed) {
+        String caret = collapsed ? "  ▸" : "  ▾";
+        if (p >= PROV_LOGOS.length) return MainActivity.PNAMES[p] + caret;   // 面板型厂商暂无官方 Logo 资源，纯文字标题（防数组越界）
+        android.text.SpannableString ss = new android.text.SpannableString("\u00A0 " + MainActivity.PNAMES[p] + caret);
         android.graphics.drawable.Drawable d = androidx.core.content.ContextCompat.getDrawable(this, PROV_LOGOS[p]);
         if (d == null) return MainActivity.PNAMES[p];
         int h = Math.round(getResources().getDisplayMetrics().density * (p == 1 ? 18 : 13));
@@ -277,6 +310,7 @@ public abstract class BaseActivity extends AppCompatActivity {
     private void onNav(android.view.MenuItem it) {
         String k = navIds.get(it.getItemId());
         if (k == null) return;
+        if (k.startsWith("grp_")) { toggleNavGroup(k.substring(4)); buildNav(); return; }   // 折叠开关：抽屉保持打开，只重建菜单
         drawer.closeDrawer(GravityCompat.START);
         if (k.equals(navKey())) return;
         if ("logout".equals(k)) {

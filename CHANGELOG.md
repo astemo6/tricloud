@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.6（build 40）(2026-11-11)
+- 新功能：**Android / iOS App 补齐 SolusVM / VirtFusion（绿云）管理**，与 Web 端对齐：厂商注册表扩到五家（添加账号含粘贴识别 / 批量添加的厂商选项、凭证表单与提示文案中英、账号编辑的字段标签与 Hash / Token 密码型输入）；账号详情只有「实例」一个页签（此前误落 Azure 页签，整页不可用）；实例操作按客户 API 能力收敛（SolusVM：启动 / 停止 / 重启 / 流量守护 / 监控；VirtFusion 另加改名），不再显示换 IP / 开放端口 / 迁移 / 绑定域名 / 重装 / 终止等不支持的操作；实例卡片流量直显（已用 / 总额 + 百分比，异步填充）；无区域处理与 Web 一致（不显示区域选择、监控不显示自动换 IP、迁移目标排除面板型账号）；流量守护无规则时默认上限取套餐流量总额；品牌色与 Web 一致（SolusVM 绿 / VirtFusion 青，暂无官方 Logo 资源：Android 抽屉纯文字标题、iOS 分组不显示 Logo 图）。
+- 修复：账号类型接口把 SolusVM / VirtFusion 账号误标「AWS 账号」（后端 else 分支兜底，Web / Android / iOS 三端都中招），改为返回面板型账号说明。
+- 核对结论：build 38 之后其余面板变化（cft 套餐口径、账号编辑 500）均为纯后端修复，App 走同一接口自动生效；VNC 先加后删、两端从未有此功能，无需跟进。
+- 版本：Android versionCode 40 / iOS build 40（versionName 1.6.6）。
+
 ## 未发布（2026-11-10 已合并 master 并部署 #15，真机联调已通过；列表流量为同日晚追加）
 - 移除：**VirtFusion VNC 控制台已按用户要求去掉**（2026-11-11）：删除实例 VNC 操作、连接信息接口与 websocket 中继、前端 noVNC（vendored）与弹窗、provider 的 vnc() 及 websockets 依赖。绿云机器自身的 VNC 开关状态不受影响（仍可在绿云面板里管理）。
 - 改进：**流量统计直接显示在实例列表**（SolusVM / VirtFusion，表格与卡片视图）：已用 / 总额 + 百分比，悬停看入/出明细，不必再点进「流量守护」；守护弹窗本身保留（阈值与自动关机设置）。VirtFusion 流量返回补 period 文案，守护弹窗的周期显示同步修好。
@@ -8,7 +14,7 @@
   - **SolusVM**（完整）：凭证 = 面板地址 + 该 VPS 在面板 API 页生成的 Key/Hash（一对凭证一台机，一台机加一个账号）。支持测活、实例列表（状态/IP/内存/硬盘/地点）、开关机/重启、流量（计费周期合计，SolusVM 只提供入出合计、不拆分，合计计入出站口径）、监控与总览计数。
   - **VirtFusion**（完整）：凭证 = 面板地址 + 用户 API Token（面板 Account → API 生成，需 ≥6.1 且管理员未关闭用户 API；一个账号管名下全部服务器）。支持测活、实例列表（分页）、实时状态、开关机/重启（boot/shutdown/restart；powerOff 是强制关机、与强制重启语义不同，未映射 hard_reboot）、流量（GET server/{id}?state=true 的 traffic 计数，当月周期口径，入/出分开；额度取 network limit）、改名。端点与字段已按绿云面板内官方 API 文档（OpenAPI 3.0.1，2026-11-10 导出）核对：id 为 UUID，cpu/memory/容量/额度均为带单位字符串，已做统一解析。真机联调待用户生成 Token 后进行。
   - 两家客户 API 都不提供创建 / 删除 / 换 IP / 开端口 / 账单：Web 端不显示这些操作，API 直调返回友好提示；实例「终止」被明确拒绝（退订走服务商客户区）。
-  - 接入点：后端 provider 注册表 / 账号必填校验 / 总览通用分组 / Telegram 厂商名；Web 端厂商列表、添加账号表单与提示文案（中英）、实例操作菜单按能力收敛、账号圆点配色。Android / iOS App 尚未跟进（/api/meta 已能返回新厂商）。
+  - 接入点：后端 provider 注册表 / 账号必填校验 / 总览通用分组 / Telegram 厂商名；Web 端厂商列表、添加账号表单与提示文案（中英）、实例操作菜单按能力收敛、账号圆点配色。Android / iOS App 已于 build 40（1.6.6）跟进。
   - 安全：面板请求只用账号里配置的出口代理，不继承进程环境变量代理（trust_env=False）。
   - 测试：新增 tests/test_solusvm_provider.py、tests/test_virtfusion_provider.py（mock 传输层）；test_structure 的 provider 顺序断言同步更新。全量测试与 master 基线一致（本地 E2E：假 SolusVM 面板 + 真应用走通加账号→列表→重启→流量→总览）。
 

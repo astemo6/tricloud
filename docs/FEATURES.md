@@ -126,6 +126,10 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 - 安全列表（实例级）（Android / iOS）：OCI 实例操作菜单新增「安全列表」入口，可查看所属安全列表规则并支持确认删除单个规则。
 - 账号快速切换器（Android / iOS）：账号详情页提供快捷切换入口，支持搜索与按云厂商分组，选中后直接停留在账号详情页换为新账号。
 
+## 1.6.6 build 40
+- App 补齐绿云（Android / iOS）：SolusVM / VirtFusion 进厂商注册表与添加 / 批量 / 编辑账号全链路；账号页只有实例页签；实例操作按能力收敛（电源 / 流量 / 监控，VirtFusion 加改名）；实例卡片流量直显；无区域 / 不可换 IP / 不可作迁移目标与 Web 的 NO_REGION / NO_CHANGE_IP / NO_CREATE 一致；流量守护默认上限取套餐总额。
+- 账号类型（后端）：面板型厂商不再误标「AWS 账号」。
+
 ## 1.6.5 build 39
 - 账号编辑 500 修复（后端）：SolusVM / VirtFusion 账号编辑详情补字段表，凭证字段加中文标签。
 - cft 套餐状态口径修复（后端）：SYNC_IN_PROGRESS 算现行订阅，FAILED 废单不算；刚订阅完列表不再误显「按量付费」。

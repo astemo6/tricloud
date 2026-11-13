@@ -1,7 +1,7 @@
 """后台任务、实例监控、流量守护。"""
 from fastapi import APIRouter, Body, HTTPException
 
-from .. import core, port_traffic, tasks, telegram, traffic_guard
+from .. import core, port_traffic, services, tasks, telegram, traffic_guard
 from ..i18n import msg
 from .common import need_acc, run
 
@@ -91,6 +91,8 @@ def _guard_view(g, a=None):
     g = {k: v for k, v in g.items() if k not in ("agent_token_enc", "agent_token_hash", "agent_info", "agent_alerted")}   # 不回传 token
     g.update(throttle_mbps=traffic_guard.throttle_mbps(g), throttled=1 if g.get("throttled") else 0, agent=agent,
              acct_enabled=1 if g.get("acct_enabled") else 0)
+    rs = services.with_reset_text({"reset_at": g.get("reset_at")}) if g.get("reset_at") and (g.get("mode") or "monthly") == "monthly" else {}
+    g.update(reset_text=rs.get("reset_text"), days_left=rs.get("days_left"))
     return dict(g, account_name=a.get("name"), provider=a.get("provider"), mode=g.get("mode") or "monthly",
                 direction=traffic_guard.direction_of(g), enabled=0 if g.get("enabled") == 0 else 1,
                 status=st, status_text=traffic_guard.STATUS_TEXT[st],

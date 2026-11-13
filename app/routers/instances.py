@@ -169,7 +169,8 @@ async def oci_rename(acc_id: int, body: dict = Body(...)):
 async def traffic(acc_id: int, instance_id: str, region: str = None, kind: str = "vm"):
     acc = need_acc(acc_id)
     p = services.provider(acc_id, region)
-    return await run(p.traffic, instance_id) if acc["provider"] == "oci" else await run(p.traffic, instance_id, kind)
+    r = await run(p.traffic, instance_id) if acc["provider"] == "oci" else await run(p.traffic, instance_id, kind)
+    return services.with_reset_text(r)
 
 
 

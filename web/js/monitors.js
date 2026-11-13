@@ -1,6 +1,6 @@
 // TriCloud 前端 v1.6.0 · 监控、流量守护、账号健康度
 import { t } from "./i18n.js";
-import { $, ACCOUNTS, act, api, confirmBox, del, esc, loading, post, view } from "./core.js";
+import { $, ACCOUNTS, act, api, confirmBox, del, esc, loading, post, resetText, view } from "./core.js";
 import { agentLine, guardAgentDialog, guardPortsDialog } from "./guard.js";
 import { trafficDialog } from "./instances.js";
 
@@ -50,7 +50,7 @@ export async function pageTraffic() {
   view.innerHTML = `<div class="card"><p class="muted">${t("traf.intro")}</p>
     ${list.length ? `<table><tr><th>${t("mon.col.instance")}</th><th>${t("common.account")}</th><th>${t("traf.col.stats")}</th><th>${t("traf.col.usage")}</th><th>${t("traf.col.limit")}</th><th>${t("traf.col.onLimit")}</th><th>${t("common.status")}</th><th>${t("traf.col.enabled")}</th><th>${t("traf.col.checkedAt")}</th><th></th></tr>
     ${list.map((g) => `<tr data-g="${g.id}"><td>${esc(g.name || g.instance_id.slice(-12))}</td><td><span class="dot ${g.provider}"></span>${esc(g.account_name || "-")}</td>
-      <td>${esc(g.scope || t("traf.scopeDefault"))}</td>
+      <td>${esc(g.scope || t("traf.scopeDefault"))}${resetText(g) ? `<div class="muted">${esc(resetText(g))}</div>` : ""}</td>
       <td><div class="meter"><i style="width:${Math.min(100, g.last_pct || 0)}%" class="${(g.last_pct || 0) >= 100 ? "bad" : (g.last_pct || 0) >= g.warn_pct ? "warn" : ""}"></i></div>
         ${g.last_gb ?? "-"} GB · ${g.last_pct ?? "-"}%</td><td>${g.limit_gb} GB</td><td>${actText(g)}${g.agent ? `<div>${agentLine(g.agent, g)}</div>` : ""}</td>
       <td><span class="badge ${GST[g.status] || ""}">${esc(g.status_text || t("traf.normal"))}</span>${g.resume_at_text ? `<div class="muted">${t("traf.resumeAt", { t: esc(g.resume_at_text) })}</div>` : g.state_msg && g.status !== "ok" ? `<div class="muted">${esc(g.state_msg)}</div>` : ""}</td>

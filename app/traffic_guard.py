@@ -61,13 +61,18 @@ def usage_window(g, hours):
     return prov.traffic(g["instance_id"], g.get("kind") or "vm", start=start, end=end)
 
 
-def measure(g):
-    """按规则的模式和方向算出已用 GB。"""
+def measure_full(g):
+    """按规则的模式和方向算出已用 GB，同时返回原始用量（含服务商给的 reset_at 等）。"""
     rolling = g.get("mode") == "rolling"
     u = usage_window(g, int(g.get("window_hours") or 24)) if rolling else usage(g)
     out, inn = float(u.get("out_gb") or 0), float(u.get("in_gb") or 0)
     d = direction_of(g)
-    return out if d == "out" else inn if d == "in" else out + inn
+    return (out if d == "out" else inn if d == "in" else out + inn), u
+
+
+def measure(g):
+    """按规则的模式和方向算出已用 GB。"""
+    return measure_full(g)[0]
 
 
 def scope_text(g):
@@ -86,7 +91,7 @@ def check(g, act=True):
     rolling = g.get("mode") == "rolling"
     month = services.now_local().strftime("%Y-%m")
     notified = g["notified"] if (rolling or g.get("month") == month) else 0
-    used = measure(g)
+    used, u = measure_full(g)
     limit = float(g["limit_gb"] or 1)
     pct = used / limit * 100
     lvl = 2 if pct >= 100 else (1 if pct >= int(g.get("warn_pct") or 80) else 0)
@@ -136,7 +141,8 @@ def check(g, act=True):
                 + ("" if agent_online(g) else "\n（agent 当前离线，上线后才会清除限速）"))
     if lvl < 2 and g.get("state") == "tripped" and not g.get("resume_at") and not extra:
         extra = {"state": "ok", "tripped_at": None, "state_msg": "用量已回落到上限以下"}   # 不自动开机的停机：回落后恢复正常状态
-    cols = {"month": month, "notified": notified, "last_gb": round(used, 3), "last_pct": round(pct, 1), "checked_at": int(time.time())}
+    cols = {"month": month, "notified": notified, "last_gb": round(used, 3), "last_pct": round(pct, 1), "checked_at": int(time.time()),
+            "reset_at": (u.get("reset_at") if isinstance(u, dict) else None) if not rolling else None}
     cols.update(extra)
     core.ex(f"UPDATE traffic_guards SET {', '.join(k + '=?' for k in cols)} WHERE id=?", (*cols.values(), g["id"]))
     return text

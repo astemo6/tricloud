@@ -68,6 +68,22 @@ def now_local():
     return dt.datetime.now(tz())
 
 
+def with_reset_text(r):
+    """流量结果带 reset_at（ISO，VirtFusion 等有重置日的服务商）时，按面板时区补
+    reset_text「MM-DD HH:mm」并重算 days_left（面板时区的自然日差）。其余原样返回。"""
+    if not isinstance(r, dict) or not r.get("reset_at"):
+        return r
+    try:
+        reset = dt.datetime.fromisoformat(str(r["reset_at"]))
+    except ValueError:
+        return r
+    if reset.tzinfo is None:
+        reset = reset.replace(tzinfo=dt.timezone.utc)
+    local, now = reset.astimezone(tz()), now_local()
+    return dict(r, reset_text=local.strftime("%m-%d %H:%M"),
+                days_left=max(0, (local.date() - now.date()).days) if local > now else 0)
+
+
 # ---------------- AWS 节流 ----------------
 def is_aws_refresh_day(d: dt.date) -> bool:
     """每月 15 号和月末最后一天。"""

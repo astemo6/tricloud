@@ -23,6 +23,8 @@ suspended / deleting 等标志位），实时状态走 ?state=true。
 口径，字节 → GiB 与其他 provider 对齐（rx=入 / tx=出）。
 该 API（用户级）不提供：创建 / 删除 / 账单——对应方法明确报错。
 """
+import datetime as dt
+import math
 import re
 
 import httpx
@@ -52,6 +54,67 @@ def _cores(value):
     m = re.match(r"\s*(\d+)", str(value or ""))
     return int(m.group(1)) if m else 0
 
+
+
+# ---- 流量周期（currentMonthlyPeriod）解析 ----
+# 官方 API 返回 ISO 8601（如 2025-10-17T00:00:00.000000Z / 2025-11-16T23:59:59.999999Z）；
+# 也兼容人类可读写法 "Fri 2025-10-17 8:00 AM CST (UTC+08:00)"（星期、12 小时制、时区缩写、
+# (UTC±HH:MM) 均可缺省）。解析失败返回 None，调用方退回原文。
+_PERIOD_RE = re.compile(
+    r"^\s*(?:[A-Za-z]{2,9}\.?,?\s+)?(\d{4})-(\d{1,2})-(\d{1,2})"
+    r"(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*([AaPp]\.?[Mm]\.?)?)?"
+    r"\s*(?:[A-Za-z]{2,6}\s*)?"
+    r"(?:\(?\s*(?:UTC|GMT)?\s*([+-])(\d{1,2}):?(\d{2})?\s*\)?|(Z|UTC|GMT))?\s*$")
+
+
+def parse_period_time(value):
+    """VirtFusion 周期时间 → 带时区的 datetime；无偏移按 UTC；无法解析返回 None。"""
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return dt.datetime.fromtimestamp(float(value), dt.timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    m = _PERIOD_RE.match(str(value))
+    if not m:
+        return None
+    y, mo, d, hh, mi, ss, ampm, sign, oh, om, z = m.groups()
+    h = int(hh or 0)
+    if ampm:
+        if not 1 <= h <= 12:
+            return None
+        pm = ampm[0].lower() == "p"
+        h = (h % 12) + (12 if pm else 0)
+    tz = dt.timezone.utc
+    if sign:
+        off = dt.timedelta(hours=int(oh), minutes=int(om or 0))
+        if off > dt.timedelta(hours=14):
+            return None
+        tz = dt.timezone(off if sign == "+" else -off)
+    try:
+        return dt.datetime(int(y), int(mo), int(d), h, int(mi or 0), int(ss or 0), tzinfo=tz)
+    except ValueError:
+        return None
+
+
+def period_info(start, end, now=None):
+    """由周期起止算出：period 文案「YYYY-MM-DD ~ YYYY-MM-DD」（按服务商给的本地日期）、
+    reset_at（下次重置 = 周期结束的下一分钟，ISO 8601 带偏移）、days_left（距重置的自然日数，
+    按重置时刻所在时区算；已过期为 0）。解析不了时 period 退回原文，不给 reset_at。"""
+    if not (start or end):
+        return {}
+    s, e = parse_period_time(start), parse_period_time(end)
+    left = s.strftime("%Y-%m-%d") if s else str(start or "").strip()
+    right = e.strftime("%Y-%m-%d") if e else str(end or "").strip()
+    info = {"period": f"{left} ~ {right}" if (left and right) else (left or right)}
+    if e:
+        reset = (e + dt.timedelta(minutes=1)).replace(second=0, microsecond=0)
+        now = (now or dt.datetime.now(dt.timezone.utc)).astimezone(reset.tzinfo)
+        info["reset_at"] = reset.isoformat()
+        info["days_left"] = max(0, (reset.date() - now.date()).days) if reset > now else 0
+        info["hours_left"] = max(0, math.ceil((reset - now).total_seconds() / 3600))
+    return info
 
 class VirtFusionProvider:
     # TriCloud 动作名 → VirtFusion 电源端点（powerOff 是强制断电，与
@@ -184,13 +247,11 @@ class VirtFusionProvider:
         total_gb = sum(_size_gb((net.get(k) or {}).get("limit")) for k in ("primary", "secondary")
                        if isinstance(net.get(k), dict))
         period = data.get("currentMonthlyPeriod") or {}
-        ptxt = ""
-        if period.get("start") and period.get("end"):
-            ptxt = f"{str(period['start'])[:10]} ~ {str(period['end'])[:10]}"
-        return {"in_gb": round(rx / _GIB, 3), "out_gb": round(tx / _GIB, 3),
-                "used_gb": round((rx + tx) / _GIB, 3), "total_gb": round(total_gb, 3),
-                "period": ptxt, "period_start": period.get("start"), "period_end": period.get("end")}
-
+        out = {"in_gb": round(rx / _GIB, 3), "out_gb": round(tx / _GIB, 3),
+               "used_gb": round((rx + tx) / _GIB, 3), "total_gb": round(total_gb, 3),
+               "period": "", "period_start": period.get("start"), "period_end": period.get("end")}
+        out.update(period_info(period.get("start"), period.get("end")))
+        return out
 
     def billing(self):
         raise core.CloudUnsupportedError("VirtFusion（绿云等）不提供账单 API，费用与续费请在服务商客户区查看")

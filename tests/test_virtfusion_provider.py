@@ -148,9 +148,75 @@ def test_traffic_period_text():
     p, orig, _ = _prov(handler)
     try:
         t = p.traffic(SERVER2["id"])
-        assert t["period"] == "2025-10-17 ~ 2025-11-16"   # 守护弹窗的 {period} 占位
+        assert t["period"] == "2025-10-17 ~ 2025-11-16"   # 守护弹窗的 {period} 占位（真实 API 为 ISO，UTC 日期）
+        assert t["period_start"] == SERVER2["currentMonthlyPeriod"]["start"]   # 原字段保持兼容
+        assert t["period_end"] == SERVER2["currentMonthlyPeriod"]["end"]
+        assert t["reset_at"] == "2025" + "-11-17T00:00:00+00:00"   # 周期结束 23:59:59.999999Z 的下一分钟取整
+        assert t["days_left"] == 0                             # 2025 年的周期早已过去
     finally:
         _restore(orig)
+
+
+def test_parse_period_time_formats():
+    import datetime as dt
+    ppt = virtfusion_provider.parse_period_time
+    cst = dt.timezone(dt.timedelta(hours=8))
+    assert ppt(SERVER["currentMonthlyPeriod"]["start"]) == dt.datetime(2025, 10, 17, tzinfo=dt.timezone.utc)   # 真实格式 ISO + 微秒 + Z
+    assert ppt(SERVER["currentMonthlyPeriod"]["end"]) == dt.datetime(2025, 11, 16, 23, 59, 59, tzinfo=dt.timezone.utc)
+    # 人类可读格式（部分面板 / 文档截图里的写法）也能解析
+    assert ppt("Fri 2025-10-17 8:00 AM CST (UTC+08:00)") == dt.datetime(2025, 10, 17, 8, 0, tzinfo=cst)
+    assert ppt("Mon 2025-11-17 7:59 AM CST (UTC+08:00)") == dt.datetime(2025, 11, 17, 7, 59, tzinfo=cst)
+    assert ppt("2025-11-17 7:59 PM CST (UTC+08:00)") == dt.datetime(2025, 11, 17, 19, 59, tzinfo=cst)   # 无星期
+    assert ppt("Sat 2025-11-01 12:00 AM EDT (UTC-04:00)") == dt.datetime(2025, 11, 1, 0, 0, tzinfo=dt.timezone(-dt.timedelta(hours=4)))
+    assert ppt("Sat 2025-11-01 12:30 PM UTC (UTC+00:00)").hour == 12
+    assert ppt("Thu 2025-12-04 5:30 AM IST (UTC+05:30)").utcoffset() == dt.timedelta(hours=5, minutes=30)
+    assert ppt("2025-11-17T07:59:00+08:00") == dt.datetime(2025, 11, 17, 7, 59, tzinfo=cst)   # ISO
+    assert ppt("2025-11-17T07:59:00Z") == dt.datetime(2025, 11, 17, 7, 59, tzinfo=dt.timezone.utc)
+    assert ppt("2025-11-17 07:59:30") == dt.datetime(2025, 11, 17, 7, 59, 30, tzinfo=dt.timezone.utc)   # 无偏移按 UTC
+    assert ppt("2025-11-17") == dt.datetime(2025, 11, 17, tzinfo=dt.timezone.utc)
+    for bad in (None, "", "next month", "2025-13-01 8:00 AM", "Fri 2025-10-17 13:00 PM CST (UTC+08:00)", "2025-10-17 8:00 AM (UTC+25:00)"):
+        assert ppt(bad) is None, bad
+
+
+def test_period_info_reset_and_days_left():
+    import datetime as dt
+    pi = virtfusion_provider.period_info
+    cst = dt.timezone(dt.timedelta(hours=8))
+    s, e = "Fri 2026-10-17 8:00 AM CST (UTC+08:00)", "Tue 2026-11-17 7:59 AM CST (UTC+08:00)"
+    r = pi(s, e, now=dt.datetime(2026, 11, 13, 13, 43, tzinfo=cst))
+    assert r["period"] == "2026-10-17 ~ 2026-11-17"
+    assert r["reset_at"] == "2026-11-17T08:00:00+08:00" and r["days_left"] == 4 and r["hours_left"] == 91
+    assert pi(s, e, now=dt.datetime(2026, 11, 17, 7, 0, tzinfo=cst))["days_left"] == 0      # 当天重置
+    assert pi(s, e, now=dt.datetime(2026, 11, 18, tzinfo=cst))["days_left"] == 0            # 已过期
+    # 秒级结束（23:59:59）→ 下一分钟取整到 00:00
+    r2 = pi("2026-10-01T00:00:00+00:00", "2026-10-31T23:59:59+00:00", now=dt.datetime(2026, 10, 30, tzinfo=dt.timezone.utc))
+    assert r2["reset_at"] == "2026-11-01T00:00:00+00:00" and r2["days_left"] == 2
+    # 解析不了：period 退回原文，不给 reset_at
+    r3 = pi("someday", "later")
+    assert r3 == {"period": "someday ~ later"}
+    assert pi(None, None) == {}
+
+
+def test_with_reset_text_panel_timezone():
+    import datetime as dt
+
+    from app import core, services
+    orig_get, orig_now = core.get_setting, services.now_local
+    try:
+        core.get_setting = lambda k, d=None: "Asia/Shanghai" if k == "timezone" else d
+        services.now_local = lambda: dt.datetime(2026, 11, 13, 13, 43, tzinfo=services.tz())
+        r = services.with_reset_text({"used_gb": 1, "reset_at": "2026-11-17T08:00:00+08:00"})
+        assert r["reset_text"] == "11-17 08:00" and r["days_left"] == 4 and r["used_gb"] == 1
+        r = services.with_reset_text({"reset_at": "2026-11-17T00:00:00+00:00"})   # UTC → 面板时区
+        assert r["reset_text"] == "11-17 08:00"
+        core.get_setting = lambda k, d=None: "America/Los_Angeles" if k == "timezone" else d
+        services.now_local = lambda: dt.datetime(2026, 11, 13, 0, 0, tzinfo=services.tz())
+        r = services.with_reset_text({"reset_at": "2026-11-17T08:00:00+08:00"})
+        assert r["reset_text"] == "11-16 16:00" and r["days_left"] == 3
+        assert services.with_reset_text({"period": "x"}) == {"period": "x"}   # SolusVM 等：原样
+        assert services.with_reset_text({"reset_at": "garbage"}) == {"reset_at": "garbage"}
+    finally:
+        core.get_setting, services.now_local = orig_get, orig_now
 
 
 def test_test_ok_and_401():

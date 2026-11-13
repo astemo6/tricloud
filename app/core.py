@@ -136,6 +136,8 @@ MIGRATIONS = [
     "ALTER TABLE sessions ADD COLUMN ip TEXT",
     "ALTER TABLE sessions ADD COLUMN ua TEXT",
     "ALTER TABLE sessions ADD COLUMN kind TEXT",
+    # ---- 流量守护：服务商给的下次流量重置时间（VirtFusion currentMonthlyPeriod，ISO；没有的为 NULL）----
+    "ALTER TABLE traffic_guards ADD COLUMN reset_at TEXT",
 ]
 
 

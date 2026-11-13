@@ -115,6 +115,8 @@ export let META = { providers: PROVS.slice() };         // GET /api/meta：当�
 export const NO_REGION = new Set(["azure", "solusvm", "virtfusion"]);            // 没有区域概念的云
 export const NO_CHANGE_IP = new Set(["solusvm", "virtfusion"]);                  // 不能换 IP 的云（监控里不显示「不通自动换 IP」）
 export const NO_CREATE = new Set(["solusvm", "virtfusion"]);                     // 不能创建实例的云（不能作为迁移目标）
+// 流量下次重置（后端按面板时区给 reset_text「MM-DD HH:mm」+ days_left；没有重置日的服务商返回空串）
+export const resetText = (d) => (d && d.reset_text ? t(d.days_left > 0 ? "inst.trafReset" : "inst.trafResetToday", { t: d.reset_text, n: d.days_left }) : "");
 export const TAB_FNS_EXTRA = {}, OP_NAMES = {}, TRAFFIC_DIALOG = {}, ADD_BODY = {}, PROV_HINT = {};
 export const TEXTAREA_FIELDS = new Set(["key_content"]);
 export const SETTINGS_CARDS = [];                       // [{ html(settings), bind(root) }]

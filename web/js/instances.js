@@ -1,6 +1,6 @@
 // TriCloud 前端 v1.6.0 · 账号页框架与实例：列表 / 卡片 / 表格、实例操作、开放端口与安全组弹窗、迁移、流量守护弹窗、v1.6 实例弹窗（重装 / 附加 IP / IP 质量 / 500M / 磁盘 / Lightsail 防火墙）
 import { agentLine, guardAgentDialog, guardPortsDialog } from "./guard.js";
-import { $, ACCOUNTS, act, api, confirmBox, ensureLsRegion, ensureMachineRegion, esc, form, instView, isDesktop, lastModal, modal, NO_CHANGE_IP, NO_CREATE, NOREG, OP_NAMES, PNAME, post, regionLabel, regionOf, regionSelect, rq, TAB_FNS_EXTRA, TABS, toast, TRAFFIC_DIALOG, view } from "./core.js";
+import { $, ACCOUNTS, act, api, confirmBox, ensureLsRegion, ensureMachineRegion, esc, form, instView, isDesktop, lastModal, modal, NO_CHANGE_IP, NO_CREATE, NOREG, OP_NAMES, PNAME, post, regionLabel, regionOf, regionSelect, resetText, rq, TAB_FNS_EXTRA, TABS, toast, TRAFFIC_DIALOG, view } from "./core.js";
 import { t } from "./i18n.js";
 import { ociOsFields, ociShapeOpts, PUBLIC_CIDR, tabOciCreate, tabOciLimits, tabOciObjects, tabOciSecGroup, tabOciSnatch, tabOciStorage, tabOciTraffic, wireOciOs } from "./oci.js";
 import { ec2Create, lightsailCreate, tabAwsCredit, tabAwsRegions, tabCloudFront, tabLightsailV16, tabQuota, tabRecycle } from "./aws.js";
@@ -149,7 +149,8 @@ async function fillTraffic(acc, list, kind, box) {
       const rgq = NOREG(acc) ? "" : `region=${encodeURIComponent(i.region || regionOf(acc))}`;
       const td = await api(`/accounts/${acc.id}/traffic?instance_id=${encodeURIComponent(i.id)}&kind=${kind}&${rgq}`);
       const nums = td.total_gb ? `${td.used_gb} / ${td.total_gb} GB（${Math.round(td.used_gb / td.total_gb * 100)}%）` : `${td.used_gb} GB`;
-      els().forEach((el) => { el.textContent = el.dataset.bare ? nums : `${t("inst.traffic")} ${nums}`; el.title = `${t("inst.dirIn")} ${td.in_gb} GB · ${t("inst.dirOut")} ${td.out_gb} GB`; });
+      const rt = resetText(td);   // VirtFusion：下次重置（SolusVM 没有重置日，不显示）
+      els().forEach((el) => { el.innerHTML = esc(el.dataset.bare ? nums : `${t("inst.traffic")} ${nums}`) + (rt ? `<br><span class="muted" data-reset>${esc(rt)}</span>` : ""); el.title = `${t("inst.dirIn")} ${td.in_gb} GB · ${t("inst.dirOut")} ${td.out_gb} GB` + (td.period ? ` · ${td.period}` : ""); });
     } catch (_) { els().forEach((el) => { el.textContent = el.dataset.bare ? "-" : `${t("inst.traffic")} -`; }); }
   }
 }
@@ -402,7 +403,8 @@ export async function trafficDialog(acc, inst, kind, onSaved) {
   try {
     const rgq = NOREG(acc) ? "" : `region=${encodeURIComponent(inst.region || regionOf(acc))}`;
     const td = await api(`/accounts/${acc.id}/traffic?instance_id=${encodeURIComponent(inst.id)}&kind=${kind}&${rgq}`);
-    use = `<p>${t("inst.trafficUse", { period: esc(td.period), out: td.out_gb, in: td.in_gb })}</p>`;
+    const rt = resetText(td);
+    use = `<p>${t("inst.trafficUse", { period: esc(td.period), out: td.out_gb, in: td.in_gb })}${rt ? `<br><span class="muted">${esc(rt)}</span>` : ""}</p>`;
   } catch (e) { use = `<p class="muted">${t("inst.trafficFail", { msg: esc(e.message) })}</p>`; }
   const mode = g.mode || "monthly", dir = g.direction || (g.count_in ? "both" : "out");
   const r = await modal(t("inst.trafTitle", { name: inst.name }), `${use}

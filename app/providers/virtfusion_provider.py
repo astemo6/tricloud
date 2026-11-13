@@ -169,6 +169,11 @@ class VirtFusionProvider:
     def _map(s):
         net = ((s.get("network") or {}).get("primary") or {})
         ipv4 = [x.get("address") for x in (net.get("ipv4") or []) if isinstance(x, dict) and x.get("address")]
+        # 终端用户 API 实测 network.secondary 为空、也没有地域字段；万一面板给了第二网卡 IPv4，就当内网 IP 显示
+        sec = (s.get("network") or {}).get("secondary")
+        sec = sec if isinstance(sec, list) else [sec] if isinstance(sec, dict) else []
+        priv = next((x.get("address") for g in sec if isinstance(g, dict)
+                     for x in (g.get("ipv4") or []) if isinstance(x, dict) and x.get("address")), None)
         ipv6 = []
         for g in net.get("ipv6") or []:
             if isinstance(g, dict):
@@ -189,7 +194,7 @@ class VirtFusionProvider:
         else:
             state = "unknown"   # 列表不带电源状态，实时状态走 get_state()
         return {"id": str(s.get("id")), "name": s.get("name") or s.get("hostname") or str(s.get("id")), "state": state,
-                "public_ip": ipv4[0] if ipv4 else None, "private_ip": None, "ipv6": ipv6,
+                "public_ip": ipv4[0] if ipv4 else None, "private_ip": priv, "ipv6": ipv6,
                 "shape": " / ".join(shape_bits) or "-", "region": "-", "zone": "-", "created": str(s.get("created") or "")}
 
     @staticmethod

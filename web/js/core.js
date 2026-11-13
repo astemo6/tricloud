@@ -114,6 +114,8 @@ export const PROVS = ["oci", "aws", "azure", "solusvm", "virtfusion"];          
 export let META = { providers: PROVS.slice() };         // GET /api/meta：当前可添加的云厂商
 export const NO_REGION = new Set(["azure", "solusvm", "virtfusion"]);            // 没有区域概念的云
 export const NO_CHANGE_IP = new Set(["solusvm", "virtfusion"]);                  // 不能换 IP 的云（监控里不显示「不通自动换 IP」）
+export const NO_PRIVATE_IP = new Set(["solusvm", "virtfusion"]);                 // API 不给内网 IP 的云（列表/卡片隐藏内网 IP；实例真有值时仍显示）
+export const NO_ZONE = new Set(["solusvm", "virtfusion"]);                       // 没有地域/可用区字段的云（只在实例带 location 时显示地域）
 export const NO_CREATE = new Set(["solusvm", "virtfusion"]);                     // 不能创建实例的云（不能作为迁移目标）
 // 流量下次重置（后端按面板时区给 reset_text「MM-DD HH:mm」+ days_left；没有重置日的服务商返回空串）
 export const resetText = (d) => (d && d.reset_text ? t(d.days_left > 0 ? "inst.trafReset" : "inst.trafResetToday", { t: d.reset_text, n: d.days_left }) : "");

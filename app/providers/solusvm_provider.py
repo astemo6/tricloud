@@ -100,7 +100,8 @@ class SolusVMProvider:
         return [{"id": name, "name": name, "state": self._state_of(info),
                  "public_ip": ipv4[0] if ipv4 else None, "private_ip": None, "ipv6": ipv6,
                  "shape": shape, "memory_gb": _gb(mem_t) if mem_t else None,
-                 "region": info.get("location") or self.panel.split("//")[-1], "zone": "-", "created": ""}]
+                 "region": info.get("location") or self.panel.split("//")[-1], "zone": "-", "created": "",
+                 "location": (info.get("location") or "").strip()}]   # 真实机房位置（空串=面板没给，Web 隐藏地域）
 
     def get_state(self, inst_id):
         try:

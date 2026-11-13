@@ -1,6 +1,6 @@
 // TriCloud 前端 v1.6.0 · 账号页框架与实例：列表 / 卡片 / 表格、实例操作、开放端口与安全组弹窗、迁移、流量守护弹窗、v1.6 实例弹窗（重装 / 附加 IP / IP 质量 / 500M / 磁盘 / Lightsail 防火墙）
 import { agentLine, guardAgentDialog, guardPortsDialog } from "./guard.js";
-import { $, ACCOUNTS, act, api, confirmBox, ensureLsRegion, ensureMachineRegion, esc, form, instView, isDesktop, lastModal, modal, NO_CHANGE_IP, NO_CREATE, NOREG, OP_NAMES, PNAME, post, regionLabel, regionOf, regionSelect, resetText, rq, TAB_FNS_EXTRA, TABS, toast, TRAFFIC_DIALOG, view } from "./core.js";
+import { $, ACCOUNTS, act, api, confirmBox, ensureLsRegion, ensureMachineRegion, esc, form, instView, isDesktop, lastModal, modal, NO_CHANGE_IP, NO_CREATE, NO_PRIVATE_IP, NO_ZONE, NOREG, OP_NAMES, PNAME, post, regionLabel, regionOf, regionSelect, resetText, rq, TAB_FNS_EXTRA, TABS, toast, TRAFFIC_DIALOG, view } from "./core.js";
 import { t } from "./i18n.js";
 import { ociOsFields, ociShapeOpts, PUBLIC_CIDR, tabOciCreate, tabOciLimits, tabOciObjects, tabOciSecGroup, tabOciSnatch, tabOciStorage, tabOciTraffic, wireOciOs } from "./oci.js";
 import { ec2Create, lightsailCreate, tabAwsCredit, tabAwsRegions, tabCloudFront, tabLightsailV16, tabQuota, tabRecycle } from "./aws.js";
@@ -80,6 +80,9 @@ export function renameResult(r) {
     try { await navigator.clipboard.writeText(ta.value); toast(t("guard.copied")); } catch (_) { ta.select(); document.execCommand("copy"); toast(t("guard.copied")); }
   };
 }
+// 面板型云（VirtFusion / SolusVM）API 不给内网 IP / 地域：没有值就不显示这一列/项
+export const hasPriv = (acc, i) => !NO_PRIVATE_IP.has(acc.provider) || !!i.private_ip;
+export const hasZone = (acc, i) => !NO_ZONE.has(acc.provider) || !!i.location;
 export function instCard(acc, i, kind) {
   const ip6 = (i.ipv6 || []).join("<br>") || "-";
   const extra = [];
@@ -94,9 +97,9 @@ export function instCard(acc, i, kind) {
   return `<div class="card inst" data-id="${esc(i.id)}"><div class="hd"><b title="${esc(i.id)}">${esc(i.name)}</b>
     <span class="badge ${esc(i.state)}">${esc(i.state)}</span></div>
     <div class="kv kv2"><span>${t("inst.public")}</span><span class="mono">${esc(i.public_ip || "-")}</span>
-    <span>${t("inst.private")}</span><span class="mono">${esc(i.private_ip || "-")}</span>
+    ${hasPriv(acc, i) ? `<span>${t("inst.private")}</span><span class="mono">${esc(i.private_ip || "-")}</span>` : ""}
     ${extra.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join("")}
-    <span>${t("inst.zone")}</span><span>${esc(i.zone ? regionLabel(i.zone) : "-")}</span>
+    ${!hasZone(acc, i) ? "" : NO_ZONE.has(acc.provider) ? `<span>${t("inst.colRegion")}</span><span>${esc(i.location)}</span>` : `<span>${t("inst.zone")}</span><span>${esc(i.zone ? regionLabel(i.zone) : "-")}</span>`}
     ${(i._dns || []).length ? `<span>${t("op.dns")}</span><span class="mono wide">${i._dns.map((x) => "🌐 " + esc(x)).join("<br>")}</span>` : ""}
     ${ip6 !== "-" ? `<span>IPv6</span><span class="mono wide">${ip6}</span>` : ""}</div>
     <div class="ops">${inl.map(([o, l]) => opBtn(o, l, i)).join("")}${more ? `<button class="btn sm" data-more aria-label="${t("inst.moreOps")}">${t("inst.more")} ▾</button>` : ""}</div></div>`;
@@ -452,10 +455,12 @@ export function instTable(acc, list, kind) {
     + (["solusvm", "virtfusion"].includes(acc.provider) ? `<div class="muted" data-traf="${esc(i.id)}">${t("inst.traffic")} …</div>` : "");   // 流量统计直接显示（异步填充）
   const when = (c) => { if (!c || c === "None") return "-"; const t = String(c).replace("T", " "); return esc(t.slice(0, 16)); };
   const ops = instOps(acc, kind);
-  return `<table class="inst-table"><tr><th>${t("acc.colName")}</th><th>${t("common.status")}</th><th>${t("inst.spec")}</th><th>${t("inst.colPublic")}</th><th>${t("inst.colPrivate")}</th><th>${t("inst.colRegion")}</th><th>${t("inst.colCreated")}</th><th>${t("inst.colOps")}</th></tr>
+  const showPriv = list.some((i) => hasPriv(acc, i)), showZone = list.some((i) => hasZone(acc, i));   // 面板型云没有值的列整列隐藏
+  const zoneCell = (i) => (NO_ZONE.has(acc.provider) ? esc(i.location || "-") : esc(i.zone || i.region ? regionLabel(i.zone || i.region) : "-"));
+  return `<table class="inst-table"><tr><th>${t("acc.colName")}</th><th>${t("common.status")}</th><th>${t("inst.spec")}</th><th>${t("inst.colPublic")}</th>${showPriv ? `<th>${t("inst.colPrivate")}</th>` : ""}${showZone ? `<th>${t("inst.colRegion")}</th>` : ""}<th>${t("inst.colCreated")}</th><th>${t("inst.colOps")}</th></tr>
     ${list.map((i) => `<tr data-id="${esc(i.id)}"><td><b title="${esc(i.id)}">${esc(i.name)}</b>${(i.ipv6 || []).length ? `<div class="muted mono" title="${esc(i.ipv6.join("\n"))}">${esc(i.ipv6[i.ipv6.length - 1])}${i.ipv6.length > 1 ? ` +${i.ipv6.length - 1}` : ""}</div>` : ""}${(i._dns || []).length ? `<div class="muted mono" title="${esc(i._dns.join("\n"))}">🌐 ${esc(i._dns[0])}${i._dns.length > 1 ? ` +${i._dns.length - 1}` : ""}</div>` : ""}</td>
-    <td><span class="badge ${esc(i.state)}">${esc(i.state)}</span></td><td>${spec(i)}</td><td class="mono nowrap">${esc(i.public_ip || "-")}</td><td class="mono nowrap">${esc(i.private_ip || "-")}</td>
-    <td class="nowrap">${esc(i.zone || i.region ? regionLabel(i.zone || i.region) : "-")}</td><td class="mono nowrap">${when(i.created)}</td>
+    <td><span class="badge ${esc(i.state)}">${esc(i.state)}</span></td><td>${spec(i)}</td><td class="mono nowrap">${esc(i.public_ip || "-")}</td>${showPriv ? `<td class="mono nowrap">${esc(i.private_ip || "-")}</td>` : ""}
+    ${showZone ? `<td class="nowrap">${zoneCell(i)}</td>` : ""}<td class="mono nowrap">${when(i.created)}</td>
     <td class="row-ops"><div class="row-ops-in">${ops.map(([o, l]) => opBtn(o, l, i, o === "terminate" ? "danger" : "")).join("")}</div></td></tr>`).join("")}</table>`;
 }
 export function opsMenu(anchor, ops, pick) {

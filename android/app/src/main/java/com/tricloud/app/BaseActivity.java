@@ -359,6 +359,15 @@ public abstract class BaseActivity extends AppCompatActivity {
         return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(new java.util.Date(sec * 1000));
     }
 
+    /** 流量下次重置（VirtFusion；后端给 reset_text「MM-DD HH:mm」+ days_left，没有就返回空串）。prefix 为非空时加在前面。 */
+    public String resetLine(JSONObject d, String prefix) {
+        if (d == null) return "";
+        String rt = d.optString("reset_text", "");
+        if (rt.isEmpty() || "null".equals(rt)) return "";
+        int n = d.optInt("days_left", 0);
+        return prefix + (n > 0 ? getString(R.string.vf_reset, rt, n) : getString(R.string.vf_reset_today, rt));
+    }
+
     static final String[][] GUARD_FREE = {{"oci", "10240"}, {"aws", "100"}, {"azure", "100"}};
 
     /** 流量守护规则（新建 / 编辑，同 Web trafficDialog）：已有规则时回显。 */
@@ -378,7 +387,7 @@ public abstract class BaseActivity extends AppCompatActivity {
                 catch (Exception e) { return new JSONObject().put("error", e.getMessage()); }
             }, tr -> {
                 JSONObject t = Api.obj(tr);
-                String use = t.has("error") ? getString(R.string.s0823, t.optString("error")) : getString(R.string.s0824, str(t, "period", "-"), t.optString("out_gb"), t.optString("in_gb"));
+                String use = t.has("error") ? getString(R.string.s0823, t.optString("error")) : getString(R.string.s0824, str(t, "period", "-"), t.optString("out_gb"), t.optString("in_gb")) + resetLine(t, "\n");
                 // 面板型厂商没有「免费出站」口径：无规则时默认上限取套餐流量总额（traffic 的 total_gb）
                 double totGb = t.optDouble("total_gb", 0);
                 String defLim = MainActivity.isPanel(prov) && totGb > 0 ? (totGb == Math.floor(totGb) ? String.valueOf((long) totGb) : String.valueOf(totGb)) : free;

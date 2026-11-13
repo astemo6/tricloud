@@ -93,6 +93,7 @@ extension Page {
                     // 面板型：周期文案用接口返回的 period（计费周期 / 日期范围），默认上限取套餐流量总额
                     let per = str(t, "period", "")
                     if !per.isEmpty { use = "周期（" + per + "）出站 " + t.optString("out_gb") + " GB，入站 " + t.optString("in_gb") + " GB。" }
+                    use += trafResetLine(t, "\n")   // VirtFusion：下次重置
                     let tot = t.optDouble("total_gb", 0)
                     if tot > 0 { panelTotal = AccountPage.trimNum(tot) }
                 case .failure(let e):

@@ -169,3 +169,6 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 
 ## 1.6.1 build 30
 - OCI 一键切换受限 API（仅 OCI）：TG 验证码 + 强确认 → 后台任务创建 TriCloud 前缀的组 / 策略 / 用户和新 RSA 2048 Key，自检通过才替换面板凭证；失败回滚；云端原 Key 不删除不撤销。策略见 docs/api-credentials.md。
+
+## 1.6.9 build 43
+- App（Android / iOS）显示绿云 VirtFusion 流量「下次重置」（实例卡片 / 流量守护弹窗 / 流量守护列表），绿云实例卡片隐藏空的内网 IP / 可用区，与 Web 一致。

@@ -1283,6 +1283,15 @@
     <string name="lx_hint_solusvm">在 SolusVM 面板打开这台 VPS → API 页生成 Key / Hash。一对凭证只对应一台 VPS，每台单独加一个账号。</string>
     <string name="lx_hint_virtfusion">在 VirtFusion 面板（如绿云 cp.green.cloud）Account → API 里生成用户 API Token（需面板 ≥6.1 且管理员未关闭用户 API）。一个账号可管理名下全部服务器，支持电源 / 流量 / 改名。</string>
     <string name="lx_limit_gb">上限 GB</string>
+    <string name="vf_reset">下次重置 %1$s · 还有 %2$d 天</string>
+    <string name="vf_reset_today">下次重置 %1$s · 今天</string>
+    <string name="vf_inst_info">公网 IP：%1$s%2$s
+IPv6：%3$s
+规格：%4$s%5$s</string>
+    <string name="vf_priv">
+内网 IP：%1$s</string>
+    <string name="vf_loc">
+地域：%1$s</string>
     <string name="lx_shape_a1">A1.Flex · ARM · ✅ Always Free（免费号合计 2 OCPU / 12 GB，付费号 4 / 24）</string>
     <string name="lx_shape_e2">E2.1.Micro · AMD 1/8 OCPU · 1 GB · ✅ Always Free（最多 2 台）</string>
     <string name="lx_shape_e4">E4.Flex · AMD · 💰 付费，非 Always Free</string>

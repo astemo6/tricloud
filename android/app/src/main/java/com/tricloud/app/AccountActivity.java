@@ -388,6 +388,12 @@ public class AccountActivity extends BaseActivity {
         LinearLayout c = card(inst.optString("name") + "  [" + inst.optString("state") + "]");
         JSONArray v6 = inst.optJSONArray("ipv6");
         String spec = "oci".equals(prov) ? inst.optString("shape") + " " + str(inst, "ocpus", "?") + "C/" + str(inst, "memory_gb", "?") + "G" : inst.optString("shape");
+        if (MainActivity.isPanel(prov)) {
+            // 绿云（SolusVM / VirtFusion）：API 不给内网 IP / 地域，没有值就不显示这两行（同 Web NO_PRIVATE_IP / NO_ZONE）
+            String pip = inst.optString("private_ip", ""), loc = inst.optString("location", "");
+            text(c, getString(R.string.vf_inst_info, str(inst, "public_ip", "-"), (pip.isEmpty() || "null".equals(pip) ? "" : getString(R.string.vf_priv, pip)),
+                    (v6 != null && v6.length() > 0 ? join(v6) : "-"), spec, (loc.isEmpty() || "null".equals(loc) ? "" : getString(R.string.vf_loc, loc))), 13, false);
+        } else
         text(c, getString(R.string.s0030, str(inst, "public_ip", "-"), str(inst, "private_ip", "-"), (v6 != null && v6.length() > 0 ? join(v6) : "-"), spec, Regions.label(str(inst, "zone", "-"))), 13, false);
         LinearLayout r = row(c);
         button(r, getString(R.string.s0031), v -> simple(inst, kind, "start", getString(R.string.s0031)));
@@ -404,7 +410,7 @@ public class AccountActivity extends BaseActivity {
                 JSONObject td = Api.obj(x);
                 if (td.has("used_gb") && !td.isNull("used_gb")) {
                     double tot = td.optDouble("total_gb", 0);
-                    trafLine.setText(getString(R.string.s0007) + " " + td.optString("used_gb") + (tot > 0 ? " / " + td.optString("total_gb") + " GB（" + Math.round(td.optDouble("used_gb", 0) / tot * 100) + "%）" : " GB"));
+                    trafLine.setText(getString(R.string.s0007) + " " + td.optString("used_gb") + (tot > 0 ? " / " + td.optString("total_gb") + " GB（" + Math.round(td.optDouble("used_gb", 0) / tot * 100) + "%）" : " GB") + resetLine(td, "\n"));
                     trafLine.setVisibility(View.VISIBLE);
                 }
             });

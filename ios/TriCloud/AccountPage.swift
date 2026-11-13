@@ -219,9 +219,20 @@ final class AccountPage: Page {
         let c = card(inst.optString("name") + "  [" + inst.optString("state") + "]")
         let v6 = inst.optJSONArray("ipv6")
         let spec = prov == "oci" ? inst.optString("shape") + " " + str(inst, "ocpus", "?") + "C/" + str(inst, "memory_gb", "?") + "G" : inst.optString("shape")
+        if MainPage.isPanel(prov) {
+            // 绿云（SolusVM / VirtFusion）：API 不给内网 IP / 地域，没有值就不显示这两行（同 Web NO_PRIVATE_IP / NO_ZONE）
+            let pip = str(inst, "private_ip", ""), loc = str(inst, "location", "")
+            let en = L10n.isEN
+            c.text((en ? "Public IP: " : "公网 IP：") + str(inst, "public_ip", "-")
+                   + (pip.isEmpty || pip == "-" ? "" : (en ? "\nPrivate IP: " : "\n内网 IP：") + pip)
+                   + "\nIPv6" + (en ? ": " : "：") + ((v6?.count ?? 0) > 0 ? join(v6) : "-")
+                   + (en ? "\nShape: " : "\n规格：") + spec
+                   + (loc.isEmpty || loc == "-" ? "" : (en ? "\nRegion: " : "\n地域：") + loc), 13)
+        } else {
         c.text("公网 IP：" + str(inst, "public_ip", "-") + "\n内网 IP：" + str(inst, "private_ip", "-")
                + "\nIPv6：" + ((v6?.count ?? 0) > 0 ? join(v6) : "-")
                + "\n规格：" + spec + "\n可用区：" + Regions.label(str(inst, "zone", "-")), 13)
+        }
         if kind == "lightsail" { c.muted("镜像 " + str(inst, "blueprint", "-") + " · 静态 IP " + (inst.optBoolean("static_ip") ? "是" : "否")) }
         if prov == "azure" && !inst.isNull("resource_group") { c.muted("资源组 " + inst.optString("resource_group")) }
         let r = c.row()
@@ -236,7 +247,7 @@ final class AccountPage: Page {
                     let td = jobj(x)
                     if !td.isNull("used_gb") {
                         let tot = td.optDouble("total_gb", 0)
-                        tl.text = "流量 " + td.optString("used_gb") + (tot > 0 ? " / " + td.optString("total_gb") + " GB（" + String(Int((td.optDouble("used_gb", 0) / tot * 100).rounded())) + "%）" : " GB")
+                        tl.text = "流量 " + td.optString("used_gb") + (tot > 0 ? " / " + td.optString("total_gb") + " GB（" + String(Int((td.optDouble("used_gb", 0) / tot * 100).rounded())) + "%）" : " GB") + trafResetLine(td, "\n")
                     }
                 }
             }

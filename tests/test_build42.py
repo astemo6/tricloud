@@ -1,4 +1,4 @@
-"""build 42：修 Android 抽屉分组折叠「时好时坏」，版本 1.6.8 / 42 静态检查。
+"""build 42 静态检查（版本断言放宽为 >=）。
 根因：NavigationView（material 1.12.0 NavigationMenuPresenter）的条目点击处理先 setUpdateSuspended(true)
 再分发 performItemAction，build 41 在分发内同步 buildNav() 重建菜单，presenter 的 prepareMenuItems()
 遇 updateSuspended 直接 return，界面不刷新，要等下一次无关重建（点别的条目 / 重开抽屉）才显形。
@@ -32,8 +32,8 @@ _vc_and = int(re.search(r"versionCode (\d+)", bg).group(1))
 _vc_ios = re.search(r'CURRENT_PROJECT_VERSION: "(\d+)"', py).group(1)
 _vn_and = re.search(r"versionName '([^']+)'", bg).group(1)
 _vn_ios = re.search(r'MARKETING_VERSION: "([^"]+)"', py).group(1)
-ok("versionCode == 42 and CURRENT_PROJECT_VERSION == '42'", _vc_and == 42 and _vc_ios == "42")
-ok("versionName == '1.6.8' and MARKETING_VERSION == '1.6.8'", _vn_and == "1.6.8" and _vn_ios == "1.6.8")
+ok("versionCode >= 42 and CURRENT_PROJECT_VERSION == '42'", _vc_and >= 42 and int(_vc_ios) >= 42 and str(_vc_and) == _vc_ios)
+ok("versionName >= '1.6.8' and MARKETING_VERSION == '1.6.8'", _vn_and == _vn_ios and tuple(map(int, _vn_and.split("."))) >= (1, 6, 8))
 
 # 2. Android 折叠重建推迟 + 其余实现仍在
 A = ("android", "app", "src", "main", "java", "com", "tricloud", "app")

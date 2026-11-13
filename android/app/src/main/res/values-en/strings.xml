@@ -1283,6 +1283,15 @@
     <string name="lx_hint_solusvm">In the SolusVM panel, open this VPS → API tab to generate a Key / Hash. One credential pair covers one VPS; add one account per VPS.</string>
     <string name="lx_hint_virtfusion">In the VirtFusion panel (e.g. GreenCloud cp.green.cloud), create a user API token under Account → API (requires panel ≥ 6.1 and the admin not having disabled the user API). One account manages all your servers, with power / traffic / rename support.</string>
     <string name="lx_limit_gb">Limit GB</string>
+    <string name="vf_reset">Next reset %1$s · %2$d days left</string>
+    <string name="vf_reset_today">Next reset %1$s · today</string>
+    <string name="vf_inst_info">Public IP: %1$s%2$s
+IPv6: %3$s
+Shape: %4$s%5$s</string>
+    <string name="vf_priv">
+Private IP: %1$s</string>
+    <string name="vf_loc">
+Region: %1$s</string>
     <string name="lx_shape_a1">A1.Flex · ARM · ✅ Always Free (free accounts 2 OCPU / 12 GB total, paid 4 / 24)</string>
     <string name="lx_shape_e2">E2.1.Micro · AMD 1/8 OCPU · 1 GB · ✅ Always Free (up to 2)</string>
     <string name="lx_shape_e4">E4.Flex · AMD · 💰 Paid, not Always Free</string>

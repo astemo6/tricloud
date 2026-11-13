@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.9（build 43）(2026-11-13)
+- App 跟进 Web（fcca49a / 544bbe9）：Android / iOS 显示 VirtFusion 流量「下次重置 MM-DD HH:mm · 还有 N 天 / 今天」（后端 reset_text + days_left，面板时区）——实例卡片流量直显行、流量守护弹窗、流量守护列表；SolusVM 无重置日不显示。
+- App 绿云实例卡片隐藏 API 不提供的内网 IP / 可用区（有 private_ip 或 location 时才显示，同 Web NO_PRIVATE_IP / NO_ZONE）。
+- 版本：Android versionCode 43 / iOS build 43（versionName 1.6.9）。
+
 ## 1.6.8（build 42）(2026-11-11)
 - 修复：**Android 抽屉分组折叠时好时坏**（build 41 引入，真机反馈）。根因：NavigationView（material 1.12.0 的 NavigationMenuPresenter）处理条目点击时先 `setUpdateSuspended(true)` 再分发点击，build 41 在分发内同步 `buildNav()` 重建菜单，presenter 的 `prepareMenuItems()` 遇 suspended 直接返回，界面不刷新，要等下一次无关重建（点别的条目 / 重开抽屉）才把折叠状态显出来。修法：`onNav` 处理分组标题时先记状态，把重建推迟到点击分发结束后（`nav.post`）再执行。Web / iOS 无此问题（纯状态驱动重渲染）。
 - 版本：Android versionCode 42 / iOS build 42（versionName 1.6.8，两端版本号按惯例同步，iOS 代码未动）。

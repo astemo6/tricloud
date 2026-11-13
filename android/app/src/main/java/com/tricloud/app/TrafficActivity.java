@@ -28,6 +28,8 @@ public class TrafficActivity extends BaseActivity {
                 boolean thr = "throttle".equals(g.optString("action"));
                 double sh = g.optDouble("shutdown_hours", 0);
                 text(c, getString(R.string.s1233, str(g, "account_name", "-"), str(g, "scope", getString(R.string.s1228)), str(g, "last_gb", "-"), str(g, "limit_gb", "-"), str(g, "last_pct", "-"), (thr ? getString(R.string.s1229, str(g, "throttle_mbps", "1")) : !stop ? getString(R.string.s0833) : sh > 0 ? getString(R.string.s1230, (sh == Math.floor(sh) ? String.valueOf((long) sh) : String.valueOf(sh))) : getString(R.string.s1231)), str(g, "status_text", getString(R.string.s0291)), (g.isNull("resume_at_text") || !g.has("resume_at_text") ? "" : getString(R.string.s1232, g.optString("resume_at_text"))), (g.optInt("enabled", 1) == 1 ? "" : getString(R.string.s0819)), fmtTime(g.optLong("checked_at"))), 13, false);
+                String rl = resetLine(g, "");   // 月度守护 + VirtFusion：下次重置
+                if (!rl.isEmpty()) muted(c, rl);
                 if (!g.isNull("state_msg") && g.has("state_msg") && !"ok".equals(g.optString("status"))) muted(c, g.optString("state_msg"));
                 if (g.optJSONObject("agent") != null) muted(c, GuardAgentActivity.agentLine(g.optJSONObject("agent"), thr, g.optInt("throttled") == 1)
                         + (g.optInt("acct_enabled") == 1 ? getString(R.string.s1234) : ""));

@@ -24,6 +24,8 @@ final class TrafficPage: Page {
                 c.text(str(g, "account_name", "-") + "\n" + str(g, "scope", "本月出站") + "：" + str(g, "last_gb", "-") + " / " + str(g, "limit_gb", "-") + " GB（" + str(g, "last_pct", "-") + "%）"
                        + "\n到上限：" + onLimit
                        + "\n状态：" + str(g, "status_text", "正常") + resume + (enabled ? "" : "（已停用）"), 13)
+                let rl = trafResetLine(g, "")   // 月度守护 + VirtFusion：下次重置
+                if !rl.isEmpty { c.muted(rl) }
                 if !g.isNull("state_msg") && g.optString("status") != "ok" { c.muted(g.optString("state_msg")) }
                 if let ag = g.optJSONObject("agent") {
                     c.muted(GuardAgentPage.agentLine(ag, thr, g.optInt("throttled") == 1) + (g.optInt("acct_enabled") == 1 ? " · 流量明细已开" : ""))
@@ -58,4 +60,15 @@ final class TrafficPage: Page {
     private func patch(_ gid: Int, _ k: String, _ v: Bool) {
         request("PATCH", "/traffic-guards/\(gid)", [k: v]) { _ in self.refresh() }
     }
+}
+
+/// 流量下次重置（VirtFusion；后端给 reset_text「MM-DD HH:mm」+ days_left，没有就返回空串）。prefix 非空时加在前面。
+func trafResetLine(_ d: JObj, _ prefix: String) -> String {
+    if d.isNull("reset_text") { return "" }
+    let rt = d.optString("reset_text")
+    if rt.isEmpty { return "" }
+    let n = d.optInt("days_left", 0)
+    let en = L10n.isEN
+    return prefix + (n > 0 ? (en ? "Next reset \(rt) · \(n) days left" : "下次重置 \(rt) · 还有 \(n) 天")
+                           : (en ? "Next reset \(rt) · today" : "下次重置 \(rt) · 今天"))
 }

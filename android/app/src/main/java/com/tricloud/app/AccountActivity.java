@@ -393,8 +393,9 @@ public class AccountActivity extends BaseActivity {
             String pip = inst.optString("private_ip", ""), loc = inst.optString("location", "");
             text(c, getString(R.string.vf_inst_info, str(inst, "public_ip", "-"), (pip.isEmpty() || "null".equals(pip) ? "" : getString(R.string.vf_priv, pip)),
                     (v6 != null && v6.length() > 0 ? join(v6) : "-"), spec, (loc.isEmpty() || "null".equals(loc) ? "" : getString(R.string.vf_loc, loc))), 13, false);
-        } else
-        text(c, getString(R.string.s0030, str(inst, "public_ip", "-"), str(inst, "private_ip", "-"), (v6 != null && v6.length() > 0 ? join(v6) : "-"), spec, Regions.label(str(inst, "zone", "-"))), 13, false);
+        } else {
+            text(c, getString(R.string.s0030, str(inst, "public_ip", "-"), str(inst, "private_ip", "-"), (v6 != null && v6.length() > 0 ? join(v6) : "-"), spec, Regions.label(str(inst, "zone", "-"))), 13, false);
+        }
         LinearLayout r = row(c);
         button(r, getString(R.string.s0031), v -> simple(inst, kind, "start", getString(R.string.s0031)));
         button(r, "azure".equals(prov) ? getString(R.string.s0032) : getString(R.string.s0033), v -> simple(inst, kind, "stop", getString(R.string.s0033)));

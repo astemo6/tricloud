@@ -25,7 +25,6 @@ import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.GravityCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
-import com.google.android.material.navigation.NavigationView;
 import androidx.appcompat.app.AppCompatDelegate;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
@@ -128,7 +127,6 @@ public abstract class BaseActivity extends AppCompatActivity {
     // ---------- Material 3 侧滑抽屉导航（分类与 Web 侧栏一致） ----------
     protected LinearLayout topBar;
     protected DrawerLayout drawer;
-    protected NavigationView nav;
     private ActionBarDrawerToggle toggle;
 
     /** 登录页、任务日志页不显示抽屉。 */
@@ -163,22 +161,23 @@ public abstract class BaseActivity extends AppCompatActivity {
     private void setupDrawer(View content) {
         drawer = new DrawerLayout(this);
         drawer.addView(content, new DrawerLayout.LayoutParams(-1, -1));
-        nav = new NavigationView(this);
-        DrawerLayout.LayoutParams lp = new DrawerLayout.LayoutParams(-2, -1);
+        // build 45：抽屉改为自绘 RecyclerView（替代 NavigationView）。NavigationView 每次菜单变化都 notifyDataSetChanged 整表重绑并 requestLayout 到 DrawerLayout，
+        // 连带重新测量背后的整个内容页，折叠/展开一卡一跳；这里用稳定 id + DiffUtil 只插入/删除变化的行（带动画），setHasFixedSize 让更新不向上触发布局。
+        nav = new androidx.recyclerview.widget.RecyclerView(this);
+        nav.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(this));
+        nav.setHasFixedSize(true);
+        nav.setClipToPadding(false);
+        nav.setPadding(0, 0, 0, dp(16));
+        nav.setBackgroundColor(navColor(com.google.android.material.R.attr.colorSurfaceContainerLow));
+        androidx.recyclerview.widget.DefaultItemAnimator anim = new androidx.recyclerview.widget.DefaultItemAnimator();
+        anim.setSupportsChangeAnimations(false);   // 标题箭头 ▾/▸ 变化直接换字，不做交叉淡入
+        anim.setAddDuration(160); anim.setRemoveDuration(120); anim.setMoveDuration(180);
+        nav.setItemAnimator(anim);
+        nav.setAdapter(navAdapter);
+        int w = Math.min(dp(320), getResources().getDisplayMetrics().widthPixels - dp(56));
+        DrawerLayout.LayoutParams lp = new DrawerLayout.LayoutParams(w, -1);
         lp.gravity = GravityCompat.START;
         drawer.addView(nav, lp);
-        LinearLayout head = new LinearLayout(this);
-        head.setOrientation(LinearLayout.VERTICAL);
-        head.setPadding(dp(28), dp(28), dp(28), dp(12));
-        TextView logo = new TextView(this);
-        logo.setText("TriCloud");
-        logo.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_HeadlineSmall);
-        head.addView(logo);
-        TextView sub = new TextView(this);
-        sub.setText(getString(R.string.s0817));
-        sub.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodySmall);
-        head.addView(sub);
-        nav.addHeaderView(head);
         setContentView(drawer);
         if (getSupportActionBar() != null) {
             toggle = new ActionBarDrawerToggle(this, drawer, R.string.nav_open, R.string.nav_close);
@@ -191,43 +190,126 @@ public abstract class BaseActivity extends AppCompatActivity {
         };
         getOnBackPressedDispatcher().addCallback(this, back);
         drawer.addDrawerListener(new DrawerLayout.SimpleDrawerListener() {
-            @Override public void onDrawerOpened(View v) { back.setEnabled(true); Api.quiet("/accounts", r -> { Api.accounts = Api.arr(r); buildNav(); }); }
+            @Override public void onDrawerOpened(View v) { back.setEnabled(true); Api.quiet("/accounts", r -> { Api.accounts = Api.arr(r); buildNav(); }); }   // 账号没变时 DiffUtil 不派发任何更新
             @Override public void onDrawerClosed(View v) { back.setEnabled(false); }
         });
-        nav.setNavigationItemSelectedListener(it -> { onNav(it); return true; });
         buildNav();
         if (Api.accounts == null) Api.quiet("/accounts", r -> { Api.accounts = Api.arr(r); buildNav(); });
     }
 
-    private final java.util.Map<Integer, String> navIds = new java.util.HashMap<>();
-    private final java.util.Map<Integer, JSONObject> navAccs = new java.util.HashMap<>();
-
-    @SuppressWarnings("RestrictedApi")
-    protected void buildNav() {
-        if (nav == null) return;
-        android.view.Menu m = nav.getMenu();
-        // 批量重建：暂停菜单变更分发，否则每次 clear/add 都会让 NavigationView 整表刷新一次（几十次），点折叠时明显卡顿；结束后只刷新一次（build 44）
-        androidx.appcompat.view.menu.MenuBuilder mb = m instanceof androidx.appcompat.view.menu.MenuBuilder ? (androidx.appcompat.view.menu.MenuBuilder) m : null;
-        if (mb != null) mb.stopDispatchingItemsChanged();
-        try { buildNavItems(m); } finally { if (mb != null) mb.startDispatchingItemsChanged(); }
+    /** 抽屉的一行：0 抬头 / 1 分组标题（可点折叠）/ 2 导航项 / 3 分隔线。key 唯一，作稳定 id 与 DiffUtil 比对依据。 */
+    static final class NavRow {
+        final int type; final String key; final CharSequence title; final boolean checked; final JSONObject acc;
+        NavRow(int type, String key, CharSequence title, boolean checked, JSONObject acc) { this.type = type; this.key = key; this.title = title; this.checked = checked; this.acc = acc; }
+        boolean sameContent(NavRow o) { return type == o.type && checked == o.checked && String.valueOf(title).equals(String.valueOf(o.title)); }
     }
 
-    @SuppressWarnings("RestrictedApi")
-    private void buildNavItems(android.view.Menu m) {
-        m.clear();
-        navIds.clear();
-        navAccs.clear();
-        int[] nid = {1};
-        int[] curGroup = {1};   // 当前菜单分组 id：NavigationView 按 groupId 变化画分隔线（替代原子菜单的分区效果）
-        java.util.function.BiFunction<android.view.Menu, String[], android.view.MenuItem> add = (menu, kv) -> {
-            int id = nid[0]++;
-            android.view.MenuItem it = menu.add(curGroup[0], id, id, kv[1]);
-            it.setCheckable(true);
-            navIds.put(id, kv[0]);
-            if (kv[0].equals(navKey())) it.setChecked(true);
-            return it;
-        };
-        add.apply(m, new String[]{"home", getString(R.string.s0818)});
+    protected androidx.recyclerview.widget.RecyclerView nav;
+    private List<NavRow> navRows = new ArrayList<>();
+
+    private final androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder> navAdapter =
+            new androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder>() {
+        { setHasStableIds(true); }
+        @Override public int getItemCount() { return navRows.size(); }
+        @Override public int getItemViewType(int pos) { return navRows.get(pos).type; }
+        @Override public long getItemId(int pos) { return navRows.get(pos).key.hashCode(); }
+        @Override public androidx.recyclerview.widget.RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int type) {
+            return new androidx.recyclerview.widget.RecyclerView.ViewHolder(navRowView(type)) {};
+        }
+        @Override public void onBindViewHolder(androidx.recyclerview.widget.RecyclerView.ViewHolder h, int pos) {
+            NavRow r = navRows.get(pos);
+            if (r.type == 0 || r.type == 3) return;
+            TextView t = (TextView) h.itemView;
+            t.setText(r.title);
+            if (r.type == 2) {
+                t.setSelected(r.checked);
+                t.setTextColor(attr(r.checked ? com.google.android.material.R.attr.colorOnSecondaryContainer : com.google.android.material.R.attr.colorOnSurfaceVariant));
+            }
+            t.setOnClickListener(v -> {
+                int p = h.getAdapterPosition();
+                if (p != androidx.recyclerview.widget.RecyclerView.NO_POSITION) onNav(navRows.get(p));
+            });
+        }
+    };
+
+    private int navColor(int a) { return MaterialColors.getColor(this, a, 0xFF888888); }
+
+    /** 按 Material 3 导航抽屉的尺寸画行：56dp 高、圆角选中底、水波纹。 */
+    private View navRowView(int type) {
+        if (type == 0) {
+            LinearLayout head = new LinearLayout(this);
+            head.setOrientation(LinearLayout.VERTICAL);
+            head.setPadding(dp(28), dp(28), dp(28), dp(12));
+            TextView logo = new TextView(this);
+            logo.setText("TriCloud");
+            logo.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_HeadlineSmall);
+            head.addView(logo);
+            TextView sub = new TextView(this);
+            sub.setText(getString(R.string.s0817));
+            sub.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodySmall);
+            head.addView(sub);
+            head.setLayoutParams(new androidx.recyclerview.widget.RecyclerView.LayoutParams(-1, -2));
+            return head;
+        }
+        if (type == 3) {
+            View d = new View(this);
+            d.setBackgroundColor(navColor(com.google.android.material.R.attr.colorOutlineVariant));
+            androidx.recyclerview.widget.RecyclerView.LayoutParams lp = new androidx.recyclerview.widget.RecyclerView.LayoutParams(-1, Math.max(1, dp(1) / 2 + 1));
+            lp.setMargins(dp(28), dp(8), dp(28), dp(8));
+            d.setLayoutParams(lp);
+            return d;
+        }
+        TextView t = new TextView(this);
+        t.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        t.setSingleLine(true);
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        t.setMinHeight(dp(type == 1 ? 48 : 56));
+        t.setPadding(dp(16), 0, dp(24), 0);
+        t.setClickable(true);
+        if (type == 1) {
+            t.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_TitleSmall);
+            t.setTextColor(navColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        } else {
+            t.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelLarge);
+        }
+        float rad = dp(28);
+        android.graphics.drawable.GradientDrawable sel = new android.graphics.drawable.GradientDrawable();
+        sel.setCornerRadius(rad);
+        sel.setColor(navColor(com.google.android.material.R.attr.colorSecondaryContainer));
+        android.graphics.drawable.StateListDrawable bg = new android.graphics.drawable.StateListDrawable();
+        bg.addState(new int[]{android.R.attr.state_selected}, sel);
+        bg.addState(new int[]{}, new android.graphics.drawable.ColorDrawable(0));
+        android.graphics.drawable.GradientDrawable mask = new android.graphics.drawable.GradientDrawable();
+        mask.setCornerRadius(rad);
+        mask.setColor(0xFFFFFFFF);
+        int ripple = androidx.core.graphics.ColorUtils.setAlphaComponent(navColor(com.google.android.material.R.attr.colorOnSurface), 0x1F);
+        t.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(ripple), bg, mask));
+        androidx.recyclerview.widget.RecyclerView.LayoutParams lp = new androidx.recyclerview.widget.RecyclerView.LayoutParams(-1, -2);
+        lp.setMargins(dp(12), 0, dp(12), 0);
+        t.setLayoutParams(lp);
+        return t;
+    }
+
+    /** 重建抽屉行并只派发差异（DiffUtil）：折叠只删掉/插回那一组的行，其余行原地不动。 */
+    protected void buildNav() {
+        if (nav == null) return;
+        List<NavRow> rows = buildNavRows();
+        List<NavRow> old = navRows;
+        androidx.recyclerview.widget.DiffUtil.DiffResult diff = androidx.recyclerview.widget.DiffUtil.calculateDiff(new androidx.recyclerview.widget.DiffUtil.Callback() {
+            @Override public int getOldListSize() { return old.size(); }
+            @Override public int getNewListSize() { return rows.size(); }
+            @Override public boolean areItemsTheSame(int o, int n) { return old.get(o).key.equals(rows.get(n).key); }
+            @Override public boolean areContentsTheSame(int o, int n) { return old.get(o).sameContent(rows.get(n)); }
+        });
+        navRows = rows;
+        diff.dispatchUpdatesTo(navAdapter);
+    }
+
+    private List<NavRow> buildNavRows() {
+        List<NavRow> rows = new ArrayList<>();
+        String cur = navKey();
+        rows.add(new NavRow(0, "head", "", false, null));
+        rows.add(new NavRow(2, "home", getString(R.string.s0818), "home".equals(cur), null));
         JSONArray accs = Api.accounts == null ? new JSONArray() : Api.accounts;
         String[] dots = {"🟥", "🟧", "🟦", "🟩", "🟪"};   // 顺序同 PROVS：oci / aws / azure / solusvm / virtfusion
         java.util.Set<String> col = navCollapsed();
@@ -238,29 +320,24 @@ public abstract class BaseActivity extends AppCompatActivity {
                 if (a != null && MainActivity.PROVS[p].equals(a.optString("provider"))) { has = true; break; }
             }
             if (!has) continue;
-            curGroup[0] = 10 + p;
             boolean c = col.contains(MainActivity.PROVS[p]);
-            int hid = nid[0]++;
-            android.view.MenuItem hd = m.add(curGroup[0], hid, hid, provHeader(p, c));   // 分组标题做成普通菜单项：子菜单标题在 NavigationView 里收不到点击，折叠必须走普通项
-            hd.setCheckable(false);
-            navIds.put(hid, "grp_" + MainActivity.PROVS[p]);
+            rows.add(new NavRow(3, "div_" + MainActivity.PROVS[p], "", false, null));
+            rows.add(new NavRow(1, "grp_" + MainActivity.PROVS[p], provHeader(p, c), false, null));
             if (c) continue;
             for (int i = 0; i < accs.length(); i++) {
                 JSONObject a = accs.optJSONObject(i);
                 if (a == null || !MainActivity.PROVS[p].equals(a.optString("provider"))) continue;
-                android.view.MenuItem it = add.apply(m, new String[]{"acc_" + a.optInt("id"), dots[p] + "  " + a.optString("name") + (a.optInt("disabled") == 1 ? getString(R.string.s0819) : "")});
-                navAccs.put(it.getItemId(), a);
+                String k = "acc_" + a.optInt("id");
+                rows.add(new NavRow(2, k, dots[p] + "  " + a.optString("name") + (a.optInt("disabled") == 1 ? getString(R.string.s0819) : ""), k.equals(cur), a));
             }
         }
-        curGroup[0] = 30;
         boolean mc = col.contains("manage");
-        int mid = nid[0]++;
-        android.view.MenuItem mh = m.add(curGroup[0], mid, mid, getString(R.string.s0725) + (mc ? "  ▸" : "  ▾"));
-        mh.setCheckable(false);
-        navIds.put(mid, "grp_manage");
-        if (!mc) for (String[] kv : NAV_PAGES) add.apply(m, new String[]{kv[0], navLabel(kv[0])});
-        curGroup[0] = 31;
-        add.apply(m, new String[]{"logout", getString(R.string.s0820)}).setCheckable(false);
+        rows.add(new NavRow(3, "div_manage", "", false, null));
+        rows.add(new NavRow(1, "grp_manage", getString(R.string.s0725) + (mc ? "  ▸" : "  ▾"), false, null));
+        if (!mc) for (String[] kv : NAV_PAGES) rows.add(new NavRow(2, kv[0], navLabel(kv[0]), kv[0].equals(cur), null));
+        rows.add(new NavRow(3, "div_logout", "", false, null));
+        rows.add(new NavRow(2, "logout", getString(R.string.s0820), false, null));
+        return rows;
     }
 
     /** 抽屉分组折叠状态（按厂商 + 管理组），存 SharedPreferences，重开 App 保持。 */
@@ -316,17 +393,16 @@ public abstract class BaseActivity extends AppCompatActivity {
         }
     }
 
-    private void onNav(android.view.MenuItem it) {
-        String k = navIds.get(it.getItemId());
-        if (k == null) return;
-        if (k.startsWith("grp_")) { toggleNavGroup(k.substring(4)); nav.post(() -> buildNav()); return; }   // 折叠开关：抽屉保持打开；重建必须推迟到点击分发结束——NavigationView 的点击处理会先 setUpdateSuspended(true)，分发内同步重建会被 presenter 吞掉（prepareMenuItems 直接 return），界面不刷新、要等下一次无关重建才显形，表现为折叠时好时坏（build 41 的坑，build 42 修）
+    private void onNav(NavRow r) {
+        String k = r.key;
+        if (k.startsWith("grp_")) { toggleNavGroup(k.substring(4)); buildNav(); return; }   // 折叠开关：抽屉保持打开，只删除/插回该组的行
         drawer.closeDrawer(GravityCompat.START);
         if (k.equals(navKey())) return;
         if ("logout".equals(k)) {
-            confirm(getString(R.string.s0821), getString(R.string.s0822), () -> Api.post(this, "/logout", null, r -> toLogin()));
+            confirm(getString(R.string.s0821), getString(R.string.s0822), () -> Api.post(this, "/logout", null, r2 -> toLogin()));
             return;
         }
-        JSONObject acc = navAccs.get(it.getItemId());
+        JSONObject acc = r.acc;
         drawer.postDelayed(() -> openPage(k, acc), 220);
     }
 

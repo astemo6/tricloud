@@ -11,8 +11,8 @@ android {
         applicationId 'com.tricloud.app'
         minSdk 26
         targetSdk 34
-        versionCode 44
-        versionName '1.6.10'
+        versionCode 45
+        versionName '1.6.11'
     }
     signingConfigs {
         release {

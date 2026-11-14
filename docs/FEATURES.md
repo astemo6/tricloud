@@ -175,3 +175,6 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 
 ## 1.6.10 build 44
 - Android 抽屉折叠改为批量重建（一次刷新），修卡顿。
+
+## 1.6.11 build 45
+- Android 抽屉改为自绘 RecyclerView（稳定 id + DiffUtil），折叠只插删该组行并带动画，不再整表刷新、整窗重排。

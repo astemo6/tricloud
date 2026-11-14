@@ -38,8 +38,8 @@ ok("versionName >= '1.6.8' and MARKETING_VERSION == '1.6.8'", _vn_and == _vn_ios
 # 2. Android 折叠重建推迟 + 其余实现仍在
 A = ("android", "app", "src", "main", "java", "com", "tricloud", "app")
 base = rd(*A, "BaseActivity.java")
-ok("grp_ toggle defers rebuild via nav.post", "nav.post(() -> buildNav())" in base)
-ok("grp_ branch no longer rebuilds synchronously", 'toggleNavGroup(k.substring(4)); buildNav()' not in base)
+ok("grp_ toggle rebuild not swallowed (build 42 nav.post; build 45 own RecyclerView, no NavigationView suspension)", "nav.post(() -> buildNav())" in base or ("new NavigationView" not in base and "toggleNavGroup(k.substring(4)); buildNav(); return;" in base))
+ok("grp_ branch no longer rebuilds synchronously inside NavigationView", 'toggleNavGroup(k.substring(4)); buildNav()' not in base or "DiffUtil" in base)
 ok("collapse helpers still present", "navCollapsed()" in base and "toggleNavGroup" in base and '"grp_" +' in base)
 
 # 3. 发布物料同步 1.6.8 / build 42

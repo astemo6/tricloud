@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.11（build 45）(2026-11-14)
+- 修复：**Android 抽屉折叠仍有卡顿**（build 44 真机反馈「还是有点卡」）。根因在 NavigationView 本身：菜单任何变化都 notifyDataSetChanged 整表重绑，并 requestLayout 一路到 DrawerLayout，连带重新测量背后的整个内容页（实例卡片多时尤其重），且没有过渡动画、列表跳变。改为自绘抽屉：RecyclerView + 稳定 id + DiffUtil，折叠只删除 / 插回该组的行（带 120–180ms 动画），setHasFixedSize 让更新不再触发整窗布局；打开抽屉时的账号刷新若无变化不派发任何更新。外观按 M3 导航抽屉（56dp 行高、圆角选中底、分组分隔线、Logo 标题）。
+- 版本：Android versionCode 45 / iOS build 45（versionName 1.6.11，iOS 代码未动）。
+
 ## 1.6.10（build 44）(2026-11-14)
 - 修复：**Android 抽屉折叠卡顿**（真机反馈）。buildNav 的 clear() 与每次 add() 都触发 MenuBuilder.onItemsChanged，NavigationView 随之整表刷新几十次；改为重建期间 stopDispatchingItemsChanged()、结束后 startDispatchingItemsChanged() 只刷新一次。nav.post 推迟重建（build 42）保留。
 - 版本：Android versionCode 44 / iOS build 44（versionName 1.6.10，iOS 代码未动）。

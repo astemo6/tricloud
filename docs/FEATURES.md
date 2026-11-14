@@ -172,3 +172,6 @@ python3 tools/migrate_from_legacy.py --legacy-db <旧 data>/tricloud.db --new-da
 
 ## 1.6.9 build 43
 - App（Android / iOS）显示绿云 VirtFusion 流量「下次重置」（实例卡片 / 流量守护弹窗 / 流量守护列表），绿云实例卡片隐藏空的内网 IP / 可用区，与 Web 一致。
+
+## 1.6.10 build 44
+- Android 抽屉折叠改为批量重建（一次刷新），修卡顿。

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.10（build 44）(2026-11-14)
+- 修复：**Android 抽屉折叠卡顿**（真机反馈）。buildNav 的 clear() 与每次 add() 都触发 MenuBuilder.onItemsChanged，NavigationView 随之整表刷新几十次；改为重建期间 stopDispatchingItemsChanged()、结束后 startDispatchingItemsChanged() 只刷新一次。nav.post 推迟重建（build 42）保留。
+- 版本：Android versionCode 44 / iOS build 44（versionName 1.6.10，iOS 代码未动）。
+
 ## 1.6.9（build 43）(2026-11-13)
 - App 跟进 Web（fcca49a / 544bbe9）：Android / iOS 显示 VirtFusion 流量「下次重置 MM-DD HH:mm · 还有 N 天 / 今天」（后端 reset_text + days_left，面板时区）——实例卡片流量直显行、流量守护弹窗、流量守护列表；SolusVM 无重置日不显示。
 - App 绿云实例卡片隐藏 API 不提供的内网 IP / 可用区（有 private_ip 或 location 时才显示，同 Web NO_PRIVATE_IP / NO_ZONE）。

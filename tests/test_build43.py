@@ -14,7 +14,8 @@ def rd(*p):
     return open(os.path.join(ROOT, *p), encoding="utf-8").read()
 
 bg = rd("android", "app", "build.gradle"); py = rd("ios", "project.yml")
-ok("versions 43 / 1.6.9 both", "versionCode 43" in bg and "versionName '1.6.9'" in bg and 'CURRENT_PROJECT_VERSION: "43"' in py and 'MARKETING_VERSION: "1.6.9"' in py)
+import re as _re
+ok("versions >= 43 and in sync", int(_re.search(r"versionCode (\d+)", bg).group(1)) >= 43 and _re.search(r"versionCode (\d+)", bg).group(1) == _re.search(r'CURRENT_PROJECT_VERSION: "(\d+)"', py).group(1))
 
 A = ("android", "app", "src", "main", "java", "com", "tricloud", "app")
 base, acc, trf = rd(*A, "BaseActivity.java"), rd(*A, "AccountActivity.java"), rd(*A, "TrafficActivity.java")

@@ -34,7 +34,7 @@ _vc_ios = int(re.search(r'CURRENT_PROJECT_VERSION: "(\d+)"', py).group(1))
 _vn_and = re.search(r"versionName '([^']+)'", bg).group(1)
 _vn_ios = re.search(r'MARKETING_VERSION: "([^"]+)"', py).group(1)
 ok("versionCode >= 37 and Android == iOS", _vc_and >= 37 and _vc_and == _vc_ios)
-ok("versionName >= '1.6.3' and Android == iOS", _vn_and >= "1.6.3" and _vn_and == _vn_ios)
+ok("versionName >= '1.6.3' and Android == iOS", tuple(map(int, _vn_and.split("."))) >= (1, 6, 3) and _vn_and == _vn_ios)
 
 # 2. Android AccountsActivity.java 含 "/accounts/reorder"； iOS MainPage.swift 含 "/accounts/reorder"
 and_accs = rd("android", "app", "src", "main", "java", "com", "tricloud", "app", "AccountsActivity.java")

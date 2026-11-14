@@ -1,3 +1,8 @@
+### 1.6.10 build 44 更新内容
+
+- **Android 侧边栏折叠更跟手**：点厂商标题折叠 / 展开时，之前菜单会被逐项刷新几十次，所以有卡顿；现在一次性重建、只刷新一次。iOS 与网页没有这个问题，iOS 版本号按惯例同步。
+- 版本：Android versionCode 44 / iOS build 44（versionName 1.6.10）。
+
 ### 1.6.9 build 43 更新内容
 
 - **App 也能看绿云「下次重置」了**（Android / iOS，与网页一致）：VirtFusion（cp.green.cloud）实例卡片的流量下面多一行「下次重置 MM-DD HH:mm · 还有 N 天」，流量守护弹窗和流量守护列表（按月模式）同样显示。SolusVM（老线路）接口没有重置日，不显示。

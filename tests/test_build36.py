@@ -19,7 +19,7 @@ ok("versionCode >= 36 and Android == iOS", _vc_and >= 36 and _vc_and == _vc_ios)
 # 2. Android versionName 与 iOS MARKETING_VERSION 一致且 >= '1.6.2'（双端显示版本一致）
 _vn_and = re.search(r"versionName '([^']+)'", bg).group(1)
 _vn_ios = re.search(r'MARKETING_VERSION: "([^"]+)"', py).group(1)
-ok("versionName >= '1.6.2' and Android == iOS", _vn_and >= "1.6.2" and _vn_and == _vn_ios)
+ok("versionName >= '1.6.2' and Android == iOS", tuple(map(int, _vn_and.split("."))) >= (1, 6, 2) and _vn_and == _vn_ios)
 
 # 3. .github/release-notes.md 含 "1.6.2" 与 "36"（发布说明已同步）
 rn = rd(".github", "release-notes.md")

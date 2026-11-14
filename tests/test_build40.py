@@ -31,7 +31,7 @@ _vc_ios = re.search(r'CURRENT_PROJECT_VERSION: "(\d+)"', py).group(1)
 _vn_and = re.search(r"versionName '([^']+)'", bg).group(1)
 _vn_ios = re.search(r'MARKETING_VERSION: "([^"]+)"', py).group(1)
 ok("versionCode >= 40 and Android == iOS", _vc_and >= 40 and _vc_and == int(_vc_ios))
-ok("versionName >= '1.6.6' and Android == iOS", _vn_and >= "1.6.6" and _vn_and == _vn_ios)
+ok("versionName >= '1.6.6' and Android == iOS", tuple(map(int, _vn_and.split("."))) >= (1, 6, 6) and _vn_and == _vn_ios)
 
 A = ("android", "app", "src", "main", "java", "com", "tricloud", "app")
 and_main = rd(*A, "MainActivity.java")

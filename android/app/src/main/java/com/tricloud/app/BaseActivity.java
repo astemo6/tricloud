@@ -202,9 +202,18 @@ public abstract class BaseActivity extends AppCompatActivity {
     private final java.util.Map<Integer, String> navIds = new java.util.HashMap<>();
     private final java.util.Map<Integer, JSONObject> navAccs = new java.util.HashMap<>();
 
+    @SuppressWarnings("RestrictedApi")
     protected void buildNav() {
         if (nav == null) return;
         android.view.Menu m = nav.getMenu();
+        // 批量重建：暂停菜单变更分发，否则每次 clear/add 都会让 NavigationView 整表刷新一次（几十次），点折叠时明显卡顿；结束后只刷新一次（build 44）
+        androidx.appcompat.view.menu.MenuBuilder mb = m instanceof androidx.appcompat.view.menu.MenuBuilder ? (androidx.appcompat.view.menu.MenuBuilder) m : null;
+        if (mb != null) mb.stopDispatchingItemsChanged();
+        try { buildNavItems(m); } finally { if (mb != null) mb.startDispatchingItemsChanged(); }
+    }
+
+    @SuppressWarnings("RestrictedApi")
+    private void buildNavItems(android.view.Menu m) {
         m.clear();
         navIds.clear();
         navAccs.clear();
